@@ -973,8 +973,12 @@ function applyRemoteMeta(key, value){
   else if(key==='technicians' && Array.isArray(value) && value.length){ TECHNICIANS = value; idbPut('meta', {k:'technicians', value: TECHNICIANS}); }
   else if(key==='poClosures' && value && typeof value==='object'){ poClosures = value; idbPut('meta', {k:'poClosures', value: poClosures}); }
 }
+let pulling = false;
 async function pullFromCloud(){
+  if(pulling) return;
   if(!cloudCfg.baseUrl || !cloudCfg.secret || !navigator.onLine) return;
+  pulling = true;
+  try{
   let changed = false;
   const cpRes = await cloudFetch(`/api/checkpoints?since=${encodeURIComponent(syncCursors.checkpoints||'')}`, {method:'GET'});
   if(cpRes && Array.isArray(cpRes.rows)){
@@ -1008,6 +1012,7 @@ async function pullFromCloud(){
     await idbPut('meta', {k:'metaAppliedAt', value: metaAppliedAt});
   }
   if(changed){ await refreshCache(); renderAll(); }
+  }finally{ pulling = false; }
 }
 async function flushOutbox(){
   if(flushing) return;
@@ -1100,8 +1105,16 @@ function manualSync(){
   toast('Đang đồng bộ…');
   flushOutbox().then(()=>toast(cloudStatus==='error' ? (lastCloudError || 'Đồng bộ chưa xong — sẽ tự thử lại') : 'Đã đồng bộ xong'));
 }
+// Mobile Chrome/Android throttle or fully suspend setInterval while the tab
+// is backgrounded or the screen is locked (to save battery), so the 20s
+// timer alone is unreliable on phones/tablets — it may simply not fire for
+// long stretches. Layer on every event that reliably DOES fire the moment
+// someone actually looks at the app again, so it catches up immediately
+// instead of waiting on the background timer.
 setInterval(()=>{ if(cloudCfg.baseUrl && cloudCfg.secret) flushOutbox(); }, 20000);
 window.addEventListener('online', ()=>{ if(cloudCfg.baseUrl && cloudCfg.secret) flushOutbox(); });
+window.addEventListener('focus', ()=>{ if(cloudCfg.baseUrl && cloudCfg.secret) flushOutbox(); });
+window.addEventListener('pageshow', ()=>{ if(cloudCfg.baseUrl && cloudCfg.secret) flushOutbox(); });
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && cloudCfg.baseUrl && cloudCfg.secret) flushOutbox(); });
 
 /* ===================== SPEC / VALUE HELPERS ===================== */
@@ -1159,6 +1172,12 @@ function showTab(name){
   if(name==='share') renderShare();
   if(name==='settings') renderSettings();
   if(name==='guide') renderGuide();
+  // Nudge a pull right when the user actually taps into a tab — the
+  // background timer/visibility triggers above can miss long stretches on
+  // mobile, so this is the last-resort "make sure what I'm looking at is
+  // fresh" catch. Cheap (a couple of small GETs) and pullFromCloud() itself
+  // re-renders the active tab if anything new came in.
+  if(name!=='settings' && name!=='guide' && cloudCfg.baseUrl && cloudCfg.secret) pullFromCloud();
 }
 qsa('.tab').forEach(t => t.addEventListener('click', ()=>showTab(t.dataset.tab)));
 
