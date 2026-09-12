@@ -853,14 +853,23 @@ function fmtDateTimeVN(ms){
 let cloudCfg = { baseUrl:'', secret:'' };
 let cloudStatus = 'unconfigured'; // unconfigured | idle | syncing | offline | error
 let cloudLastSyncAt = null;
-let syncCursors = { checkpoints:'' };
+let syncCursors = { checkpoints:'0' }; // integer seq cursor (server write-order, not a timestamp — see worker.js)
 let metaAppliedAt = {}; // meta key -> updatedAt of the version we already have
+let lastPullCount = 0; // rows returned by the most recent pull — surfaced in the manual sync toast for diagnosis
 let flushing = false;
 let flushScheduled = false;
 
 async function loadCloudState(){
   const cfg = await idbGet('meta','cloudCfg'); if(cfg && cfg.value) cloudCfg = cfg.value;
   const cur = await idbGet('meta','syncCursors'); if(cur && cur.value) syncCursors = cur.value;
+  // One-time migration: the checkpoints cursor used to be an ISO timestamp
+  // (clock-skew prone — see worker.js). If we find the old string format,
+  // reset to '0' so the next pull just re-fetches everything from scratch
+  // via the new integer `seq` cursor instead of silently missing rows.
+  if(syncCursors.checkpoints && !/^\d+$/.test(String(syncCursors.checkpoints))){
+    syncCursors.checkpoints = '0';
+    await idbPut('meta', {k:'syncCursors', value: syncCursors});
+  }
   const ma = await idbGet('meta','metaAppliedAt'); if(ma && ma.value) metaAppliedAt = ma.value;
   const ls = await idbGet('meta','cloudLastSyncAt'); if(ls && ls.value) cloudLastSyncAt = ls.value;
 }
@@ -980,8 +989,10 @@ async function pullFromCloud(){
   pulling = true;
   try{
   let changed = false;
-  const cpRes = await cloudFetch(`/api/checkpoints?since=${encodeURIComponent(syncCursors.checkpoints||'')}`, {method:'GET'});
+  lastPullCount = 0;
+  const cpRes = await cloudFetch(`/api/checkpoints?since=${encodeURIComponent(syncCursors.checkpoints||'0')}`, {method:'GET'});
   if(cpRes && Array.isArray(cpRes.rows)){
+    lastPullCount = cpRes.rows.length;
     for(const row of cpRes.rows){
       const local = await idbGet('shifts', row.key);
       if(row.deleted){
@@ -995,7 +1006,7 @@ async function pullFromCloud(){
         changed = true;
       }
     }
-    syncCursors.checkpoints = cpRes.serverTime;
+    if(cpRes.cursor!=null) syncCursors.checkpoints = String(cpRes.cursor);
     await idbPut('meta', {k:'syncCursors', value: syncCursors});
   }
   const metaRes = await cloudFetch('/api/meta', {method:'GET'});
@@ -1103,7 +1114,26 @@ async function flushOutbox(){
 function manualSync(){
   if(!cloudCfg.baseUrl || !cloudCfg.secret){ toast('Chưa cấu hình đồng bộ Cloudflare'); return; }
   toast('Đang đồng bộ…');
-  flushOutbox().then(()=>toast(cloudStatus==='error' ? (lastCloudError || 'Đồng bộ chưa xong — sẽ tự thử lại') : 'Đã đồng bộ xong'));
+  flushOutbox().then(()=>{
+    if(cloudStatus==='error') toast(lastCloudError || 'Đồng bộ chưa xong — sẽ tự thử lại');
+    else toast(lastPullCount>0 ? `Đã đồng bộ xong — nhận ${lastPullCount} thay đổi mới` : 'Đã đồng bộ xong — không có gì mới');
+  });
+}
+// Escape hatch for a stuck/mismatched cursor: forget how far we've already
+// pulled and re-fetch everything from the server from scratch. Safe to run
+// any time — idbPut() upserts by key, so re-applying data already present
+// locally is a harmless no-op.
+function resyncFromScratch(){
+  if(!cloudCfg.baseUrl || !cloudCfg.secret){ toast('Chưa cấu hình đồng bộ Cloudflare'); return; }
+  toast('Đang đồng bộ lại toàn bộ từ đầu…');
+  syncCursors.checkpoints = '0';
+  metaAppliedAt = {};
+  idbPut('meta', {k:'syncCursors', value: syncCursors});
+  idbPut('meta', {k:'metaAppliedAt', value: metaAppliedAt});
+  flushOutbox().then(()=>{
+    if(cloudStatus==='error') toast(lastCloudError || 'Đồng bộ chưa xong — sẽ tự thử lại');
+    else toast(`Đã tải lại toàn bộ — nhận ${lastPullCount} điểm kiểm tra từ server`);
+  });
 }
 // Mobile Chrome/Android throttle or fully suspend setInterval while the tab
 // is backgrounded or the screen is locked (to save battery), so the 20s
@@ -4015,12 +4045,16 @@ function renderSettings(){
     el('button',{class:'btn teal sm'},['💾 Lưu & Kết nối']),
     el('button',{class:'btn ghost sm'},['🔄 Đồng bộ ngay']),
   ]);
-  if(cloudCfg.baseUrl) cloudBtnRow.appendChild(el('button',{class:'btn danger sm'},['⛔ Ngắt kết nối']));
+  if(cloudCfg.baseUrl){
+    cloudBtnRow.appendChild(el('button',{class:'btn ghost sm', title:'Dùng khi nghi ngờ 1 thiết bị bị "kẹt", không nhận được dữ liệu mới dù báo đã đồng bộ'},['🔁 Đồng bộ lại từ đầu']));
+    cloudBtnRow.appendChild(el('button',{class:'btn danger sm'},['⛔ Ngắt kết nối']));
+  }
   cloudCard.appendChild(cloudBtnRow);
   const cloudBtns = qsa('button', cloudBtnRow);
   cloudBtns[0].addEventListener('click', ()=>saveCloudConfig(urlInp.value, secretInp.value));
   cloudBtns[1].addEventListener('click', manualSync);
-  if(cloudBtns[2]) cloudBtns[2].addEventListener('click', clearCloudConfig);
+  if(cloudBtns[2]) cloudBtns[2].addEventListener('click', resyncFromScratch);
+  if(cloudBtns[3]) cloudBtns[3].addEventListener('click', clearCloudConfig);
   root.appendChild(cloudCard);
 
   const backupCard = el('div',{class:'card'},[
@@ -4118,7 +4152,7 @@ function renderGuide(){
     <h4>6. An toàn dữ liệu</h4>
     <p>Toàn bộ dữ liệu được lưu ngay trong máy đang dùng (IndexedDB) trước tiên — luôn vào được, kể cả mất mạng. Nếu có cấu hình đồng bộ Cloudflare, mỗi lần lưu app sẽ tự đẩy dữ liệu lên; nếu đang offline hoặc đồng bộ lỗi, các thay đổi được xếp vào 1 "hàng đợi" lưu ngay trong máy và app tự thử lại khi có mạng trở lại — không mất dữ liệu. Vẫn nên thỉnh thoảng tải file JSON sao lưu ở tab Cài đặt như 1 lớp an toàn bổ sung.</p>
     <h4>6b. Đồng bộ Cloudflare — cách hoạt động</h4>
-    <p>Sau khi cấu hình ở tab Cài đặt, mỗi lần lưu 1 điểm kiểm tra/Specs/Danh sách PO-Recipe-Client-QC, app đẩy ngay thay đổi đó lên Cloudflare, đồng thời cứ khoảng 15-20 giây (và mỗi khi mở lại app / có mạng trở lại) sẽ tự kéo về những gì các máy khác vừa đồng bộ lên — đây là đồng bộ <b>gần-thời-gian-thực theo chu kỳ</b>, không phải tức thời từng giây. Nếu 2 người cùng sửa <b>đúng 1 điểm kiểm tra</b> (trùng Ngày+Ca+Công đoạn+PO) gần như cùng lúc, bản lưu <b>sau cùng sẽ thắng</b> (theo thời gian lưu) — vì mỗi điểm kiểm tra đã tách rất nhỏ theo Công đoạn+PO nên tình huống này hiếm khi xảy ra. Ảnh đính kèm được tải lên riêng (Cloudflare R2) và chỉ gửi đường dẫn ảnh qua lại giữa các máy, không gửi nguyên ảnh mỗi lần đồng bộ. Có thể bấm "🔄 Đồng bộ ngay" ở tab Cài đặt để đồng bộ thủ công bất cứ lúc nào.</p>
+    <p>Sau khi cấu hình ở tab Cài đặt, mỗi lần lưu 1 điểm kiểm tra/Specs/Danh sách PO-Recipe-Client-QC, app đẩy ngay thay đổi đó lên Cloudflare, đồng thời cứ khoảng 15-20 giây (và mỗi khi mở lại app / có mạng trở lại) sẽ tự kéo về những gì các máy khác vừa đồng bộ lên — đây là đồng bộ <b>gần-thời-gian-thực theo chu kỳ</b>, không phải tức thời từng giây. Nếu 2 người cùng sửa <b>đúng 1 điểm kiểm tra</b> (trùng Ngày+Ca+Công đoạn+PO) gần như cùng lúc, bản lưu <b>sau cùng sẽ thắng</b> (theo thời gian lưu) — vì mỗi điểm kiểm tra đã tách rất nhỏ theo Công đoạn+PO nên tình huống này hiếm khi xảy ra. Ảnh đính kèm được tải lên riêng (Cloudflare R2) và chỉ gửi đường dẫn ảnh qua lại giữa các máy, không gửi nguyên ảnh mỗi lần đồng bộ. Có thể bấm "🔄 Đồng bộ ngay" ở tab Cài đặt để đồng bộ thủ công bất cứ lúc nào — app sẽ báo rõ vừa nhận thêm bao nhiêu thay đổi mới, hoặc lý do cụ thể nếu đồng bộ thất bại (sai Worker URL/mật khẩu, mất mạng...) thay vì chỉ báo chung chung. Con trỏ đồng bộ dùng số thứ tự do server tự sinh (không dùng đồng hồ của máy) nên đồng hồ điện thoại/máy tính lệch nhau không làm mất hoặc trễ dữ liệu. Nếu nghi ngờ 1 thiết bị bị "kẹt" (báo đã đồng bộ nhưng thiếu dữ liệu), bấm "🔁 Đồng bộ lại từ đầu" để buộc tải lại toàn bộ từ server — an toàn, không mất dữ liệu.</p>
     <h4>7. Đưa dữ liệu sang máy tính (Tablet Android ↔ PC Windows)</h4>
     <p>Nếu đã bật Đồng bộ Cloudflare, việc này giờ <b>tự động</b> — bất kỳ máy nào (tablet ở xưởng, PC văn phòng, laptop quản lý) mở cùng 1 địa chỉ app và cấu hình cùng Worker URL + mật khẩu sẽ tự thấy dữ liệu của nhau, không cần chép file qua lại nữa. Chỉ cần cả 2 máy có mạng tại một thời điểm nào đó (không cần đồng thời) để đồng bộ diễn ra.</p>
     <p>Vẫn nên duy trì thói quen sao lưu thủ công định kỳ để phòng rủi ro (mất tài khoản Cloudflare, xoá nhầm, sự cố ngoài dự kiến):</p>
