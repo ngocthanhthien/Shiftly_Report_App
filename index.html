@@ -878,13 +878,18 @@ async function clearCloudConfig(){
   updateCloudPill();
 }
 function setCloudStatus(status){ cloudStatus = status; updateCloudPill(); }
+// Set by cloudFetch() whenever a call fails, cleared on the next success —
+// lets flushOutbox() surface WHY sync failed (wrong URL/secret vs. offline)
+// instead of a generic "error", and stops a failed PULL from being masked
+// as "✅ Đã đồng bộ" just because there was nothing local to push.
+let lastCloudError = null;
 function updateCloudPill(){
   const pill = qs('#linkPill'); const txt = qs('#linkPillTxt');
   if(pill && txt){
     if(!cloudCfg.baseUrl){ pill.classList.add('off'); txt.textContent = 'Chưa cấu hình đồng bộ'; }
     else if(cloudStatus==='syncing'){ pill.classList.remove('off'); txt.textContent = 'Đang đồng bộ…'; }
     else if(cloudStatus==='offline'){ pill.classList.add('off'); txt.textContent = 'Offline — chờ mạng'; }
-    else if(cloudStatus==='error'){ pill.classList.add('off'); txt.textContent = 'Lỗi đồng bộ — sẽ tự thử lại'; }
+    else if(cloudStatus==='error'){ pill.classList.add('off'); txt.textContent = lastCloudError || 'Lỗi đồng bộ — sẽ tự thử lại'; }
     else { pill.classList.remove('off'); txt.textContent = 'Đã đồng bộ'; }
   }
   renderSettings();
@@ -896,9 +901,17 @@ async function cloudFetch(path, opts){
     const url = new URL(cloudCfg.baseUrl + path);
     url.searchParams.set('secret', cloudCfg.secret);
     const res = await fetch(url.toString(), Object.assign({headers:{'Content-Type':'application/json'}}, opts));
-    if(!res.ok) throw new Error('HTTP '+res.status);
+    if(!res.ok){
+      lastCloudError = res.status===401 ? 'Sai Worker URL hoặc mật khẩu đồng bộ' : `Lỗi máy chủ (HTTP ${res.status})`;
+      throw new Error('HTTP '+res.status);
+    }
+    lastCloudError = null;
     return await res.json();
-  }catch(e){ console.error('cloudFetch failed:', path, e); return null; }
+  }catch(e){
+    if(!lastCloudError) lastCloudError = 'Không kết nối được tới Worker (kiểm tra mạng / Worker URL có đúng không)';
+    console.error('cloudFetch failed:', path, e);
+    return null;
+  }
 }
 async function queueOutbox(kind, payload){
   await idbPut('outbox', {kind, payload, queuedAt: new Date().toISOString()});
@@ -1002,6 +1015,7 @@ async function flushOutbox(){
   if(!navigator.onLine){ setCloudStatus('offline'); return; }
   flushing = true;
   setCloudStatus('syncing');
+  lastCloudError = null;
   try{
     const items = await idbGetAll('outbox');
     const doneIds = [];
@@ -1068,10 +1082,13 @@ async function flushOutbox(){
 
     for(const id of doneIds) await idbDelete('outbox', id);
     await pullFromCloud();
-    cloudLastSyncAt = new Date().toISOString();
-    await idbPut('meta', {k:'cloudLastSyncAt', value: cloudLastSyncAt});
     const remaining = await idbGetAll('outbox');
-    setCloudStatus(remaining.length ? 'error' : 'idle');
+    if(lastCloudError){ setCloudStatus('error'); }
+    else{
+      cloudLastSyncAt = new Date().toISOString();
+      await idbPut('meta', {k:'cloudLastSyncAt', value: cloudLastSyncAt});
+      setCloudStatus(remaining.length ? 'error' : 'idle');
+    }
   }catch(e){
     console.error(e);
     setCloudStatus('error');
@@ -1081,7 +1098,7 @@ async function flushOutbox(){
 function manualSync(){
   if(!cloudCfg.baseUrl || !cloudCfg.secret){ toast('Chưa cấu hình đồng bộ Cloudflare'); return; }
   toast('Đang đồng bộ…');
-  flushOutbox().then(()=>toast(cloudStatus==='error' ? 'Đồng bộ chưa xong — sẽ tự thử lại' : 'Đã đồng bộ xong'));
+  flushOutbox().then(()=>toast(cloudStatus==='error' ? (lastCloudError || 'Đồng bộ chưa xong — sẽ tự thử lại') : 'Đã đồng bộ xong'));
 }
 setInterval(()=>{ if(cloudCfg.baseUrl && cloudCfg.secret) flushOutbox(); }, 20000);
 window.addEventListener('online', ()=>{ if(cloudCfg.baseUrl && cloudCfg.secret) flushOutbox(); });
@@ -1173,7 +1190,7 @@ function renderInputForm(){
   if(!cloudCfg.baseUrl){
     root.appendChild(el('div',{class:'sub', style:'margin:0 0 10px;'},['☁️ Chưa cấu hình đồng bộ Cloudflare — dữ liệu vẫn lưu an toàn trong máy này. Vào tab Cài đặt để bật đồng bộ nhiều thiết bị.']));
   } else if(cloudStatus==='error' || cloudStatus==='offline'){
-    root.appendChild(el('div',{class:'sub', style:'margin:0 0 10px;'},[cloudStatus==='offline' ? '📶 Đang offline — dữ liệu lưu trong máy, sẽ tự đồng bộ khi có mạng.' : '⚠️ Đồng bộ gặp lỗi — app sẽ tự thử lại, dữ liệu vẫn an toàn trong máy.']));
+    root.appendChild(el('div',{class:'sub', style:'margin:0 0 10px;'},[cloudStatus==='offline' ? '📶 Đang offline — dữ liệu lưu trong máy, sẽ tự đồng bộ khi có mạng.' : `⚠️ Đồng bộ gặp lỗi${lastCloudError?': '+lastCloudError:''} — dữ liệu vẫn an toàn trong máy, kiểm tra lại Worker URL/mật khẩu ở tab Cài đặt.`]));
   }
 
   const dateVal = renderInputForm._date || todayStr();
@@ -3706,7 +3723,7 @@ async function renderShare(){
   const fileCard = el('div',{class:'card'},[
     el('div',{class:'card-h'},['Trạng thái đồng bộ Cloudflare', el('div',{class:'rule'})]),
   ]);
-  const statusWord = !cloudCfg.baseUrl ? 'Chưa cấu hình' : cloudStatus==='syncing' ? 'Đang đồng bộ…' : cloudStatus==='offline' ? 'Offline — chờ mạng' : cloudStatus==='error' ? 'Lỗi (sẽ tự thử lại)' : 'Đã đồng bộ';
+  const statusWord = !cloudCfg.baseUrl ? 'Chưa cấu hình' : cloudStatus==='syncing' ? 'Đang đồng bộ…' : cloudStatus==='offline' ? 'Offline — chờ mạng' : cloudStatus==='error' ? (lastCloudError || 'Lỗi (sẽ tự thử lại)') : 'Đã đồng bộ';
   fileCard.appendChild(el('div',{class:'filepill'+(cloudStatus==='idle'?' linked':'')},[
     el('span',{class:'ic'},[cloudStatus==='idle'?'✅':cloudStatus==='syncing'?'🔄':'⚠️']),
     el('span',{class:'nm'},[statusWord]),
@@ -3970,7 +3987,7 @@ function renderSettings(){
   const secretInp = el('input',{class:'inp', type:'password', placeholder:'Mật khẩu đồng bộ (SYNC_SECRET)', value: cloudCfg.secret},[]);
   cloudCard.appendChild(el('label',{class:'fld'},[el('span',{class:'lab'},['Worker URL']), urlInp]));
   cloudCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Mật khẩu đồng bộ']), secretInp]));
-  const cloudStatusWord = !cloudCfg.baseUrl ? 'Chưa cấu hình' : cloudStatus==='syncing' ? 'Đang đồng bộ…' : cloudStatus==='offline' ? 'Offline — chờ mạng' : cloudStatus==='error' ? 'Lỗi (sẽ tự thử lại)' : 'Đã đồng bộ';
+  const cloudStatusWord = !cloudCfg.baseUrl ? 'Chưa cấu hình' : cloudStatus==='syncing' ? 'Đang đồng bộ…' : cloudStatus==='offline' ? 'Offline — chờ mạng' : cloudStatus==='error' ? (lastCloudError || 'Lỗi (sẽ tự thử lại)') : 'Đã đồng bộ';
   cloudCard.appendChild(el('div',{class:'filepill'+(cloudStatus==='idle'?' linked':''), style:'margin-top:10px;'},[
     el('span',{class:'ic'},[cloudStatus==='idle'?'✅':cloudStatus==='syncing'?'🔄':'⚠️']),
     el('span',{class:'nm'},[cloudStatusWord + (cloudLastSyncAt ? ` — lần cuối ${fmtDateTimeVN(new Date(cloudLastSyncAt).getTime())}` : '')]),
