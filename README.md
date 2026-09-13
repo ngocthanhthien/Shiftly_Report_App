@@ -2,6 +2,8 @@
 
 Production UI: https://shiftly-report-app.dangthanhbinh53.workers.dev/
 
+The frontend requires HTTP Basic login before serving any route or static asset. Credentials are stored as `APP_USERNAME` and `APP_PASSWORD` secrets on `shiftly-report-app`. Change them through Cloudflare Secrets; never put their values in this repository. The browser displays its native username/password prompt. The backend still requires its separate `SYNC_SECRET`; existing legacy image links and backend clients retain their original behavior. Previously downloaded offline HTML and already-open pages are not remotely locked by this gateway.
+
 The 13-tab UI is unchanged. The production site serves its API at `/api/*` and images at `/images/*` through a Cloudflare service binding to `shiftly-report-sync`. The existing sync Worker remains available for older devices and exported image URLs, using its existing SYNC_SECRET. No secret is committed to this repository.
 
 ## Deploy
