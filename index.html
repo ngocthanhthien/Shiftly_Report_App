@@ -851,7 +851,8 @@ function fmtDateTimeVN(ms){
    both here and server-side, since 2 devices only truly collide when they
    edit the exact same checkpoint (same Date+Shift+Section+PO) — everything
    else is naturally partitioned by key, so this stays simple by design. */
-let cloudCfg = { baseUrl:'', secret:'' };
+const DEFAULT_WORKER_URL = 'https://shiftly-report-app.dangthanhbinh53.workers.dev';
+let cloudCfg = { baseUrl:DEFAULT_WORKER_URL, secret:'' };
 let cloudStatus = 'unconfigured'; // unconfigured | idle | syncing | offline | error
 let cloudLastSyncAt = null;
 let syncCursors = { checkpoints:'0' }; // integer seq cursor (server write-order, not a timestamp — see worker.js)
@@ -863,6 +864,8 @@ let flushScheduled = false;
 async function loadCloudState(){
   const cfg = await idbGet('meta','cloudCfg'); if(cfg && cfg.value) cloudCfg = cfg.value;
   if(location.origin==='https://shiftly-report-app.dangthanhbinh53.workers.dev' && (!cloudCfg.baseUrl || cloudCfg.baseUrl==='https://shiftly-report-sync.dangthanhbinh53.workers.dev')) cloudCfg.baseUrl=location.origin;
+  if(!cloudCfg.baseUrl) cloudCfg.baseUrl=DEFAULT_WORKER_URL;
+  await idbPut('meta', {k:'cloudCfg', value:cloudCfg});
   await compactOutbox();
   const cur = await idbGet('meta','syncCursors'); if(cur && cur.value) syncCursors = cur.value;
   // One-time migration: the checkpoints cursor used to be an ISO timestamp
@@ -877,14 +880,14 @@ async function loadCloudState(){
   const ls = await idbGet('meta','cloudLastSyncAt'); if(ls && ls.value) cloudLastSyncAt = ls.value;
 }
 async function saveCloudConfig(baseUrl, secret){
-  cloudCfg = { baseUrl: (baseUrl||'').trim().replace(/\/+$/,''), secret: (secret||'').trim() };
+  cloudCfg = { baseUrl: (baseUrl||'').trim().replace(/\/+$/,'') || DEFAULT_WORKER_URL, secret: (secret||'').trim() };
   await idbPut('meta', {k:'cloudCfg', value: cloudCfg});
   updateCloudPill();
   if(cloudCfg.baseUrl && cloudCfg.secret){ toast('Đã lưu cấu hình — đang đồng bộ...'); flushOutbox(); }
 }
 async function clearCloudConfig(){
   if(!confirm('Ngắt kết nối đồng bộ Cloudflare? Dữ liệu vẫn an toàn trong máy này — chỉ là app sẽ ngừng đẩy/kéo dữ liệu online cho tới khi bạn cấu hình lại.')) return;
-  cloudCfg = {baseUrl:'', secret:''};
+  cloudCfg = {baseUrl:DEFAULT_WORKER_URL, secret:''};
   await idbDelete('meta','cloudCfg');
   toast('Đã ngắt kết nối đồng bộ');
   updateCloudPill();
@@ -3846,7 +3849,7 @@ async function renderShare(){
   const fileCard = el('div',{class:'card'},[
     el('div',{class:'card-h'},['Trạng thái đồng bộ Cloudflare', el('div',{class:'rule'})]),
   ]);
-  const statusWord = !cloudCfg.baseUrl ? 'Chưa cấu hình' : cloudStatus==='syncing' ? 'Đang đồng bộ…' : cloudStatus==='offline' ? 'Offline — chờ mạng' : cloudStatus==='error' ? (lastCloudError || 'Lỗi (sẽ tự thử lại)') : 'Đã đồng bộ';
+  const statusWord = (!cloudCfg.baseUrl || !cloudCfg.secret) ? 'Chưa cấu hình' : cloudStatus==='syncing' ? 'Đang đồng bộ…' : cloudStatus==='offline' ? 'Offline — chờ mạng' : cloudStatus==='error' ? (lastCloudError || 'Lỗi (sẽ tự thử lại)') : 'Đã đồng bộ';
   fileCard.appendChild(el('div',{class:'filepill'+(cloudStatus==='idle'?' linked':'')},[
     el('span',{class:'ic'},[cloudStatus==='idle'?'✅':cloudStatus==='syncing'?'🔄':'⚠️']),
     el('span',{class:'nm'},[statusWord]),
@@ -4110,7 +4113,7 @@ function renderSettings(){
   const secretInp = el('input',{class:'inp', type:'password', placeholder:'Mật khẩu đồng bộ (SYNC_SECRET)', value: cloudCfg.secret},[]);
   cloudCard.appendChild(el('label',{class:'fld'},[el('span',{class:'lab'},['Worker URL']), urlInp]));
   cloudCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Mật khẩu đồng bộ']), secretInp]));
-  const cloudStatusWord = !cloudCfg.baseUrl ? 'Chưa cấu hình' : cloudStatus==='syncing' ? 'Đang đồng bộ…' : cloudStatus==='offline' ? 'Offline — chờ mạng' : cloudStatus==='error' ? (lastCloudError || 'Lỗi (sẽ tự thử lại)') : 'Đã đồng bộ';
+  const cloudStatusWord = (!cloudCfg.baseUrl || !cloudCfg.secret) ? 'Chưa cấu hình' : cloudStatus==='syncing' ? 'Đang đồng bộ…' : cloudStatus==='offline' ? 'Offline — chờ mạng' : cloudStatus==='error' ? (lastCloudError || 'Lỗi (sẽ tự thử lại)') : 'Đã đồng bộ';
   cloudCard.appendChild(el('div',{class:'filepill'+(cloudStatus==='idle'?' linked':''), style:'margin-top:10px;'},[
     el('span',{class:'ic'},[cloudStatus==='idle'?'✅':cloudStatus==='syncing'?'🔄':'⚠️']),
     el('span',{class:'nm'},[cloudStatusWord + (cloudLastSyncAt ? ` — lần cuối ${fmtDateTimeVN(new Date(cloudLastSyncAt).getTime())}` : '')]),
