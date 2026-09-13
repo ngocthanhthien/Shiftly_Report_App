@@ -597,7 +597,8 @@ let currentStage = stageIds()[0];
 async function refreshCache(){
   allCheckpoints = await idbGetAll('shifts');
   allCheckpoints.sort((a,b) => (b.date+b.shift).localeCompare(a.date+a.shift));
-  localStorage.setItem('shiftly_backup', JSON.stringify(allCheckpoints));
+  // IndexedDB is durable; avoid serializing every photo into synchronous localStorage.
+  // Keep any older backup available for the existing recovery path.
 }
 
 function blankCheckpoint(date, shift, section, po, technician){
@@ -861,6 +862,8 @@ let flushScheduled = false;
 
 async function loadCloudState(){
   const cfg = await idbGet('meta','cloudCfg'); if(cfg && cfg.value) cloudCfg = cfg.value;
+  if(location.origin==='https://shiftly-report-app.dangthanhbinh53.workers.dev' && (!cloudCfg.baseUrl || cloudCfg.baseUrl==='https://shiftly-report-sync.dangthanhbinh53.workers.dev')) cloudCfg.baseUrl=location.origin;
+  await compactOutbox();
   const cur = await idbGet('meta','syncCursors'); if(cur && cur.value) syncCursors = cur.value;
   // One-time migration: the checkpoints cursor used to be an ISO timestamp
   // (clock-skew prone — see worker.js). If we find the old string format,
@@ -895,26 +898,26 @@ let lastCloudError = null;
 function updateCloudPill(){
   const pill = qs('#linkPill'); const txt = qs('#linkPillTxt');
   if(pill && txt){
-    if(!cloudCfg.baseUrl){ pill.classList.add('off'); txt.textContent = 'Chưa cấu hình đồng bộ'; }
+    if(!cloudCfg.baseUrl || !cloudCfg.secret){ pill.classList.add('off'); txt.textContent = 'Chưa cấu hình đồng bộ'; }
     else if(cloudStatus==='syncing'){ pill.classList.remove('off'); txt.textContent = 'Đang đồng bộ…'; }
     else if(cloudStatus==='offline'){ pill.classList.add('off'); txt.textContent = 'Offline — chờ mạng'; }
     else if(cloudStatus==='error'){ pill.classList.add('off'); txt.textContent = lastCloudError || 'Lỗi đồng bộ — sẽ tự thử lại'; }
     else { pill.classList.remove('off'); txt.textContent = 'Đã đồng bộ'; }
   }
-  renderSettings();
-  renderShare();
+  // Only update the status badge; never rebuild an in-progress form here.
 }
 async function cloudFetch(path, opts){
   opts = opts || {};
   try{
     const url = new URL(cloudCfg.baseUrl + path);
-    url.searchParams.set('secret', cloudCfg.secret);
-    const res = await fetch(url.toString(), Object.assign({headers:{'Content-Type':'application/json'}}, opts));
+    const headers = new Headers(opts.headers || {});
+    headers.set('Content-Type', 'application/json');
+    headers.set('X-Sync-Secret', cloudCfg.secret);
+    const res = await fetch(url.toString(), Object.assign({}, opts, {headers, signal: AbortSignal.timeout(30000)}));
     if(!res.ok){
       lastCloudError = res.status===401 ? 'Sai Worker URL hoặc mật khẩu đồng bộ' : `Lỗi máy chủ (HTTP ${res.status})`;
       throw new Error('HTTP '+res.status);
     }
-    lastCloudError = null;
     return await res.json();
   }catch(e){
     if(!lastCloudError) lastCloudError = 'Không kết nối được tới Worker (kiểm tra mạng / Worker URL có đúng không)';
@@ -922,8 +925,45 @@ async function cloudFetch(path, opts){
     return null;
   }
 }
+function outboxKey(kind, payload){
+  if(kind==='checkpoint' || kind==='checkpointDelete') return 'checkpoint:'+payload.key;
+  if(kind==='meta') return 'meta:'+payload.key;
+  if(kind==='image') return 'image:'+payload.cpKey+':'+payload.imageTs;
+  return null;
+}
+async function compactOutbox(){
+  await new Promise((resolve,reject)=>{
+    const tx=DB.transaction('outbox','readwrite'), store=tx.objectStore('outbox');
+    const req=store.getAll();
+    req.onsuccess=()=>{
+      const latest=new Map();
+      for(const item of req.result){
+        const key=outboxKey(item.kind,item.payload);
+        if(!key) continue;
+        const previous=latest.get(key);
+        if(previous){
+          if((previous.payload.updatedAt||'')>(item.payload.updatedAt||'')){store.delete(item.id);continue;}
+          store.delete(previous.id);
+        }
+        latest.set(key,item);
+      }
+    };
+    tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+  });
+}
 async function queueOutbox(kind, payload){
-  await idbPut('outbox', {kind, payload, queuedAt: new Date().toISOString()});
+  const key = outboxKey(kind, payload);
+  await new Promise((resolve,reject)=>{
+    const tx=DB.transaction('outbox','readwrite'), store=tx.objectStore('outbox');
+    const req=store.getAll();
+    req.onsuccess=()=>{
+      for(const item of req.result){
+        if(key && outboxKey(item.kind,item.payload)===key) store.delete(item.id);
+      }
+      store.add({kind,payload,queuedAt:new Date().toISOString()});
+    };
+    tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error); tx.onabort=()=>reject(tx.error);
+  });
 }
 function scheduleFlush(delayMs){
   if(flushScheduled) return;
@@ -947,7 +987,10 @@ async function collectDirtyCheckpointRows(){
 // idbPut+refreshCache — queues whatever is now dirty and schedules a flush.
 async function persistAll(){
   const rows = await collectDirtyCheckpointRows();
-  for(const cp of rows) await queueOutbox('checkpoint', cp);
+  const queued = await idbGetAll('outbox');
+  for(const cp of rows){
+    if(!queued.some(i=>i.kind==='checkpoint' && i.payload.key===cp.key && i.payload.updatedAt===cp.updatedAt)) await queueOutbox('checkpoint', cp);
+  }
   scheduleFlush();
 }
 async function queueCheckpointDelete(key){
@@ -990,13 +1033,15 @@ async function pullFromCloud(){
   try{
   let changed = false;
   lastPullCount = 0;
+  let hasMore = true;
+  while(hasMore){
   const cpRes = await cloudFetch(`/api/checkpoints?since=${encodeURIComponent(syncCursors.checkpoints||'0')}`, {method:'GET'});
   if(cpRes && Array.isArray(cpRes.rows)){
-    lastPullCount = cpRes.rows.length;
+    lastPullCount += cpRes.rows.length;
     for(const row of cpRes.rows){
       const local = await idbGet('shifts', row.key);
       if(row.deleted){
-        if(local){ await idbDelete('shifts', row.key); changed = true; }
+        if(local && row.updatedAt >= local.updatedAt){ await idbDelete('shifts', row.key); changed = true; }
       } else if(!local || row.updatedAt > local.updatedAt){
         await idbPut('shifts', {
           key:row.key, date:row.date, shift:row.shift, section:row.section, po:row.po, recipe:row.recipe,
@@ -1008,6 +1053,9 @@ async function pullFromCloud(){
     }
     if(cpRes.cursor!=null) syncCursors.checkpoints = String(cpRes.cursor);
     await idbPut('meta', {k:'syncCursors', value: syncCursors});
+  }
+  hasMore = !!(cpRes && cpRes.hasMore);
+  if(!cpRes) break;
   }
   const metaRes = await cloudFetch('/api/meta', {method:'GET'});
   if(metaRes && metaRes.items){
@@ -1022,7 +1070,7 @@ async function pullFromCloud(){
     }
     await idbPut('meta', {k:'metaAppliedAt', value: metaAppliedAt});
   }
-  if(changed){ await refreshCache(); renderAll(); }
+  if(changed){ await refreshCache(); } // Refresh views when selected, preserving unsaved inputs.
   }finally{ pulling = false; }
 }
 async function flushOutbox(){
@@ -1058,26 +1106,34 @@ async function flushOutbox(){
     const byKey = {};
     cpItems.forEach(i=>{ const cp=i.payload; if(!byKey[cp.key] || cp.updatedAt>byKey[cp.key].updatedAt) byKey[cp.key]=cp; });
     (await collectDirtyCheckpointRows()).forEach(cp=>{ if(!byKey[cp.key] || cp.updatedAt>byKey[cp.key].updatedAt) byKey[cp.key]=cp; });
-    const rows = Object.values(byKey);
+    const allRows = Object.values(byKey);
+    for(let offset=0;offset<allRows.length;offset+=10){
+    const rows=allRows.slice(offset,offset+10);
     if(rows.length){
       const res = await cloudFetch('/api/checkpoints', {method:'PUT', body: JSON.stringify({rows})});
       if(res){
         for(const cp of rows){
           const local = await idbGet('shifts', cp.key);
-          if(local){ local._syncedAt = cp.updatedAt; await idbPut('shifts', local); }
+          const ack=(res.results||[]).find(r=>r.key===cp.key);
+          if(local && local.updatedAt===cp.updatedAt && ack && (ack.applied || ack.reason==='stale')){ local._syncedAt = cp.updatedAt; await idbPut('shifts', local); }
         }
-        cpItems.forEach(i=>doneIds.push(i.id));
+        const accepted = new Set((res.results||[]).filter(r=>r.applied || r.reason==='stale').map(r=>r.key));
+        cpItems.filter(i=>accepted.has(i.payload.key) && rows.some(r=>r.key===i.payload.key)).forEach(i=>doneIds.push(i.id));
+        if(accepted.size!==rows.length) lastCloudError='Máy chủ chưa xác nhận đầy đủ dữ liệu';
       }
+      if(!res) break;
+    }
     }
 
     const delItems = items.filter(i=>i.kind==='checkpointDelete');
     if(delItems.length){
       const byKeyD = {};
       delItems.forEach(i=>{ const d=i.payload; if(!byKeyD[d.key] || d.updatedAt>byKeyD[d.key].updatedAt) byKeyD[d.key]=d; });
-      const keys = Object.keys(byKeyD);
-      const updatedAt = Object.values(byKeyD).reduce((m,d)=>d.updatedAt>m?d.updatedAt:m, '');
-      const res = await cloudFetch('/api/checkpoints', {method:'DELETE', body: JSON.stringify({keys, updatedAt})});
-      if(res) delItems.forEach(i=>doneIds.push(i.id));
+      for(const d of Object.values(byKeyD)){
+        const res=await cloudFetch('/api/checkpoints',{method:'DELETE',body:JSON.stringify({keys:[d.key],updatedAt:d.updatedAt})});
+        if(res) delItems.filter(i=>i.payload.key===d.key).forEach(i=>doneIds.push(i.id));
+        else break;
+      }
     }
 
     const metaItems = items.filter(i=>i.kind==='meta');
@@ -1097,6 +1153,7 @@ async function flushOutbox(){
     }
 
     for(const id of doneIds) await idbDelete('outbox', id);
+    if(doneIds.length) await refreshCache();
     await pullFromCloud();
     const remaining = await idbGetAll('outbox');
     if(lastCloudError){ setCloudStatus('error'); }
@@ -1110,6 +1167,8 @@ async function flushOutbox(){
     setCloudStatus('error');
   }
   flushing = false;
+  syncDelay = cloudStatus==='error' ? Math.min(syncDelay*2, 300000) : lastPullCount ? 20000 : Math.min(syncDelay*1.5, 120000);
+  armSync();
 }
 function manualSync(){
   if(!cloudCfg.baseUrl || !cloudCfg.secret){ toast('Chưa cấu hình đồng bộ Cloudflare'); return; }
@@ -1141,11 +1200,26 @@ function resyncFromScratch(){
 // long stretches. Layer on every event that reliably DOES fire the moment
 // someone actually looks at the app again, so it catches up immediately
 // instead of waiting on the background timer.
-setInterval(()=>{ if(cloudCfg.baseUrl && cloudCfg.secret) flushOutbox(); }, 20000);
-window.addEventListener('online', ()=>{ if(cloudCfg.baseUrl && cloudCfg.secret) flushOutbox(); });
-window.addEventListener('focus', ()=>{ if(cloudCfg.baseUrl && cloudCfg.secret) flushOutbox(); });
-window.addEventListener('pageshow', ()=>{ if(cloudCfg.baseUrl && cloudCfg.secret) flushOutbox(); });
-document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && cloudCfg.baseUrl && cloudCfg.secret) flushOutbox(); });
+let syncTimer = null;
+let syncDelay = 20000;
+let lastWake = 0;
+function armSync(){
+  clearTimeout(syncTimer);
+  if(document.visibilityState==='hidden' || !navigator.onLine) return;
+  syncTimer=setTimeout(()=>{ flushOutbox().finally(armSync); },syncDelay);
+}
+function wakeSync(){
+  if(document.visibilityState==='hidden'){ clearTimeout(syncTimer); return; }
+  if(Date.now()-lastWake<1500) return;
+  lastWake=Date.now(); syncDelay=20000;
+  if(cloudCfg.baseUrl && cloudCfg.secret) scheduleFlush(0);
+  armSync();
+}
+window.addEventListener('online',wakeSync);
+window.addEventListener('focus',wakeSync);
+window.addEventListener('pageshow',wakeSync);
+document.addEventListener('visibilitychange',wakeSync);
+armSync();
 
 /* ===================== SPEC / VALUE HELPERS ===================== */
 // 4-band spec model (matches the QC_Inspection_Pro / FG_Release_Inspection
@@ -1207,7 +1281,7 @@ function showTab(name){
   // mobile, so this is the last-resort "make sure what I'm looking at is
   // fresh" catch. Cheap (a couple of small GETs) and pullFromCloud() itself
   // re-renders the active tab if anything new came in.
-  if(name!=='settings' && name!=='guide' && cloudCfg.baseUrl && cloudCfg.secret) pullFromCloud();
+  if(name!=='settings' && name!=='guide' && cloudCfg.baseUrl && cloudCfg.secret && Date.now()-lastWake>20000) wakeSync();
 }
 qsa('.tab').forEach(t => t.addEventListener('click', ()=>showTab(t.dataset.tab)));
 

@@ -1,0 +1,13 @@
+name = "shiftly-report-sync"
+main = "worker.js"
+account_id = "96bcf77a519793b49f2d4c1c041ef0fb"
+compatibility_date = "2026-09-13"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "shiftly_report_db"
+database_id = "974b1a12-8f97-4926-be98-d0d44c45b6e6"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "shiftly-report-images"
