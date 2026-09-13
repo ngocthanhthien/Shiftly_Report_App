@@ -7,8 +7,13 @@ import {DatabaseSync} from 'node:sqlite';
 import worker from '../cloudflare/worker.js';
 import {JSDOM, VirtualConsole} from 'jsdom';
 import {IDBFactory} from 'fake-indexeddb';
+import {backendEnvironment, targets} from '../scripts/deploy.mjs';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const source=html.match(/<script>([\s\S]*?)<\/script>/)[1];
+test('CI frontend name cannot overwrite the compatibility backend',()=>{
+ const original={WRANGLER_CI_OVERRIDE_NAME:'shiftly-report-app',WRANGLER_CI_MATCH_TAG:'frontend-tag',CLOUDFLARE_API_TOKEN:'test'};
+ const env=backendEnvironment(original);assert.equal(env.WRANGLER_CI_OVERRIDE_NAME,undefined);assert.equal(env.WRANGLER_CI_MATCH_TAG,undefined);assert.equal(env.CLOUDFLARE_API_TOKEN,'test');assert.equal(original.WRANGLER_CI_OVERRIDE_NAME,'shiftly-report-app');assert.equal(targets()[0][0],'cloudflare/wrangler.toml');
+});
 function fn(name){const p=source.indexOf('function '+name+'(');const start=source.slice(Math.max(0,p-6),p)==='async '?p-6:p;let braces=0;const open=source.indexOf('{',p);for(let i=open;i<source.length;i++){if(source[i]==='{')braces++;if(source[i]==='}'&&!--braces)return source.slice(start,i+1);}throw Error(name);}
 function backend(){
   const sqlite=new DatabaseSync(':memory:');

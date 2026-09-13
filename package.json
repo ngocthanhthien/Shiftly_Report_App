@@ -5,7 +5,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test --test-isolation=none tests/*.test.mjs",
-    "deploy": "npm test && wrangler deploy --config cloudflare/wrangler.toml && wrangler deploy --config wrangler.jsonc"
+    "deploy": "npm test && node scripts/deploy.mjs"
   },
   "devDependencies": {
     "fake-indexeddb": "6.2.4",
