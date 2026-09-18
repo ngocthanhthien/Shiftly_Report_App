@@ -21,6 +21,11 @@
 -- PC with the wrong time must never cause another device to silently miss
 -- data — see index.html's cloud-sync comments for the history of that bug).
 
+-- On Supabase this installs into an `extensions` schema (not `public`) by
+-- default — that's why the 2 functions below that call digest() set
+-- search_path to "public, extensions" rather than just "public". Postgres
+-- silently skips schemas in search_path that don't exist, so this is safe
+-- unchanged even somewhere pgcrypto's functions land directly in `public`.
 create extension if not exists pgcrypto;
 
 create table if not exists checkpoints (
@@ -80,13 +85,13 @@ alter table app_secret enable row level security;
 -- the one-time setup step. See supabase/README.md.
 
 create or replace function set_sync_secret(p_secret text) returns void
-language sql security definer set search_path = public as $$
+language sql security definer set search_path = public, extensions as $$
   insert into app_secret (id, secret_hash) values (1, digest(p_secret, 'sha256'))
   on conflict (id) do update set secret_hash = excluded.secret_hash;
 $$;
 
 create or replace function check_secret(p_secret text) returns boolean
-language sql stable security definer set search_path = public as $$
+language sql stable security definer set search_path = public, extensions as $$
   select exists (
     select 1 from app_secret where id = 1 and secret_hash = digest(coalesce(p_secret, ''), 'sha256')
   );
