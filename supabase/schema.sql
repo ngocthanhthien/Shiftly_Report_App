@@ -1,32 +1,20 @@
 -- Shiftly Report — Supabase (Postgres) backend
--- Run ONCE in the Supabase Dashboard → SQL Editor → New query → paste this
--- whole file → Run. No CLI/terminal needed.
+-- Run in the Supabase Dashboard → SQL Editor → New query → paste this whole
+-- file → Run. Safe to re-run any time (every statement is idempotent).
 --
 -- Design: every real table is locked down (RLS enabled, no policies), and
 -- the ONLY way in is through the sync_* functions below (SECURITY DEFINER,
 -- so they run with the owner's privileges and bypass RLS regardless of who
--- calls them). Each one takes the shared secret as its first argument and
--- checks it itself — same "one shared password" model the app used with
--- its previous Cloudflare backend, just implemented in Postgres.
---
--- Every sync_* function always returns a JSON object and HTTP 200 — even
--- on a wrong secret, which comes back as {"error":"unauthorized"} rather
--- than a raised SQL exception. This is deliberate: PostgREST's mapping of
--- arbitrary raised Postgres error codes to HTTP status codes isn't
--- something to depend on sight-unseen, whereas "read `error` in the JSON
--- body" is unambiguous and works identically in the app and in tests.
+-- calls them). Each one checks the CALLER's real identity — a Supabase Auth
+-- session (`auth.uid()`), verified against the `members` table — instead of
+-- a shared password. See supabase/README.md for how to create the first
+-- Admin account and deploy the admin-users Edge Function that manages the
+-- rest.
 --
 -- The sync cursor (`seq`) is a Postgres SEQUENCE, assigned per row on every
 -- write — always increasing, never based on any device's clock (a phone or
 -- PC with the wrong time must never cause another device to silently miss
 -- data — see index.html's cloud-sync comments for the history of that bug).
-
--- On Supabase this installs into an `extensions` schema (not `public`) by
--- default — that's why the 2 functions below that call digest() set
--- search_path to "public, extensions" rather than just "public". Postgres
--- silently skips schemas in search_path that don't exist, so this is safe
--- unchanged even somewhere pgcrypto's functions land directly in `public`.
-create extension if not exists pgcrypto;
 
 create table if not exists checkpoints (
   key text primary key,
@@ -67,49 +55,87 @@ create table if not exists logs (
 );
 create index if not exists idx_logs_ts on logs (ts);
 
-create table if not exists app_secret (
-  id int primary key check (id = 1),
-  secret_hash bytea not null
-);
-
 alter table checkpoints enable row level security;
 alter table meta enable row level security;
 alter table logs enable row level security;
-alter table app_secret enable row level security;
 -- No policies are created for any of them — RLS with zero policies denies
 -- all direct REST access (anon/authenticated), which is exactly the point.
 
--- ===================== Secret management =====================
--- set_sync_secret is intentionally NEVER granted to anon/authenticated —
--- it can only be run from the SQL Editor (as the table owner), which is
--- the one-time setup step. See supabase/README.md.
+-- ===================== Access control (members) =====================
+-- Real Supabase Auth accounts: Admin signs in with a real email + password;
+-- User signs in with a username + password (Supabase Auth only knows
+-- email/phone, so a username account is given a synthetic, never-mailed
+-- address — see the admin-users Edge Function for the exact transform).
+-- Either way, the row here is what grants (or revokes) access to this app —
+-- having a Supabase Auth account alone grants nothing.
 
-create or replace function set_sync_secret(p_secret text) returns void
-language sql security definer set search_path = public, extensions as $$
-  insert into app_secret (id, secret_hash) values (1, digest(p_secret, 'sha256'))
-  on conflict (id) do update set secret_hash = excluded.secret_hash;
-$$;
+create table if not exists members (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  display_name text not null default '',
+  username text,
+  role text not null default 'user' check (role in ('admin', 'user')),
+  disabled boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists idx_members_username on members (lower(username)) where username is not null;
 
-create or replace function check_secret(p_secret text) returns boolean
-language sql stable security definer set search_path = public, extensions as $$
+create table if not exists member_audit (
+  id bigserial primary key,
+  actor_id uuid,
+  actor_name text,
+  action text not null,
+  detail text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_member_audit_created_at on member_audit (created_at);
+
+alter table members enable row level security;
+alter table member_audit enable row level security;
+-- Same zero-policy lockdown as the data tables — the app only ever reads
+-- its own membership via sync_whoami(), and only the admin-users Edge
+-- Function (using the service_role key, which bypasses RLS entirely) ever
+-- lists/creates/disables members or writes to member_audit.
+
+-- is_active_member() is what every sync_* function below calls instead of
+-- checking a shared secret: true only for a signed-in, non-disabled member.
+-- SECURITY DEFINER + owned by the table owner means it reads `members`
+-- bypassing RLS, exactly like the sync_* functions that call it.
+create or replace function is_active_member() returns boolean
+language sql stable security definer set search_path = public as $$
   select exists (
-    select 1 from app_secret where id = 1 and secret_hash = digest(coalesce(p_secret, ''), 'sha256')
+    select 1 from members where user_id = auth.uid() and not disabled
   );
 $$;
+revoke all on function is_active_member() from public;
+grant execute on function is_active_member() to authenticated;
 
-revoke all on function set_sync_secret(text) from public;
-revoke all on function check_secret(text) from public;
+-- Returns the caller's own membership row, or {"error":"unauthorized"} if
+-- not signed in / not a member / disabled. This is how the app learns its
+-- own display name + role after login (client code can never read `members`
+-- directly — RLS blocks that on purpose).
+create or replace function sync_whoami() returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v_row members;
+begin
+  select * into v_row from members where user_id = auth.uid() and not disabled;
+  if not found then return jsonb_build_object('error', 'unauthorized'); end if;
+  return jsonb_build_object('userId', v_row.user_id, 'displayName', v_row.display_name,
+    'username', v_row.username, 'role', v_row.role);
+end;
+$$;
+grant execute on function sync_whoami() to authenticated;
 
 -- ===================== Checkpoints =====================
 
-create or replace function sync_get_checkpoints(p_secret text, p_since bigint default 0)
+drop function if exists sync_get_checkpoints(text, bigint);
+create or replace function sync_get_checkpoints(p_since bigint default 0)
 returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
   v_rows jsonb;
   v_cursor bigint;
 begin
-  if not check_secret(p_secret) then return jsonb_build_object('error', 'unauthorized'); end if;
+  if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
   select coalesce(jsonb_agg(jsonb_build_object(
       'key', c.key, 'date', c.date, 'shift', c.shift, 'section', c.section, 'po', c.po,
       'recipe', c.recipe, 'client', c.client, 'technician', c.technician,
@@ -122,7 +148,8 @@ begin
 end;
 $$;
 
-create or replace function sync_put_checkpoints(p_secret text, p_rows jsonb)
+drop function if exists sync_put_checkpoints(text, jsonb);
+create or replace function sync_put_checkpoints(p_rows jsonb)
 returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
@@ -132,7 +159,7 @@ declare
   v_current_updated_at text;
   v_results jsonb := '[]'::jsonb;
 begin
-  if not check_secret(p_secret) then return jsonb_build_object('error', 'unauthorized'); end if;
+  if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
   for v_row in select * from jsonb_array_elements(p_rows) loop
     v_key := v_row->>'key';
     v_updated_at := v_row->>'updatedAt';
@@ -160,13 +187,14 @@ begin
 end;
 $$;
 
-create or replace function sync_delete_checkpoints(p_secret text, p_keys text[], p_updated_at text)
+drop function if exists sync_delete_checkpoints(text, text[], text);
+create or replace function sync_delete_checkpoints(p_keys text[], p_updated_at text)
 returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
   v_key text;
 begin
-  if not check_secret(p_secret) then return jsonb_build_object('error', 'unauthorized'); end if;
+  if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
   foreach v_key in array p_keys loop
     insert into checkpoints (key, date, shift, section, po, recipe, client, technician, fields, field_notes, images, updated_at, deleted, seq)
     values (v_key, '', '', '', '', '', '', '', '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, p_updated_at, true, nextval('checkpoints_seq'))
@@ -179,18 +207,20 @@ $$;
 
 -- ===================== Meta (Specs/PO list/Recipe list/Client list/Technicians/PO closures) =====================
 
-create or replace function sync_get_meta(p_secret text) returns jsonb
+drop function if exists sync_get_meta(text);
+create or replace function sync_get_meta() returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare v_items jsonb;
 begin
-  if not check_secret(p_secret) then return jsonb_build_object('error', 'unauthorized'); end if;
+  if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
   select coalesce(jsonb_object_agg(k, jsonb_build_object('value', value, 'updatedAt', updated_at)), '{}'::jsonb)
     into v_items from meta;
   return jsonb_build_object('items', v_items);
 end;
 $$;
 
-create or replace function sync_put_meta(p_secret text, p_items jsonb) returns jsonb
+drop function if exists sync_put_meta(text, jsonb);
+create or replace function sync_put_meta(p_items jsonb) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
   v_key text;
@@ -199,7 +229,7 @@ declare
   v_current text;
   v_results jsonb := '{}'::jsonb;
 begin
-  if not check_secret(p_secret) then return jsonb_build_object('error', 'unauthorized'); end if;
+  if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
   for v_key, v_val in select * from jsonb_each(p_items) loop
     v_updated_at := v_val->>'updatedAt';
     if v_updated_at is null then
@@ -218,11 +248,12 @@ $$;
 
 -- ===================== Logs (Data Log audit trail) =====================
 
-create or replace function sync_post_logs(p_secret text, p_entries jsonb) returns jsonb
+drop function if exists sync_post_logs(text, jsonb);
+create or replace function sync_post_logs(p_entries jsonb) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare v_entry jsonb;
 begin
-  if not check_secret(p_secret) then return jsonb_build_object('error', 'unauthorized'); end if;
+  if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
   for v_entry in select * from jsonb_array_elements(p_entries) loop
     insert into logs (ts, date, shift, po, section, technician, changes)
     values (
@@ -234,11 +265,23 @@ begin
 end;
 $$;
 
+-- ===================== Cleanup of the old shared-secret model =====================
+-- Shiftly used to authorize every sync_* call with a shared password argument
+-- (`set_sync_secret` / `check_secret` / `app_secret`) instead of real Auth
+-- accounts. That model is fully replaced by `members` + `is_active_member()`
+-- above — drop the now-unused pieces so no old-shaped call can slip through.
+
+drop function if exists set_sync_secret(text);
+drop function if exists check_secret(text);
+drop table if exists app_secret;
+
 -- ===================== Grants =====================
--- Postgres grants EXECUTE to the PUBLIC pseudo-role on every new function
--- by default — the two revokes above already lock down the secret-setting
--- functions. Everything below is meant to be reachable via the anon key
--- (each function checks p_secret itself, same threat model as before).
+-- Every sync_* function below is granted to `authenticated` only (not
+-- `anon`) — signing in with a real Supabase Auth account is now a
+-- precondition just to call these, on top of the is_active_member() check
+-- each one does internally. Postgres grants EXECUTE to PUBLIC on new
+-- functions by default, so this also implicitly relies on the revoke above
+-- for is_active_member() itself never being reachable except through these.
 --
 -- Note on images: attached photos travel as base64 `dataUrl` strings right
 -- inside each checkpoint's `images` jsonb column (same shape the app already
@@ -246,9 +289,9 @@ $$;
 -- plenty for this app's actual photo volume (a per-shift QC log, not a photo
 -- host); revisit only if that changes.
 
-grant execute on function sync_get_checkpoints(text, bigint) to anon, authenticated;
-grant execute on function sync_put_checkpoints(text, jsonb) to anon, authenticated;
-grant execute on function sync_delete_checkpoints(text, text[], text) to anon, authenticated;
-grant execute on function sync_get_meta(text) to anon, authenticated;
-grant execute on function sync_put_meta(text, jsonb) to anon, authenticated;
-grant execute on function sync_post_logs(text, jsonb) to anon, authenticated;
+grant execute on function sync_get_checkpoints(bigint) to authenticated;
+grant execute on function sync_put_checkpoints(jsonb) to authenticated;
+grant execute on function sync_delete_checkpoints(text[], text) to authenticated;
+grant execute on function sync_get_meta() to authenticated;
+grant execute on function sync_put_meta(jsonb) to authenticated;
+grant execute on function sync_post_logs(jsonb) to authenticated;

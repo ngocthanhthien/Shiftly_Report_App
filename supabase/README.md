@@ -1,60 +1,110 @@
 # Shiftly Report — Supabase backend
 
-Không cần server riêng, không cần CLI/terminal để triển khai — chỉ 1 project
-Supabase (miễn phí) + dán 1 file SQL vào SQL Editor trên trình duyệt.
+Data lives in 1 Supabase project (free tier is enough). Access is real
+per-person login (Admin / Nhân viên), not a single shared password — this
+needs the Supabase CLI once to deploy the account-management Edge Function
+(step 5 below); everything else is still just pasting SQL into the
+dashboard.
 
-## Thiết lập (1 lần)
+## 1. Tạo project
 
-1. Tạo tài khoản + project mới tại https://supabase.com (chọn gói Free là đủ).
-2. Vào project vừa tạo → menu bên trái → **SQL Editor** → **New query**.
-3. Mở file [`schema.sql`](./schema.sql) trong thư mục này, copy toàn bộ nội
-   dung, dán vào SQL Editor → bấm **Run**. Xong — toàn bộ bảng và function
-   cần thiết đã được tạo.
-4. Đặt mật khẩu đồng bộ — vẫn trong SQL Editor, chạy dòng lệnh sau (đổi
-   `mat-khau-cua-ban` thành mật khẩu bạn muốn dùng, càng dài càng khó đoán
-   càng tốt):
+Tạo tài khoản + project mới tại https://supabase.com (gói Free là đủ).
+
+## 2. Chạy schema.sql
+
+Vào project → **SQL Editor** → **New query** → dán toàn bộ nội dung
+[`schema.sql`](./schema.sql) → **Run**. Tạo xong bảng `checkpoints`, `meta`,
+`logs`, `members`, `member_audit` và toàn bộ các hàm `sync_*` / `is_active_member`
+/ `sync_whoami`. An toàn chạy lại file này bất cứ lúc nào sau này khi cập
+nhật schema (mọi câu lệnh đều `create or replace` / `create table if not
+exists`).
+
+## 3. Bật đăng nhập bằng Email/Password
+
+Vào **Authentication → Providers** → đảm bảo **Email** đang bật. Vào
+**Authentication → Settings** → tắt "Confirm email" (app tự tạo tài khoản đã
+xác thực sẵn qua Edge Function ở bước 5, không cần người dùng bấm link xác
+nhận qua email — nhất là vì tài khoản Nhân viên dùng địa chỉ email giả nội
+bộ, không nhận được email nào cả).
+
+## 4. Tạo tài khoản Admin đầu tiên
+
+Chưa có Admin nào thì không ai tạo được tài khoản khác — tạo thủ công 1 lần:
+
+1. **Authentication → Users → Add user** → nhập email + mật khẩu thật của
+   bạn → **Create user**.
+2. Quay lại **SQL Editor**, chạy (đổi email cho đúng):
 
    ```sql
-   select set_sync_secret('mat-khau-cua-ban');
+   insert into members (user_id, display_name, role)
+   select id, 'Admin', 'admin' from auth.users where email = 'ban@congty.com'
+   on conflict (user_id) do update set role = 'admin';
    ```
 
-   Bấm Run. Ghi nhớ mật khẩu này — sẽ nhập lại vào app ở bước dưới. Có thể
-   chạy lại lệnh này bất cứ lúc nào để đổi mật khẩu mới.
+Từ giờ tài khoản này đăng nhập được vào app (chọn tab "🛡️ Admin" ở màn hình
+đăng nhập) và thấy mục "👥 Quản lý tài khoản" trong tab Cài đặt để tạo các
+tài khoản Nhân viên khác — không cần chạm SQL Editor nữa cho việc này.
 
-5. Lấy 2 thông tin cần cho app — vào **Project Settings** (biểu tượng bánh
-   răng) → **API**:
-   - **Project URL** (dạng `https://xxxxxxxxxxxx.supabase.co`)
-   - **anon public** key (chuỗi dài ở mục "Project API keys")
+## 5. Deploy Edge Function quản lý tài khoản (cần CLI, làm 1 lần)
 
-## Cấu hình trong app
+Việc tạo/vô hiệu hóa tài khoản cần `service_role` key — key này **không bao
+giờ** được đặt trong `index.html` (mã nguồn public trên GitHub Pages), nên
+việc đó chạy trên 1 Edge Function riêng, do Supabase host.
 
-Mở `index.html` (bản đã publish qua GitHub Pages, hoặc mở trực tiếp file)
-→ tab **Cài đặt** → mục "☁️ Đồng bộ Supabase" → nhập:
-- **Supabase URL**: URL lấy ở bước 5.
-- **Anon public key**: key lấy ở bước 5.
-- **Mật khẩu đồng bộ**: đúng giá trị đã đặt ở bước 4.
+1. Cài Supabase CLI (1 lần trên máy bạn):
+   ```bash
+   npm install -g supabase
+   ```
+2. Đăng nhập + liên kết project (thay `<project-ref>` bằng ID project, lấy ở
+   Project Settings → General):
+   ```bash
+   supabase login
+   supabase link --project-ref <project-ref>
+   ```
+3. Deploy function (đã có sẵn trong `supabase/functions/admin-users/`):
+   ```bash
+   supabase functions deploy admin-users
+   ```
+4. Function tự đọc `SUPABASE_URL` và `SUPABASE_SERVICE_ROLE_KEY` từ biến môi
+   trường Supabase tự cấp sẵn cho mọi Edge Function — không cần tự khai báo
+   gì thêm.
 
-Bấm "💾 Lưu & Kết nối". Từ đó app tự đẩy/kéo dữ liệu mỗi khi có mạng, không
-cần thao tác gì thêm. Lặp lại đúng 3 giá trị này trên mọi thiết bị khác
-muốn dùng chung dữ liệu.
+Deploy lại bằng đúng lệnh ở bước 3 mỗi khi sửa
+`supabase/functions/admin-users/index.ts`.
+
+## 6. Cấu hình trong app
+
+Mở app (bản đã publish qua GitHub Pages, hoặc mở trực tiếp file) → tab
+**Cài đặt** → mục "☁️ Đồng bộ Supabase" → nhập:
+- **Supabase URL**: `https://<project-ref>.supabase.co`.
+- **Anon public key**: Project Settings → API → "anon public".
+
+Bấm "💾 Lưu cấu hình" → app chuyển sang màn hình đăng nhập → đăng nhập bằng
+tài khoản Admin vừa tạo ở bước 4 (hoặc 1 tài khoản Nhân viên do Admin tạo
+trong tab Cài đặt). Lặp lại đúng Supabase URL + Anon key này trên mọi thiết
+bị khác muốn dùng chung dữ liệu — mỗi thiết bị/mỗi người tự đăng nhập bằng
+tài khoản riêng của mình.
 
 ## Vì sao an toàn dù mã nguồn public trên GitHub
 
 `anon public key` được thiết kế để lộ ra công khai (Supabase dùng nó y hệt
 cách này ở mọi ứng dụng client-side) — bản thân nó không cấp quyền đọc/ghi
-gì cả. Mọi bảng dữ liệu thật (`checkpoints`, `meta`, `logs`) đều bật Row
-Level Security và **không có policy nào** — nghĩa là không ai đọc/ghi trực
-tiếp được kể cả khi biết `anon key`. Đường vào DUY NHẤT là qua các SQL
-function (`sync_get_checkpoints`, `sync_put_checkpoints`, ...), và mỗi
-function đó tự kiểm tra mật khẩu đồng bộ bạn đặt ở bước 4 trước khi làm bất
-cứ điều gì — mật khẩu này KHÔNG nằm trong mã nguồn, chỉ nằm trong Cài đặt
-của từng thiết bị (lưu trong IndexedDB, gửi kèm mỗi lần gọi function).
+gì cả. Mọi bảng dữ liệu thật (`checkpoints`, `meta`, `logs`, `members`,
+`member_audit`) đều bật Row Level Security và **không có policy nào** —
+nghĩa là không ai đọc/ghi trực tiếp được kể cả khi biết `anon key`. Đường
+vào DUY NHẤT là qua các SQL function (`sync_get_checkpoints`, ...), và mỗi
+function đó tự kiểm tra người gọi là 1 tài khoản Supabase Auth **đã đăng
+nhập thật** và có mặt (chưa bị vô hiệu hóa) trong bảng `members` — không có
+tài khoản hợp lệ thì không làm gì cả. Việc tạo/vô hiệu hóa tài khoản chỉ
+chạy được qua Edge Function `admin-users` (bước 5), nơi duy nhất giữ
+`service_role` key, và function đó tự kiểm tra người gọi phải là Admin trước
+khi làm bất cứ điều gì.
 
 ## Cập nhật schema sau này
 
-Sửa `schema.sql` xong, copy đoạn mới/thay đổi (hoặc cả file — các câu lệnh
-đều dùng `create or replace` / `create table if not exists` nên chạy lại
-toàn bộ file cũng an toàn) rồi dán vào SQL Editor → Run lại.
+Sửa `schema.sql` xong, dán lại toàn bộ file vào SQL Editor → Run lại (an
+toàn, mọi câu lệnh đều idempotent). Sửa
+`supabase/functions/admin-users/index.ts` thì deploy lại bằng lệnh ở bước 5.
 
 ## Giới hạn cần biết (gói Free)
 
@@ -63,6 +113,10 @@ toàn bộ file cũng an toàn) rồi dán vào SQL Editor → Run lại.
   nhà máy, dữ liệu chữ + ảnh nén nhỏ.
 - Không giới hạn số API request theo ngày ở gói Free (khác Cloudflare
   Workers free tier trước đây).
+- Auth: 50.000 người dùng hoạt động hàng tháng (MAU) miễn phí — dư thừa cho
+  quy mô 1 nhà máy.
+- Edge Functions: 500.000 lượt gọi/tháng miễn phí — mục quản lý tài khoản
+  dùng rất ít trong số này (chỉ gọi khi Admin tạo/sửa tài khoản).
 - Đồng bộ dùng Realtime Broadcast (gần như tức thời khi kết nối WebSocket
   thành công) + dự phòng bằng chu kỳ polling ~15-20s khi không kết nối
   được — không cần bật/cấu hình gì thêm trong Supabase Dashboard cho việc
@@ -72,3 +126,10 @@ toàn bộ file cũng an toàn) rồi dán vào SQL Editor → Run lại.
   bảng `checkpoints` — không dùng Supabase Storage riêng. Nếu sau này khối
   lượng ảnh lớn hơn nhiều (hàng chục nghìn ảnh/tháng), cân nhắc chuyển ảnh
   sang Supabase Storage để nhẹ database hơn.
+
+## Đang dùng bản cũ (mật khẩu chung)?
+
+Nếu project của bạn từng chạy phiên bản `schema.sql` dùng 1 mật khẩu chung
+(`set_sync_secret`), chạy lại toàn bộ `schema.sql` mới sẽ tự xóa cơ chế đó
+(bảng `app_secret`, hàm `set_sync_secret`/`check_secret`) và chuyển hẳn sang
+mô hình tài khoản thật ở trên — làm tiếp từ bước 3.

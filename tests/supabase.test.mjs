@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import crypto from 'node:crypto';
 import { PGlite } from '@electric-sql/pglite';
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import { JSDOM, VirtualConsole } from 'jsdom';
@@ -16,15 +17,36 @@ const schemaSql = readFileSync(new URL('../supabase/schema.sql', import.meta.url
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const source = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
-async function backend(secret) {
+// Real Supabase provides `auth.users` + `auth.uid()` (reading the caller's
+// JWT `sub` claim, which PostgREST injects as the `request.jwt.claim.sub`
+// session setting) out of the box; plain Postgres (what PGlite gives us)
+// does not, so this stand-in exists ONLY in the test harness — schema.sql
+// itself is the real, unmodified file that ships to users.
+async function backend() {
   const db = new PGlite({ extensions: { pgcrypto } });
-  // Real Supabase projects come with `anon`/`authenticated` roles built in;
-  // plain Postgres (what PGlite gives us) does not, so create stand-ins
-  // before applying the real schema.sql unmodified.
   await db.exec('create role anon; create role authenticated;');
+  await db.exec(`
+    create schema auth;
+    create table auth.users (id uuid primary key default gen_random_uuid(), email text);
+    create or replace function auth.uid() returns uuid language sql stable as $$
+      select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+    $$;
+  `);
   await db.exec(schemaSql);
-  await db.query('select set_sync_secret($1)', [secret ?? 'test-secret']);
   return db;
+}
+
+// Mimics PostgREST setting the caller's JWT claim for the session — every
+// sync_* call after this runs `as` that member (or as nobody, if userId is
+// falsy, i.e. an unauthenticated anon call).
+async function signInAs(db, userId) {
+  await db.query("select set_config('request.jwt.claim.sub', $1, false)", [userId || '']);
+}
+async function createMember(db, { role = 'user', disabled = false, displayName = 'QA', username = null, email = null } = {}) {
+  const id = crypto.randomUUID();
+  await db.query('insert into auth.users (id, email) values ($1,$2)', [id, email]);
+  await db.query('insert into members (user_id, display_name, role, disabled, username) values ($1,$2,$3,$4,$5)', [id, displayName, role, disabled, username]);
+  return id;
 }
 
 // Mirrors exactly how the frontend calls these functions (see cloudFetch in
@@ -34,12 +56,13 @@ async function backend(secret) {
 async function rpc(db, fn, params) {
   const p = params || {};
   const table = {
-    sync_get_checkpoints: ['select sync_get_checkpoints($1,$2) as result', [p.p_secret, p.p_since ?? 0]],
-    sync_put_checkpoints: ['select sync_put_checkpoints($1,$2::jsonb) as result', [p.p_secret, JSON.stringify(p.p_rows)]],
-    sync_delete_checkpoints: ['select sync_delete_checkpoints($1,$2,$3) as result', [p.p_secret, p.p_keys, p.p_updated_at]],
-    sync_get_meta: ['select sync_get_meta($1) as result', [p.p_secret]],
-    sync_put_meta: ['select sync_put_meta($1,$2::jsonb) as result', [p.p_secret, JSON.stringify(p.p_items)]],
-    sync_post_logs: ['select sync_post_logs($1,$2::jsonb) as result', [p.p_secret, JSON.stringify(p.p_entries)]],
+    sync_whoami: ['select sync_whoami() as result', []],
+    sync_get_checkpoints: ['select sync_get_checkpoints($1) as result', [p.p_since ?? 0]],
+    sync_put_checkpoints: ['select sync_put_checkpoints($1::jsonb) as result', [JSON.stringify(p.p_rows)]],
+    sync_delete_checkpoints: ['select sync_delete_checkpoints($1,$2) as result', [p.p_keys, p.p_updated_at]],
+    sync_get_meta: ['select sync_get_meta() as result', []],
+    sync_put_meta: ['select sync_put_meta($1::jsonb) as result', [JSON.stringify(p.p_items)]],
+    sync_post_logs: ['select sync_post_logs($1::jsonb) as result', [JSON.stringify(p.p_entries)]],
   }[fn];
   const res = await db.query(table[0], table[1]);
   return res.rows[0].result;
@@ -50,108 +73,190 @@ test('HTML script compiles and 13 tabs remain', () => {
   assert.equal((html.match(/data-tab="/g) || []).length, 13);
 });
 
-test('every sync_* function rejects a wrong secret with {error:"unauthorized"}, not an exception', async () => {
-  const db = await backend('right-secret');
-  assert.equal((await rpc(db, 'sync_get_checkpoints', { p_secret: 'wrong' })).error, 'unauthorized');
-  assert.equal((await rpc(db, 'sync_put_checkpoints', { p_secret: 'wrong', p_rows: [] })).error, 'unauthorized');
-  assert.equal((await rpc(db, 'sync_delete_checkpoints', { p_secret: 'wrong', p_keys: ['x'], p_updated_at: '2026-01-01' })).error, 'unauthorized');
-  assert.equal((await rpc(db, 'sync_get_meta', { p_secret: 'wrong' })).error, 'unauthorized');
-  assert.equal((await rpc(db, 'sync_put_meta', { p_secret: 'wrong', p_items: {} })).error, 'unauthorized');
-  assert.equal((await rpc(db, 'sync_post_logs', { p_secret: 'wrong', p_entries: [] })).error, 'unauthorized');
+test('every sync_* function rejects an unauthenticated caller with {error:"unauthorized"}, not an exception', async () => {
+  const db = await backend();
+  await signInAs(db, null);
+  assert.equal((await rpc(db, 'sync_whoami', {})).error, 'unauthorized');
+  assert.equal((await rpc(db, 'sync_get_checkpoints', {})).error, 'unauthorized');
+  assert.equal((await rpc(db, 'sync_put_checkpoints', { p_rows: [] })).error, 'unauthorized');
+  assert.equal((await rpc(db, 'sync_delete_checkpoints', { p_keys: ['x'], p_updated_at: '2026-01-01' })).error, 'unauthorized');
+  assert.equal((await rpc(db, 'sync_get_meta', {})).error, 'unauthorized');
+  assert.equal((await rpc(db, 'sync_put_meta', { p_items: {} })).error, 'unauthorized');
+  assert.equal((await rpc(db, 'sync_post_logs', { p_entries: [] })).error, 'unauthorized');
 });
 
-test('set_sync_secret and check_secret are not reachable by anon/authenticated', async () => {
+test('a signed-in Supabase Auth user with no members row, or a disabled member, is still unauthorized', async () => {
+  const db = await backend();
+  const strangerId = crypto.randomUUID();
+  await db.query('insert into auth.users (id, email) values ($1,$2)', [strangerId, 'stranger@test.local']);
+  await signInAs(db, strangerId);
+  assert.equal((await rpc(db, 'sync_get_checkpoints', {})).error, 'unauthorized');
+
+  const disabledId = await createMember(db, { disabled: true, displayName: 'Disabled QC' });
+  await signInAs(db, disabledId);
+  assert.equal((await rpc(db, 'sync_whoami', {})).error, 'unauthorized');
+  assert.equal((await rpc(db, 'sync_get_checkpoints', {})).error, 'unauthorized');
+});
+
+test('sync_whoami returns the caller\'s own membership row for an active member', async () => {
+  const db = await backend();
+  const uid = await createMember(db, { role: 'admin', displayName: 'Nguyễn Văn A', username: 'nva' });
+  await signInAs(db, uid);
+  const who = await rpc(db, 'sync_whoami', {});
+  assert.equal(who.userId, uid);
+  assert.equal(who.displayName, 'Nguyễn Văn A');
+  assert.equal(who.username, 'nva');
+  assert.equal(who.role, 'admin');
+});
+
+test('is_active_member() is not reachable by anon, only authenticated', async () => {
   const db = await backend();
   const res = await db.query(`
-    select has_function_privilege('anon', 'set_sync_secret(text)', 'execute') as a,
-           has_function_privilege('authenticated', 'set_sync_secret(text)', 'execute') as b,
-           has_function_privilege('anon', 'check_secret(text)', 'execute') as c
+    select has_function_privilege('anon', 'is_active_member()', 'execute') as a,
+           has_function_privilege('authenticated', 'is_active_member()', 'execute') as b
   `);
   assert.equal(res.rows[0].a, false);
-  assert.equal(res.rows[0].b, false);
-  assert.equal(res.rows[0].c, false);
+  assert.equal(res.rows[0].b, true);
 });
 
 test('every real table has row level security enabled (no policies -> direct REST access denied)', async () => {
   const db = await backend();
-  const res = await db.query(`select relname, relrowsecurity from pg_class where relname in ('checkpoints','meta','logs','app_secret') and relkind='r'`);
-  assert.equal(res.rows.length, 4);
+  const res = await db.query(`select relname, relrowsecurity from pg_class where relname in ('checkpoints','meta','logs','members','member_audit') and relkind='r'`);
+  assert.equal(res.rows.length, 5);
   for (const row of res.rows) assert.equal(row.relrowsecurity, true, row.relname + ' must have RLS enabled');
+});
+
+test('the old shared-secret model is fully removed', async () => {
+  const db = await backend();
+  const res = await db.query(`
+    select
+      (select count(*)::int from pg_proc where proname in ('set_sync_secret','check_secret')) as fn_count,
+      (select count(*)::int from pg_class where relname='app_secret') as tbl_count
+  `);
+  assert.equal(res.rows[0].fn_count, 0);
+  assert.equal(res.rows[0].tbl_count, 0);
 });
 
 test('checkpoints: push, pull, stale update rejected, cursor advances, delete tombstone', async () => {
   const db = await backend();
+  const uid = await createMember(db, { displayName: 'QA' });
+  await signInAs(db, uid);
   const cp = { key: 'k1', date: '2026-09-18', shift: '1', section: 'ROA', po: 'PO1', recipe: '', client: '', technician: 'QA', fields: { a: 1 }, fieldNotes: {}, images: [], updatedAt: '2026-09-18T01:00:00Z' };
 
-  const put1 = await rpc(db, 'sync_put_checkpoints', { p_secret: 'test-secret', p_rows: [cp] });
+  const put1 = await rpc(db, 'sync_put_checkpoints', { p_rows: [cp] });
   assert.equal(put1.results[0].applied, true);
 
-  const pull1 = await rpc(db, 'sync_get_checkpoints', { p_secret: 'test-secret', p_since: 0 });
+  const pull1 = await rpc(db, 'sync_get_checkpoints', { p_since: 0 });
   assert.equal(pull1.rows.length, 1);
   assert.equal(pull1.rows[0].fields.a, 1);
   const cursor1 = pull1.cursor;
   assert.ok(cursor1 > 0);
 
-  const putStale = await rpc(db, 'sync_put_checkpoints', { p_secret: 'test-secret', p_rows: [{ ...cp, updatedAt: '2026-09-17T00:00:00Z', fields: { a: 999 } }] });
+  const putStale = await rpc(db, 'sync_put_checkpoints', { p_rows: [{ ...cp, updatedAt: '2026-09-17T00:00:00Z', fields: { a: 999 } }] });
   assert.equal(putStale.results[0].applied, false);
-  assert.equal((await rpc(db, 'sync_get_checkpoints', { p_secret: 'test-secret', p_since: 0 })).rows[0].fields.a, 1);
+  assert.equal((await rpc(db, 'sync_get_checkpoints', { p_since: 0 })).rows[0].fields.a, 1);
 
-  assert.equal((await rpc(db, 'sync_get_checkpoints', { p_secret: 'test-secret', p_since: cursor1 })).rows.length, 0);
+  assert.equal((await rpc(db, 'sync_get_checkpoints', { p_since: cursor1 })).rows.length, 0);
 
-  const putNewer = await rpc(db, 'sync_put_checkpoints', { p_secret: 'test-secret', p_rows: [{ ...cp, updatedAt: '2026-09-18T02:00:00Z', fields: { a: 2 } }] });
+  const putNewer = await rpc(db, 'sync_put_checkpoints', { p_rows: [{ ...cp, updatedAt: '2026-09-18T02:00:00Z', fields: { a: 2 } }] });
   assert.equal(putNewer.results[0].applied, true);
-  const pull3 = await rpc(db, 'sync_get_checkpoints', { p_secret: 'test-secret', p_since: cursor1 });
+  const pull3 = await rpc(db, 'sync_get_checkpoints', { p_since: cursor1 });
   assert.equal(pull3.rows.length, 1);
   assert.equal(pull3.rows[0].fields.a, 2);
 
-  await rpc(db, 'sync_delete_checkpoints', { p_secret: 'test-secret', p_keys: ['k1'], p_updated_at: '2026-09-18T03:00:00Z' });
-  assert.equal((await rpc(db, 'sync_get_checkpoints', { p_secret: 'test-secret', p_since: 0 })).rows[0].deleted, true);
+  await rpc(db, 'sync_delete_checkpoints', { p_keys: ['k1'], p_updated_at: '2026-09-18T03:00:00Z' });
+  assert.equal((await rpc(db, 'sync_get_checkpoints', { p_since: 0 })).rows[0].deleted, true);
 });
 
 test('images travel inline as base64 dataUrl inside the checkpoint row — no separate table/round trip', async () => {
   const db = await backend();
+  const uid = await createMember(db);
+  await signInAs(db, uid);
   const cp = {
     key: 'k2', date: '2026-09-18', shift: '1', section: 'FP', po: 'PO2', recipe: '', client: '', technician: 'QA',
     fields: {}, fieldNotes: {}, images: [{ name: 'a.jpg', dataUrl: 'data:image/jpeg;base64,AAAA', ts: 123 }], updatedAt: '2026-09-18T01:00:00Z',
   };
-  await rpc(db, 'sync_put_checkpoints', { p_secret: 'test-secret', p_rows: [cp] });
-  const got = (await rpc(db, 'sync_get_checkpoints', { p_secret: 'test-secret', p_since: 0 })).rows.find(r => r.key === 'k2');
+  await rpc(db, 'sync_put_checkpoints', { p_rows: [cp] });
+  const got = (await rpc(db, 'sync_get_checkpoints', { p_since: 0 })).rows.find(r => r.key === 'k2');
   assert.equal(got.images[0].dataUrl, 'data:image/jpeg;base64,AAAA');
 });
 
 test('meta: last-write-wins round trip', async () => {
   const db = await backend();
-  const put1 = await rpc(db, 'sync_put_meta', { p_secret: 'test-secret', p_items: { poList: { value: ['A', 'B'], updatedAt: '2026-09-18T01:00:00Z' } } });
+  const uid = await createMember(db);
+  await signInAs(db, uid);
+  const put1 = await rpc(db, 'sync_put_meta', { p_items: { poList: { value: ['A', 'B'], updatedAt: '2026-09-18T01:00:00Z' } } });
   assert.equal(put1.results.poList.applied, true);
-  assert.deepEqual((await rpc(db, 'sync_get_meta', { p_secret: 'test-secret' })).items.poList.value, ['A', 'B']);
+  assert.deepEqual((await rpc(db, 'sync_get_meta', {})).items.poList.value, ['A', 'B']);
 
-  const putStale = await rpc(db, 'sync_put_meta', { p_secret: 'test-secret', p_items: { poList: { value: ['STALE'], updatedAt: '2026-09-17T00:00:00Z' } } });
+  const putStale = await rpc(db, 'sync_put_meta', { p_items: { poList: { value: ['STALE'], updatedAt: '2026-09-17T00:00:00Z' } } });
   assert.equal(putStale.results.poList.applied, false);
-  assert.deepEqual((await rpc(db, 'sync_get_meta', { p_secret: 'test-secret' })).items.poList.value, ['A', 'B']);
+  assert.deepEqual((await rpc(db, 'sync_get_meta', {})).items.poList.value, ['A', 'B']);
 });
 
 test('logs: entries are recorded', async () => {
   const db = await backend();
-  await rpc(db, 'sync_post_logs', { p_secret: 'test-secret', p_entries: [{ ts: '2026-09-18T01:00:00Z', date: '2026-09-18', shift: '1', po: 'PO1', section: 'ROA', technician: 'QA', changes: [{ fieldId: 'x', from: 1, to: 2 }] }] });
+  const uid = await createMember(db);
+  await signInAs(db, uid);
+  await rpc(db, 'sync_post_logs', { p_entries: [{ ts: '2026-09-18T01:00:00Z', date: '2026-09-18', shift: '1', po: 'PO1', section: 'ROA', technician: 'QA', changes: [{ fieldId: 'x', from: 1, to: 2 }] }] });
   assert.equal((await db.query('select count(*)::int as n from logs')).rows[0].n, 1);
 });
 
 test('bulk push: every row gets a distinct seq (Postgres sequence, no shared per-batch counter, no ties to break)', async () => {
   const db = await backend();
+  const uid = await createMember(db);
+  await signInAs(db, uid);
   const rows = [];
   for (let i = 0; i < 250; i++) {
     rows.push({ key: 'k' + i, date: '2026-09-18', shift: '1', section: 'ROA', po: '', recipe: '', client: '', technician: '', fields: {}, fieldNotes: {}, images: [], updatedAt: '2026-09-18T00:00:00.' + String(i).padStart(4, '0') + 'Z' });
   }
-  await rpc(db, 'sync_put_checkpoints', { p_secret: 'test-secret', p_rows: rows });
-  const page = await rpc(db, 'sync_get_checkpoints', { p_secret: 'test-secret', p_since: 0 });
+  await rpc(db, 'sync_put_checkpoints', { p_rows: rows });
+  const page = await rpc(db, 'sync_get_checkpoints', { p_since: 0 });
   assert.equal(page.rows.length, 250);
   assert.equal(page.hasMore, false);
   const distinctSeq = await db.query('select count(distinct seq)::int as n from checkpoints');
   assert.equal(distinctSeq.rows[0].n, 250);
 });
 
-test('full app boots, syncs a checkpoint through Supabase RPC end-to-end, and does not requeue acknowledged records', async () => {
-  const db = await backend('test-secret');
+// Builds a stand-in for the `window.supabase` global (the supabase-js SDK,
+// which jsdom never actually loads — see the CDN <script> comment in
+// index.html) covering only what index.html's ACCESS CONTROL section calls:
+// auth.signInWithPassword/getSession/signOut, and just enough of the
+// Realtime channel API for startRealtime/stopRealtime/pingRealtimeChanged to
+// run without throwing. Real GoTrue (Supabase's Auth server) never runs
+// here — signInWithPassword instead checks an in-memory fixture and mints a
+// fake session whose "access_token" is simply the member's real user_id, so
+// the mocked fetch below can hand that straight to signInAs().
+function fakeSupabaseSdk(fixtureUsersByEmail) {
+  return {
+    createClient() {
+      let session = null;
+      return {
+        auth: {
+          async getSession() { return { data: { session } }; },
+          async signInWithPassword({ email, password }) {
+            const fx = fixtureUsersByEmail.get(String(email).toLowerCase());
+            if (!fx || fx.password !== password) return { error: { message: 'Invalid login credentials' } };
+            session = { access_token: fx.userId };
+            return { error: null };
+          },
+          async signOut() { session = null; return { error: null }; },
+        },
+        channel() {
+          const ch = { on() { return ch; }, subscribe() { return ch; }, send() {} };
+          return ch;
+        },
+        removeChannel() {},
+      };
+    },
+  };
+}
+
+test('full app boots, requires login once cloud sync is configured, then syncs a checkpoint through Supabase RPC end-to-end', async () => {
+  const db = await backend();
+  const uid = await createMember(db, { role: 'user', displayName: 'QA Một', username: 'qa1' });
+  const fixtures = new Map([[`qa1@x.users.internal`, { userId: uid, password: 'secret123' }]]);
+
   const errors = [];
   const vc = new VirtualConsole();
   vc.on('jsdomError', e => errors.push(e.message));
@@ -164,9 +269,13 @@ test('full app boots, syncs a checkpoint through Supabase RPC end-to-end, and do
       w.indexedDB = new IDBFactory();
       w.Headers = Headers;
       w.AbortSignal = AbortSignal;
+      w.supabase = fakeSupabaseSdk(fixtures);
       w.fetch = async (url, opts) => {
         const u = new URL(url);
         const fn = u.pathname.split('/rest/v1/rpc/')[1];
+        const authHeader = (opts && opts.headers && opts.headers['Authorization']) || '';
+        const token = authHeader.replace(/^Bearer\s+/, '');
+        await signInAs(db, token || null);
         const params = opts && opts.body ? JSON.parse(opts.body) : {};
         const result = await rpc(db, fn, params);
         return new Response(JSON.stringify(result), { status: 200 });
@@ -179,7 +288,21 @@ test('full app boots, syncs a checkpoint through Supabase RPC end-to-end, and do
     await new Promise(r => setTimeout(r, 50));
     assert.equal(w.document.querySelectorAll('.tab').length, 13);
 
-    w.eval("cloudCfg = {url:'https://x.supabase.co', anonKey:'anon-key', secret:'test-secret'}");
+    // https://<project-ref>.supabase.co — shadowAuthDomain() derives
+    // "x.users.internal" from the hostname's first label, matching the
+    // fixture email registered above.
+    await w.eval("(async () => { await saveCloudConfig('https://x.supabase.co', 'anon-key'); })()");
+    assert.equal(w.document.getElementById('loginGate').style.display, '', 'login gate must show once cloud sync is configured but no session exists yet');
+
+    const loginErr = await w.eval("(async () => await signInUser('qa1', 'wrong-password'))()");
+    assert.ok(loginErr, 'wrong password must be rejected');
+
+    const ok = await w.eval("(async () => await signInUser('qa1', 'secret123'))()");
+    assert.equal(ok, null);
+    assert.equal(w.document.getElementById('loginGate').style.display, 'none');
+    assert.equal(w.eval('currentMember.role'), 'user');
+    assert.equal(w.eval('currentMember.displayName'), 'QA Một');
+
     const cpKey = await w.eval(`(async () => {
       const cp = blankCheckpoint('2026-09-18','1','ROA','TEST','QA');
       cp.fields = {ROA_R5C: 100};
@@ -199,19 +322,19 @@ test('full app boots, syncs a checkpoint through Supabase RPC end-to-end, and do
     // same scope and can read them.
     assert.equal(w.eval('cloudStatus'), 'idle', w.eval('lastCloudError') || '');
 
-    const serverRows = await rpc(db, 'sync_get_checkpoints', { p_secret: 'test-secret', p_since: 0 });
+    await signInAs(db, uid);
+    const serverRows = await rpc(db, 'sync_get_checkpoints', { p_since: 0 });
     assert.equal(serverRows.rows.length, 1);
     assert.equal(serverRows.rows[0].key, cpKey);
     assert.equal(serverRows.rows[0].fields.ROA_R5C, 100);
 
-    // Realtime is a best-effort layer on top (see the REALTIME "WAKE UP"
-    // SIGNAL comment in index.html) — this test's jsdom window never loads
-    // the supabase-js CDN script, exactly like a page load with the CDN
-    // blocked or offline. None of these calls may throw, and no channel
-    // should end up "connected" without the SDK actually being present.
-    await w.eval(`(async () => { startRealtime(); pingRealtimeChanged(); stopRealtime(); })()`);
-    assert.equal(errors.length, 0, errors.join('\n'));
-    assert.equal(w.eval('realtimeChannel'), null);
+    // A disabled account must be kicked back to the login gate on its very
+    // next sync call, even mid-session (see onAccessRevoked in index.html).
+    await db.query('update members set disabled = true where user_id = $1', [uid]);
+    await w.eval('(async () => { await flushOutbox(); })()');
+    await new Promise(r => setTimeout(r, 50)); // onAccessRevoked() is fire-and-forget from cloudFetch — give it a tick to finish signOut()+showLoginGate()
+    assert.equal(w.document.getElementById('loginGate').style.display, '', 'a disabled account must be signed out back to the login gate');
+    assert.equal(w.eval('currentMember'), null);
   } finally {
     dom.window.close();
   }
