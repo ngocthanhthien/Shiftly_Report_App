@@ -1,9 +1,0 @@
-{
-  "name": "shiftly-report-app",
-  "main": "worker.js",
-  "account_id": "96bcf77a519793b49f2d4c1c041ef0fb",
-  "compatibility_date": "2026-09-13",
-  "build": {"command": "npm test && npm run build"},
-  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
-  "services": [{"binding":"SYNC", "service":"shiftly-report-sync"}]
-}
