@@ -74,16 +74,17 @@ Deploy lại bằng đúng lệnh ở bước 3 mỗi khi sửa
 
 ## 6. Cấu hình trong app
 
-Mở app (bản đã publish qua GitHub Pages, hoặc mở trực tiếp file) → tab
-**Cài đặt** → mục "☁️ Đồng bộ Supabase" → nhập:
-- **Supabase URL**: `https://<project-ref>.supabase.co`.
-- **Anon public key**: Project Settings → API → "anon public".
+Supabase URL và Anon public key của project đang dùng đã được đặt cứng sẵn
+trong `index.html` (hằng số `DEFAULT_SUPABASE_URL`/`DEFAULT_SUPABASE_ANON_KEY`
+ở đầu khối `CLOUD SYNC`) — an toàn vì anon key vốn được thiết kế để công
+khai (xem phần bên dưới). Nhờ vậy mở app lên là vào thẳng màn hình đăng
+nhập, không cần vào tab Cài đặt gõ tay 2 giá trị này nữa. Chỉ cần đăng nhập
+bằng tài khoản Admin vừa tạo ở bước 4 (hoặc 1 tài khoản Nhân viên do Admin
+tạo trong tab Cài đặt) — trên mọi thiết bị.
 
-Bấm "💾 Lưu cấu hình" → app chuyển sang màn hình đăng nhập → đăng nhập bằng
-tài khoản Admin vừa tạo ở bước 4 (hoặc 1 tài khoản Nhân viên do Admin tạo
-trong tab Cài đặt). Lặp lại đúng Supabase URL + Anon key này trên mọi thiết
-bị khác muốn dùng chung dữ liệu — mỗi thiết bị/mỗi người tự đăng nhập bằng
-tài khoản riêng của mình.
+Nếu sau này đổi sang project Supabase khác: sửa 2 hằng số đó trong
+`index.html`, hoặc tạm thời trỏ 1 thiết bị sang project khác qua tab Cài đặt
+→ mục "☁️ Đồng bộ Supabase" (vẫn nhập/sửa được thủ công ở đó).
 
 ## Vì sao an toàn dù mã nguồn public trên GitHub
 

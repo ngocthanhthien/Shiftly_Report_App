@@ -864,7 +864,14 @@ function fmtDateTimeVN(ms){
    both here and server-side, since 2 devices only truly collide when they
    edit the exact same checkpoint (same Date+Shift+Section+PO) — everything
    else is naturally partitioned by key, so this stays simple by design. */
-let cloudCfg = { url:'', anonKey:'' };
+// Đặt cứng mặc định cho mọi thiết bị mở app — anon public key được thiết kế
+// để công khai (xem "Vì sao an toàn" trong supabase/README.md), nên không
+// cần mỗi thiết bị tự gõ tay 2 giá trị này ở tab Cài đặt nữa; quyền truy
+// cập thật 100% vẫn do đăng nhập kiểm soát (xem ACCESS CONTROL bên dưới).
+// Tab Cài đặt vẫn cho sửa nếu sau này cần trỏ sang project Supabase khác.
+const DEFAULT_SUPABASE_URL = 'https://mpdcpfkvkncugruzzjmr.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wZGNwZmt2a25jdWdydXp6am1yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk3MDIyNzUsImV4cCI6MjEwNTI3ODI3NX0.RdU6r91egXItxE1j0O1Z6zfbeBRql5HMWCGCRiSlFT0';
+let cloudCfg = { url: DEFAULT_SUPABASE_URL, anonKey: DEFAULT_SUPABASE_ANON_KEY };
 let cloudStatus = 'unconfigured'; // unconfigured | idle | syncing | offline | error
 let cloudLastSyncAt = null;
 let syncCursors = { checkpoints:'0' }; // integer seq cursor (server write-order, not a timestamp — see supabase/schema.sql)
@@ -898,7 +905,10 @@ async function saveCloudConfig(url, anonKey){
 async function clearCloudConfig(){
   if(!confirm('Ngắt kết nối đồng bộ Supabase? Dữ liệu vẫn an toàn trong máy này — chỉ là app sẽ ngừng đẩy/kéo dữ liệu online cho tới khi bạn cấu hình lại.')) return;
   cloudCfg = {url:'', anonKey:''};
-  await idbDelete('meta','cloudCfg');
+  // Lưu (không xoá) bản ghi rỗng — có DEFAULT_SUPABASE_URL/ANON_KEY hardcode
+  // ở trên, nên nếu xoá hẳn bản ghi, lần mở app sau sẽ lại tự dùng mặc định
+  // (loadCloudState() chỉ ghi đè cloudCfg khi tìm thấy bản ghi đã lưu).
+  await idbPut('meta', {k:'cloudCfg', value: cloudCfg});
   stopRealtime();
   await signOutCloud(true);
   toast('Đã ngắt kết nối đồng bộ');
@@ -1379,9 +1389,9 @@ async function verifyAndEnter(){
 // Supabase URL/Anon key in Cài đặt — decides whether to show the app or the
 // login gate.
 async function checkAccessGate(){
-  if(!cloudConfigured()){ showApp(); return; }
+  if(!cloudConfigured()){ showApp(); renderAll(); return; }
   const sb = ensureSupabaseClient();
-  if(!sb){ showApp(); return; } // supabase-js failed to load — fail open to the offline-first app rather than lock it
+  if(!sb){ showApp(); renderAll(); return; } // supabase-js failed to load — fail open to the offline-first app rather than lock it
   const {data} = await sb.auth.getSession();
   if(data && data.session){ await verifyAndEnter(); }
   else showLoginGate();
