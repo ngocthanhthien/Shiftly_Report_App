@@ -1,30 +1,68 @@
 # Shiftly Report
 
-Production UI: https://shiftly-report-app.dangthanhbinh53.workers.dev/
+QC shift-report app for ILD Coffee Vietnam's freeze-dried coffee line —
+single-file offline-first PWA, with optional multi-device sync.
 
-The frontend requires HTTP Basic login before serving any route or static asset. Credentials are stored as `APP_USERNAME` and `APP_PASSWORD` secrets on `shiftly-report-app`. Change them through Cloudflare Secrets; never put their values in this repository. The browser displays its native username/password prompt. The backend still requires its separate `SYNC_SECRET`; existing legacy image links and backend clients retain their original behavior. Previously downloaded offline HTML and already-open pages are not remotely locked by this gateway.
+- **Offline app**: `Shiftly_Report_App.html` — fully offline, no network
+  dependency at all. Meant to run locally on the tablets at the plant.
+- **Online app**: [`index.html`](index.html) — identical UI/business logic,
+  plus optional background sync so multiple tablets/PCs can share one data
+  set. Hosted as a static site (GitHub Pages); data lives in a Supabase
+  (Postgres) project — see [`supabase/README.md`](supabase/README.md) for
+  the one-time setup (paste one SQL file into the Supabase dashboard, no
+  CLI needed).
 
-The 13-tab UI is unchanged. The production site serves its API at `/api/*` and images at `/images/*` through a Cloudflare service binding to `shiftly-report-sync`. The existing sync Worker remains available for older devices and exported image URLs, using its existing SYNC_SECRET. No secret is committed to this repository.
+The 13-tab UI (Nhập liệu, Dữ liệu, Truy xuất, Danh sách PO/Recipe/Client,
+Data Log, Báo cáo, Thống kê, Specs, Xuất nhập dữ liệu, Cài đặt, Hướng dẫn)
+is the same in both builds.
+
+## Architecture (online build)
+
+There is no custom backend server. `index.html` talks directly to
+Supabase's PostgREST RPC endpoint using the public `anon` key; every real
+table (`checkpoints`, `meta`, `logs`) has Row Level Security enabled with
+**no policies**, so direct REST access is denied outright. The only way in
+is through a handful of `sync_*` SQL functions (SECURITY DEFINER) that each
+check a shared secret argument themselves — see
+[`supabase/schema.sql`](supabase/schema.sql). That secret is set once via
+`select set_sync_secret('...')` in the Supabase SQL Editor and is never
+committed to this repo; each device enters it in the app's Cài đặt tab.
+
+IndexedDB remains the source of truth on every device (offline-first,
+unchanged from the original app) — writes go into a local `outbox` and get
+pushed to Supabase whenever the device is online, with an incremental
+`seq`-based pull for whatever other devices pushed. See the `CLOUD SYNC`
+section at the top of `index.html` for the full design notes, including why
+the sync cursor is a server-assigned sequence rather than a timestamp
+(client clocks drift — a phone with the wrong time must never cause another
+device to silently miss data).
+
+A Supabase Realtime Broadcast channel (`shiftly-changes`) pings every
+connected device the instant one of them pushes a change, so sync is
+effectively immediate when the WebSocket connects; ~15-20s polling (already
+resilient to backgrounded tabs and reconnects) is the fallback when it
+doesn't. Broadcast carries no data — actual reads still only ever happen
+through the secret-checked RPCs above, so this adds no new access path.
 
 ## Deploy
 
-Node.js 24+, `npm ci`, then `npm run deploy`.
-The `npm run deploy` command runs regression tests, deploys the compatibility backend, then deploys the frontend. The frontend build only tests and generates `public/index.html`; it never deploys recursively. Cloudflare Workers Builds uses `npm run deploy` as its deploy command. Both Workers now live in one repository/release workflow.
+1. Push this repo to GitHub, enable **GitHub Pages** (Settings → Pages →
+   deploy from the `main` branch, root folder). `index.html` is served at
+   the resulting `https://<user>.github.io/<repo>/` URL automatically on
+   every push — no build step.
+2. Set up the Supabase project once — see
+   [`supabase/README.md`](supabase/README.md).
+3. Open the published URL → tab Cài đặt → enter the Supabase URL, anon key,
+   and sync password from step 2.
 
-Existing devices on the production site automatically use same-origin API requests, preserving their configured password. Other sites or custom backend URLs are preserved. D1 and R2 bindings reuse the existing resources; no database migration or destructive reset is needed.
+## Tests
 
-## Sync behavior
+```bash
+npm ci
+npm test
+```
 
-- Local changes queue immediately; latest checkpoint/meta replaces earlier pending versions. Logs remain separate.
-- Legacy outbox entries compact on startup in one IndexedDB transaction.
-- Foreground idle polling grows from 20 to 120 seconds. Network errors back off to 300 seconds. Hidden tabs stop background polling. Saving still schedules a push within 800 ms.
-- API requests have a 30-second timeout and send the secret in a header.
-- Checkpoint upload batches contain at most 10 records.
-- Server sequence assignment and checkpoint writes share an atomic D1 batch. Pulls advance only through returned rows, including legacy ties, and follow pagination.
-- Background sync does not rebuild in-progress forms. Navigate to a tab to render refreshed cache contents.
-
-## Rollback
-
-Frontend previous production version: `9b3cc14e` (Git commit `0f5acb5c83d26d12c1efe74a577e8157485e12c9`). Backend previous version: `f425a6a2-fd84-4c9e-831a-d73ceb86e360`. Roll back code through Cloudflare Deployments if needed. Do not roll back the database for a code-only issue; production writes may have occurred since backup.
-
-The offline-only HTML is maintained outside this repository and is unaffected by online storage changes.
+Runs against a real embedded Postgres (`@electric-sql/pglite`) executing
+the actual `supabase/schema.sql` — not a hand-written mirror — plus a full
+jsdom boot of `index.html` that exercises the real sync code path end to
+end. See `tests/`.
