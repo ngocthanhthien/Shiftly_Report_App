@@ -59,8 +59,8 @@ async function rpc(db, fn, params) {
     sync_whoami: ['select sync_whoami() as result', []],
     sync_get_checkpoints: ['select sync_get_checkpoints($1) as result', [p.p_since ?? 0]],
     sync_put_checkpoints: ['select sync_put_checkpoints($1::jsonb) as result', [JSON.stringify(p.p_rows)]],
-    sync_delete_checkpoints: ['select sync_delete_checkpoints($1,$2) as result', [p.p_keys, p.p_updated_at]],
-    sync_get_meta: ['select sync_get_meta() as result', []],
+    sync_delete_checkpoints: ['select sync_delete_checkpoints($1::jsonb) as result', [JSON.stringify(p.p_deletes)]],
+    sync_get_meta: ['select sync_get_meta($1) as result', [p.p_since ?? null]],
     sync_put_meta: ['select sync_put_meta($1::jsonb) as result', [JSON.stringify(p.p_items)]],
     sync_post_logs: ['select sync_post_logs($1::jsonb) as result', [JSON.stringify(p.p_entries)]],
   }[fn];
@@ -79,7 +79,7 @@ test('every sync_* function rejects an unauthenticated caller with {error:"unaut
   assert.equal((await rpc(db, 'sync_whoami', {})).error, 'unauthorized');
   assert.equal((await rpc(db, 'sync_get_checkpoints', {})).error, 'unauthorized');
   assert.equal((await rpc(db, 'sync_put_checkpoints', { p_rows: [] })).error, 'unauthorized');
-  assert.equal((await rpc(db, 'sync_delete_checkpoints', { p_keys: ['x'], p_updated_at: '2026-01-01' })).error, 'unauthorized');
+  assert.equal((await rpc(db, 'sync_delete_checkpoints', { p_deletes: [{ key: 'x', updatedAt: '2026-01-01' }] })).error, 'unauthorized');
   assert.equal((await rpc(db, 'sync_get_meta', {})).error, 'unauthorized');
   assert.equal((await rpc(db, 'sync_put_meta', { p_items: {} })).error, 'unauthorized');
   assert.equal((await rpc(db, 'sync_post_logs', { p_entries: [] })).error, 'unauthorized');
@@ -122,7 +122,7 @@ test('a supervisor can read everything but every write RPC rejects with {error:"
   // Writes: every one of them, rejected — never silently a no-op, always this exact error shape.
   const cp = { key: 'sup1', date: '2026-09-19', shift: '1', section: 'ROA', po: '', recipe: '', client: '', technician: '', fields: {}, fieldNotes: {}, images: [], updatedAt: '2026-09-19T00:00:00Z' };
   assert.equal((await rpc(db, 'sync_put_checkpoints', { p_rows: [cp] })).error, 'forbidden_role');
-  assert.equal((await rpc(db, 'sync_delete_checkpoints', { p_keys: ['sup1'], p_updated_at: '2026-09-19T00:00:01Z' })).error, 'forbidden_role');
+  assert.equal((await rpc(db, 'sync_delete_checkpoints', { p_deletes: [{ key: 'sup1', updatedAt: '2026-09-19T00:00:01Z' }] })).error, 'forbidden_role');
   assert.equal((await rpc(db, 'sync_put_meta', { p_items: { poList: { value: ['X'], updatedAt: '2026-09-19T00:00:00Z' } } })).error, 'forbidden_role');
   assert.equal((await rpc(db, 'sync_post_logs', { p_entries: [{ ts: '2026-09-19T00:00:00Z' }] })).error, 'forbidden_role');
 
@@ -201,8 +201,29 @@ test('checkpoints: push, pull, stale update rejected, cursor advances, delete to
   assert.equal(pull3.rows.length, 1);
   assert.equal(pull3.rows[0].fields.a, 2);
 
-  await rpc(db, 'sync_delete_checkpoints', { p_keys: ['k1'], p_updated_at: '2026-09-18T03:00:00Z' });
+  await rpc(db, 'sync_delete_checkpoints', { p_deletes: [{ key: 'k1', updatedAt: '2026-09-18T03:00:00Z' }] });
   assert.equal((await rpc(db, 'sync_get_checkpoints', { p_since: 0 })).rows[0].deleted, true);
+});
+
+test('sync_delete_checkpoints: 1 call batches multiple keys, each keeping its own updatedAt for independent last-write-wins', async () => {
+  const db = await backend();
+  const uid = await createMember(db);
+  await signInAs(db, uid);
+  const rows = ['b1', 'b2'].map(k => ({ key: k, date: '2026-09-19', shift: '1', section: 'ROA', po: '', recipe: '', client: '', technician: '', fields: {}, fieldNotes: {}, images: [], updatedAt: '2026-09-19T01:00:00Z' }));
+  await rpc(db, 'sync_put_checkpoints', { p_rows: rows });
+
+  // b1: a genuinely newer delete (must apply). b2: an OLDER "delete" than
+  // its current updated_at (must be rejected, same last-write-wins rule as
+  // sync_put_checkpoints) — both in the SAME batched call.
+  await rpc(db, 'sync_delete_checkpoints', {
+    p_deletes: [
+      { key: 'b1', updatedAt: '2026-09-19T02:00:00Z' },
+      { key: 'b2', updatedAt: '2026-09-19T00:30:00Z' },
+    ],
+  });
+  const got = (await rpc(db, 'sync_get_checkpoints', { p_since: 0 })).rows;
+  assert.equal(got.find(r => r.key === 'b1').deleted, true, 'a genuinely newer delete must apply');
+  assert.equal(got.find(r => r.key === 'b2').deleted, false, 'a stale delete (older than current updatedAt) must be rejected, even inside a batch');
 });
 
 test('images travel inline as base64 dataUrl inside the checkpoint row — no separate table/round trip', async () => {
@@ -256,6 +277,27 @@ test('meta: last-write-wins round trip', async () => {
   const putStale = await rpc(db, 'sync_put_meta', { p_items: { poList: { value: ['STALE'], updatedAt: '2026-09-17T00:00:00Z' } } });
   assert.equal(putStale.results.poList.applied, false);
   assert.deepEqual((await rpc(db, 'sync_get_meta', {})).items.poList.value, ['A', 'B']);
+});
+
+test('sync_get_meta: p_since cursor avoids re-downloading unchanged keys on every poll (egress optimization)', async () => {
+  const db = await backend();
+  const uid = await createMember(db);
+  await signInAs(db, uid);
+  await rpc(db, 'sync_put_meta', { p_items: { poList: { value: ['A'], updatedAt: '2026-09-19T01:00:00Z' } } });
+  const first = await rpc(db, 'sync_get_meta', {});
+  assert.deepEqual(Object.keys(first.items), ['poList']);
+  assert.ok(first.cursor, 'first call (no since) must return a cursor');
+
+  // Polling again with that cursor and nothing changed must come back empty —
+  // this is the whole point of the fix (no more re-downloading everything).
+  const unchanged = await rpc(db, 'sync_get_meta', { p_since: first.cursor });
+  assert.deepEqual(unchanged.items, {}, 'nothing changed since the cursor -> empty payload');
+  assert.equal(unchanged.cursor, first.cursor, 'cursor must be carried forward unchanged when nothing new came back');
+
+  // A real change after that cursor must show up on the next poll, and ONLY that key.
+  await rpc(db, 'sync_put_meta', { p_items: { recipes: { value: ['300'], updatedAt: '2026-09-19T02:00:00Z' } } });
+  const next = await rpc(db, 'sync_get_meta', { p_since: first.cursor });
+  assert.deepEqual(Object.keys(next.items), ['recipes'], 'only the key changed after the cursor must come back, not poList again');
 });
 
 test('logs: entries are recorded', async () => {

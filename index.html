@@ -1193,7 +1193,11 @@ async function pullFromCloud(){
   hasMore = !!(cpRes && cpRes.hasMore);
   if(!cpRes) break;
   }
-  const metaRes = await cloudFetch('sync_get_meta', {});
+  // p_since: cursor riêng cho meta (giống hệt nguyên lý seq của checkpoints)
+  // — không có gì đổi thì server trả về {} gần như ngay lập tức thay vì
+  // nguyên khối SCHEMA/PO-Recipe-Client-list mỗi lần poll (xem audit egress
+  // 2026-09-19).
+  const metaRes = await cloudFetch('sync_get_meta', {p_since: syncCursors.meta || null});
   if(metaRes && metaRes.items){
     for(const key of Object.keys(metaRes.items)){
       const incoming = metaRes.items[key];
@@ -1205,6 +1209,7 @@ async function pullFromCloud(){
       }
     }
     await idbPut('meta', {k:'metaAppliedAt', value: metaAppliedAt});
+    if(metaRes.cursor!=null){ syncCursors.meta = metaRes.cursor; await idbPut('meta', {k:'syncCursors', value: syncCursors}); }
   }
   if(changed){ await refreshCache(); } // Refresh views when selected, preserving unsaved inputs.
   }finally{ pulling = false; }
@@ -1259,11 +1264,12 @@ async function flushOutbox(){
     if(delItems.length){
       const byKeyD = {};
       delItems.forEach(i=>{ const d=i.payload; if(!byKeyD[d.key] || d.updatedAt>byKeyD[d.key].updatedAt) byKeyD[d.key]=d; });
-      for(const d of Object.values(byKeyD)){
-        const res=await cloudFetch('sync_delete_checkpoints', {p_keys:[d.key], p_updated_at:d.updatedAt});
-        if(res) delItems.filter(i=>i.payload.key===d.key).forEach(i=>doneIds.push(i.id));
-        else break;
-      }
+      // 1 lệnh gọi cho TẤT CẢ key cần xoá (mỗi key giữ đúng updatedAt riêng)
+      // thay vì lặp gọi từng key một — tránh N+1 round-trip khi xoá nhiều ca
+      // cùng lúc (xem audit egress 2026-09-19).
+      const deletes = Object.values(byKeyD).map(d=>({key:d.key, updatedAt:d.updatedAt}));
+      const res = await cloudFetch('sync_delete_checkpoints', {p_deletes: deletes});
+      if(res) delItems.forEach(i=>doneIds.push(i.id));
     }
 
     const metaItems = items.filter(i=>i.kind==='meta');
@@ -1316,6 +1322,7 @@ function resyncFromScratch(){
   if(!cloudConfigured()){ toast('Chưa cấu hình đồng bộ Supabase'); return; }
   toast('Đang đồng bộ lại toàn bộ từ đầu…');
   syncCursors.checkpoints = '0';
+  syncCursors.meta = null;
   metaAppliedAt = {};
   idbPut('meta', {k:'syncCursors', value: syncCursors});
   idbPut('meta', {k:'metaAppliedAt', value: metaAppliedAt});

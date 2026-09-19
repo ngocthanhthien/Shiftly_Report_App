@@ -220,18 +220,27 @@ begin
 end;
 $$;
 
-drop function if exists sync_delete_checkpoints(text, text[], text);
-create or replace function sync_delete_checkpoints(p_keys text[], p_updated_at text)
+-- p_deletes: [{"key":..., "updatedAt":...}, ...] — 1 lệnh gọi xoá NHIỀU
+-- checkpoint cùng lúc (mỗi key giữ đúng updatedAt riêng của nó, quyết định
+-- last-write-wins độc lập cho từng dòng) thay vì client tự lặp gọi hàm này
+-- 1 lần/key (N+1 round-trip không cần thiết — xem audit egress 2026-09-19).
+drop function if exists sync_delete_checkpoints(text[], text);
+create or replace function sync_delete_checkpoints(p_deletes jsonb)
 returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
+  v_item jsonb;
   v_key text;
+  v_updated_at text;
 begin
   if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
   if not is_writer_member() then return jsonb_build_object('error', 'forbidden_role'); end if;
-  foreach v_key in array p_keys loop
+  for v_item in select * from jsonb_array_elements(p_deletes) loop
+    v_key := v_item->>'key';
+    v_updated_at := v_item->>'updatedAt';
+    if v_key is null or v_updated_at is null then continue; end if;
     insert into checkpoints (key, date, shift, section, po, recipe, client, technician, fields, field_notes, images, updated_at, deleted, seq)
-    values (v_key, '', '', '', '', '', '', '', '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, p_updated_at, true, nextval('checkpoints_seq'))
+    values (v_key, '', '', '', '', '', '', '', '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, v_updated_at, true, nextval('checkpoints_seq'))
     on conflict (key) do update set deleted = true, updated_at = excluded.updated_at, seq = excluded.seq
     where excluded.updated_at > checkpoints.updated_at;
   end loop;
@@ -241,15 +250,23 @@ $$;
 
 -- ===================== Meta (Specs/PO list/Recipe list/Client list/Technicians/PO closures) =====================
 
-drop function if exists sync_get_meta(text);
-create or replace function sync_get_meta() returns jsonb
+-- p_since (tuỳ chọn): chỉ trả về key nào đổi SAU thời điểm này — cùng
+-- nguyên lý cursor như sync_get_checkpoints (seq), giúp mỗi lần poll không
+-- phải tải lại nguyên khối meta (SCHEMA + PO/Recipe/Client list +
+-- Technicians + poClosures) nếu không có gì thay đổi (xem audit egress
+-- 2026-09-19 — trước đây hàm này luôn trả về TOÀN BỘ bảng `meta` mỗi lần
+-- gọi, dù client poll mỗi ~8-20 giây/thiết bị).
+drop function if exists sync_get_meta();
+create or replace function sync_get_meta(p_since text default null) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare v_items jsonb;
+declare v_items jsonb; v_cursor text;
 begin
   if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
-  select coalesce(jsonb_object_agg(k, jsonb_build_object('value', value, 'updatedAt', updated_at)), '{}'::jsonb)
-    into v_items from meta;
-  return jsonb_build_object('items', v_items);
+  select coalesce(jsonb_object_agg(k, jsonb_build_object('value', value, 'updatedAt', updated_at)), '{}'::jsonb),
+         max(updated_at)
+    into v_items, v_cursor
+  from meta where p_since is null or updated_at > p_since;
+  return jsonb_build_object('items', v_items, 'cursor', coalesce(v_cursor, p_since));
 end;
 $$;
 
@@ -352,7 +369,7 @@ drop table if exists app_secret;
 
 grant execute on function sync_get_checkpoints(bigint) to authenticated;
 grant execute on function sync_put_checkpoints(jsonb) to authenticated;
-grant execute on function sync_delete_checkpoints(text[], text) to authenticated;
-grant execute on function sync_get_meta() to authenticated;
+grant execute on function sync_delete_checkpoints(jsonb) to authenticated;
+grant execute on function sync_get_meta(text) to authenticated;
 grant execute on function sync_put_meta(jsonb) to authenticated;
 grant execute on function sync_post_logs(jsonb) to authenticated;
