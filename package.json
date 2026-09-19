@@ -8,6 +8,7 @@
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
     "fake-indexeddb": "6.2.4",
-    "jsdom": "^30.0.1"
+    "jsdom": "^30.0.1",
+    "supabase": "^2.117.0"
   }
 }
