@@ -2240,25 +2240,6 @@ function renderTable(){
     await exportFileToPreferredLocation(file, {title:'Shiftly Short CSV', fallbackMsg:`Đã tải file Short CSV (${subset.length} ca) về máy`});
   });
 
-  const qmsCard = el('div',{class:'card'},[
-    el('div',{class:'card-h'},['Xuất theo mẫu Process/QMS', el('div',{class:'rule'})]),
-    el('p',{class:'sub', style:'margin:0 0 10px;'},['Xuất Excel/PDF đúng bố cục theo mẫu: nhóm theo Công đoạn, chỉ gồm các cột QMS đã đánh dấu trong tab Specs, ngày dạng dd-mmm-yyyy, không kèm ảnh. Tick chọn vài ca ở bảng dưới để chỉ xuất phần đó, hoặc để trống để xuất toàn bộ. Muốn thêm/bớt cột QMS, vào tab Specs → sửa chỉ tiêu → "Xuất trong báo cáo QMS".']),
-    el('div',{class:'row'},[
-      el('button',{class:'btn teal sm', id:'btnExportQmsXlsx'},['📊 Xuất Excel theo mẫu']),
-      el('button',{class:'btn ghost sm', id:'btnExportQmsPdf'},['📄 Xuất PDF theo mẫu']),
-    ]),
-  ]);
-  root.appendChild(qmsCard);
-  function qmsExportSubset(){ return selectedKeys.size ? allCheckpoints.filter(r=>selectedKeys.has(r.key)) : allCheckpoints; }
-  qs('#btnExportQmsXlsx', qmsCard).addEventListener('click', async ()=>{
-    const subset = qmsExportSubset();
-    const file = new File([buildProcessQmsExcelXml(subset)], `Shiftly_ProcessQMS_${todayStr()}.xls`, {type:'application/vnd.ms-excel'});
-    await exportFileToPreferredLocation(file, {title:'Shiftly Process/QMS', fallbackMsg:`Đã tải Excel theo mẫu (${subset.length} điểm kiểm tra) về máy`});
-  });
-  qs('#btnExportQmsPdf', qmsCard).addEventListener('click', ()=>{
-    const subset = qmsExportSubset();
-    printReport(buildProcessQmsPrintHtml(subset), `Shiftly_ProcessQMS_${todayStr()}`);
-  });
 
   const wrap = el('div',{class:'card tablescroll'},[]);
   const table = el('table',{class:'datatable'},[]);
@@ -3588,6 +3569,8 @@ function renderReport(){
         el('option',{value:'pdf'},['📄 Xuất PDF (in trang)']),
         el('option',{value:'html'},['🌐 Xuất báo cáo HTML đầy đủ (đẹp, có ảnh)']),
         el('option',{value:'multi'},['🖼️ Xuất nhiều ảnh (mỗi công đoạn)']),
+        el('option',{value:'qms-xlsx'},['📊 Xuất Excel theo mẫu (Process/QMS)']),
+        el('option',{value:'qms-pdf'},['📄 Xuất PDF theo mẫu (Process/QMS)']),
       ]);
       sel.addEventListener('change', async ()=>{
         if(sel.value==='pdf'){
@@ -3625,6 +3608,18 @@ function renderReport(){
               if(files.length) await robustShareMultipleOrDownload(files, {title:'Shiftly Report', fallbackMsg:`Đã tải ${files.length} ảnh về máy`});
             }
           }
+        } else if(sel.value==='qms-xlsx' || sel.value==='qms-pdf'){
+          if(!currentGen){ toast('Chưa có báo cáo để xuất'); }
+          else {
+            const subset = currentQmsSubset();
+            if(subset.length===0){ toast('Không có điểm kiểm tra nào khớp Ngày/Ca/Công đoạn đã chọn'); }
+            else if(sel.value==='qms-xlsx'){
+              const file = new File([buildProcessQmsExcelXml(subset)], `Shiftly_ProcessQMS_${todayStr()}.xls`, {type:'application/vnd.ms-excel'});
+              await exportFileToPreferredLocation(file, {title:'Shiftly Process/QMS', fallbackMsg:`Đã tải Excel theo mẫu (${subset.length} điểm kiểm tra) về máy`});
+            } else {
+              printReport(buildProcessQmsPrintHtml(subset), `Shiftly_ProcessQMS_${todayStr()}`);
+            }
+          }
         }
         sel.value='';
       });
@@ -3636,6 +3631,19 @@ function renderReport(){
   const [pngBtn, shareBtn] = qsa('button', btnRow);
 
   let currentGen = null; // () => {svg,width,height,filename,printHtml,checkpointList,headerTitle}
+  // Scope for "Xuất Excel/PDF theo mẫu (Process/QMS)": luôn dựa trên đúng
+  // Ngày+Ca (hoặc PO) đang chọn/xem ở trên — KHÔNG bao giờ xuất toàn bộ dữ
+  // liệu — và ở chế độ Theo ca, còn lọc thêm theo processFilterSel nếu có
+  // chọn 1 công đoạn cụ thể (mặc định "Tất cả công đoạn" trong ca đó).
+  let processFilterSel = null;
+  function currentQmsSubset(){
+    if(!currentGen) return [];
+    let list = (currentGen().checkpointList || []).filter(cp=>cp.section!=='META');
+    if(processFilterSel && processFilterSel.value && processFilterSel.value!=='ALL'){
+      list = list.filter(cp=>cp.section===processFilterSel.value);
+    }
+    return list;
+  }
 
   if(mode==='shift'){
     const shiftKeys = [...new Set(allCheckpoints.map(r=>r.date+'|'+r.shift))].sort().reverse();
@@ -3645,6 +3653,9 @@ function renderReport(){
       sel.appendChild(el('option',{value:String(i)},[`${fmtDateVN(d)} — Ca ${s}`]));
     });
     pickerBox.appendChild(sel);
+    processFilterSel = el('select',{class:'inp', style:'margin-top:8px;'},[el('option',{value:'ALL'},['Tất cả công đoạn (dùng cho Xuất theo mẫu)'])]);
+    SCHEMA.filter(s=>s.id!=='META').forEach(s=>processFilterSel.appendChild(el('option',{value:s.id},[s.name])));
+    pickerBox.appendChild(processFilterSel);
     async function draw(){
       const [d,s] = shiftKeys[parseInt(sel.value||'0',10)].split('|');
       previewWrap.innerHTML = '<div class="sub" style="padding:16px;margin:0;">Đang tạo báo cáo…</div>';
@@ -4890,7 +4901,8 @@ function renderGuide(){
     <h4>33. Item Code</h4>
     <p>Mỗi điểm kiểm tra giờ có thêm ô <b>Item Code</b> (cạnh Mã PO khi thêm/sửa) — nhập tay, không có danh sách gợi ý sẵn (khác PO). Hiện ở bảng Dữ liệu, trang Chi tiết, danh sách điểm kiểm tra trong Nhập liệu, và các file CSV/Excel xuất ra (cột "ItemCode", ngay sau cột PO) — kể cả file sao lưu/phục hồi JSON.</p>
     <h4>34. Xuất theo mẫu Process/QMS (Excel/PDF)</h4>
-    <p>Ở tab <b>Dữ liệu</b>, mục "Xuất theo mẫu Process/QMS" tạo file Excel hoặc PDF theo đúng bố cục mẫu: mỗi Công đoạn 1 khối riêng (Date, Shift, Process, Item Code, PO, ISSUES/Abnormal, ACTION + các cột chỉ tiêu QMS của công đoạn đó), ngày theo định dạng <code>d-mmm-yyyy</code> (VD: 19-Sep-2026), <b>không kèm ảnh đính kèm</b>. Tick chọn vài ca ở bảng bên dưới để chỉ xuất phần đó, để trống để xuất toàn bộ. Cột ISSUES/Abnormal tự lấy từ ô "Issue/ Abnormal" sẵn có của từng công đoạn. Cột ACTION chỉ có dữ liệu nếu công đoạn đó có 1 chỉ tiêu tên "Action" (thêm qua tab Specs, kiểu "Ghi chú", nếu cần). <b>Các cột QMS phải tự đánh dấu trước</b> ở tab Specs → sửa từng chỉ tiêu → tick "Xuất trong báo cáo QMS" (có thể đặt tên cột ngắn gọn riêng, VD chỉ tiêu "Color: 45 ± 2" đặt tên cột là "Color") — app không tự đoán chỉ tiêu nào là QMS vì tên gọi khác nhau tuỳ nhà máy.</p>
+    <p>Ở tab <b>Báo cáo</b>, chế độ "📋 Theo ca": chọn đúng <b>Ngày + Ca</b> ở ô trên cùng (giống hệt khi xem báo cáo ảnh bình thường), rồi chọn thêm <b>Công đoạn</b> ở ô ngay bên dưới (mặc định "Tất cả công đoạn trong ca đó", hoặc chọn đúng 1 công đoạn cụ thể nếu chỉ cần xuất riêng công đoạn đó) → mở "Định dạng khác..." → chọn <b>"📊 Xuất Excel theo mẫu (Process/QMS)"</b> hoặc <b>"📄 Xuất PDF theo mẫu (Process/QMS)"</b>. Luôn xuất đúng phạm vi Ngày/Ca/Công đoạn đã chọn — không có lựa chọn "xuất toàn bộ dữ liệu" ở tính năng này. Ở chế độ "🔎 Theo PO", 2 mục này xuất đúng các điểm kiểm tra khớp PO đang tìm (không cần chọn thêm Công đoạn).</p>
+    <p>File xuất ra đúng bố cục mẫu: mỗi Công đoạn 1 khối riêng (Date, Shift, Process, Item Code, PO, ISSUES/Abnormal, ACTION + các cột chỉ tiêu QMS của công đoạn đó), ngày theo định dạng <code>d-mmm-yyyy</code> (VD: 19-Sep-2026), <b>không kèm ảnh đính kèm</b>. Cột ISSUES/Abnormal tự lấy từ ô "Issue/ Abnormal" sẵn có của từng công đoạn. Cột ACTION chỉ có dữ liệu nếu công đoạn đó có 1 chỉ tiêu tên "Action" (thêm qua tab Specs, kiểu "Ghi chú", nếu cần). <b>Các cột QMS phải tự đánh dấu trước</b> ở tab Specs → sửa từng chỉ tiêu → tick "Xuất trong báo cáo QMS" (có thể đặt tên cột ngắn gọn riêng, VD chỉ tiêu "Color: 45 ± 2" đặt tên cột là "Color") — app không tự đoán chỉ tiêu nào là QMS vì tên gọi khác nhau tuỳ nhà máy.</p>
     <h4>35. Thư mục lưu xuất tự động</h4>
     <p>Ở tab Cài đặt, mục "📁 Thư mục lưu xuất tự động" cho chọn 1 thư mục MỘT LẦN — từ đó mọi lần xuất Excel/CSV/ảnh/báo cáo HTML (kể cả mục 34 ở trên) tự động lưu thẳng vào thư mục đó thay vì hỏi lại mỗi lần. Chỉ hoạt động trên <b>Chrome/Edge trên máy tính</b> (Windows/Mac/Linux) — không có trên điện thoại/máy tính bảng (kể cả Chrome Android) hoặc Safari/Firefox, những nơi đó vẫn dùng hộp thoại tải/chia sẻ bình thường, không có gì bị hỏng. Riêng xuất PDF (qua hộp thoại In của trình duyệt) không tự động hoá được bằng cách này — trình duyệt luôn để bạn tự chọn nơi lưu trong chính hộp thoại In đó.</p>
   </div>`;

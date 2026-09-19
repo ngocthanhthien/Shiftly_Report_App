@@ -101,6 +101,36 @@ test('buildProcessQmsPrintHtml: same grouping/columns as the Excel builder, rend
   } finally { dom.window.close(); }
 });
 
+test('Báo cáo tab: template export is scoped to the selected Date+Shift+Process, never the whole dataset', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const cp1 = w.blankCheckpoint('2026-09-19', '1', 'ROA', 'PO1', 'QA'); cp1.fields = {};
+    const cp2 = w.blankCheckpoint('2026-09-19', '1', 'EXT', 'PO2', 'QA'); cp2.fields = {};
+    const cp3 = w.blankCheckpoint('2026-08-01', '2', 'ROA', 'PO3', 'QA'); cp3.fields = {}; // different date+shift entirely
+    await w.idbPut('shifts', cp1); await w.idbPut('shifts', cp2); await w.idbPut('shifts', cp3);
+    await w.refreshCache();
+    w.showTab('report');
+    await new Promise(r => setTimeout(r, 80));
+
+    // Stub the file-writing step so this test only checks WHAT gets built,
+    // not the browser download/share plumbing (not fully implemented in jsdom).
+    w.eval('window.exportFileToPreferredLocation = async (file) => { window.__capturedFile = file; };');
+
+    const doc = w.document;
+    const selects = doc.querySelectorAll('#view-report select');
+    assert.equal(selects.length, 3, 'expects Date+Shift picker, Process filter, and the format dropdown');
+    selects[1].value = 'ROA'; // narrow the shift's report down to just the ROA process
+    selects[2].value = 'qms-xlsx';
+    selects[2].dispatchEvent(new w.Event('change'));
+    await new Promise(r => setTimeout(r, 100));
+
+    const xmlContent = await w.eval('window.__capturedFile.text()');
+    assert.ok(xmlContent.includes('PO1'), 'must include the ROA checkpoint from the selected shift');
+    assert.ok(!xmlContent.includes('PO2'), 'must exclude EXT once the Process filter narrows to ROA');
+    assert.ok(!xmlContent.includes('PO3'), 'must exclude a checkpoint from a completely different date/shift');
+  } finally { dom.window.close(); }
+});
+
 test('Item Code: typed value survives a PO change before Save (same draft-safety net as chỉ tiêu fields)', async () => {
   const {dom, w, errors} = await boot();
   try {
