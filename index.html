@@ -3099,7 +3099,10 @@ function renderLinesToSVG(lines, W){
   const FONT = 11.5;
   const ctx = getMeasureCtx(FONT);
   const H_TITLE=26, H_SUB=17, H_SECTION=21, H_ROW=16, H_WRAP=13.5, H_EMPTY=15, H_GAP=5, H_BAR=36, H_FOOTER=18;
-  const THUMB_W=84, THUMB_H=64, THUMB_GAP=10, THUMB_PER_ROW=6;
+  // Ảnh đính kèm giờ kéo theo chiều rộng báo cáo thay vì thumbnail nhỏ cố
+  // định: tối đa 2 ảnh/hàng, mỗi ảnh chia đều chiều rộng còn lại; hàng cuối
+  // chỉ còn 1 ảnh (số lẻ) thì ảnh đó kéo full chiều rộng luôn.
+  const IMG_ROW_H=200, IMG_GAP=10, IMG_PER_ROW=2;
   let clipCounter = 0;
   const colGap = 14;
   const colW = (W - 2*M - colGap) / 2;
@@ -3143,8 +3146,8 @@ function renderLinesToSVG(lines, W){
       flushPending();
       let h;
       if(l.t==='images'){
-        const rows = Math.ceil(l.thumbs.length / THUMB_PER_ROW);
-        h = 16 + rows*(THUMB_H+8);
+        const rows = Math.ceil(l.thumbs.length / IMG_PER_ROW);
+        h = 16 + rows*(IMG_ROW_H+IMG_GAP) + (l.total>l.thumbs.length ? 14 : 0);
       } else {
         h = l.t==='title'?H_TITLE : l.t==='sub'?H_SUB : l.t==='section'?H_SECTION : l.t==='empty'?H_EMPTY : l.t==='gap'?H_GAP : l.t==='bar'?H_BAR : l.t==='footer'?H_FOOTER : 0;
       }
@@ -3210,17 +3213,29 @@ function renderLinesToSVG(lines, W){
     }
     else if(p.t==='images'){
       svg += `<text x="${M+6}" y="${y+10}" font-size="10" font-weight="700" fill="#334155">📎 Ảnh đính kèm (${p.total})</text>`;
-      let tx = M+6, ty = y+16;
-      p.thumbs.forEach((href,i)=>{
-        if(i>0 && i%THUMB_PER_ROW===0){ tx = M+6; ty += THUMB_H+8; }
-        const cid = `thimg${clipCounter++}`;
-        svg += `<clipPath id="${cid}"><rect x="${tx}" y="${ty}" width="${THUMB_W}" height="${THUMB_H}" rx="8"/></clipPath>`;
-        svg += `<image href="${href}" x="${tx}" y="${ty}" width="${THUMB_W}" height="${THUMB_H}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${cid})"/>`;
-        svg += `<rect x="${tx}" y="${ty}" width="${THUMB_W}" height="${THUMB_H}" rx="8" fill="none" stroke="#CBD5E1" stroke-width="1.5"/>`;
-        tx += THUMB_W+THUMB_GAP;
-      });
-      if(p.total > p.thumbs.length){
-        svg += `<text x="${tx+4}" y="${ty+THUMB_H/2+4}" font-size="10" fill="#94A3B8">+${p.total-p.thumbs.length}</text>`;
+      const n = p.thumbs.length;
+      const contentW = (W - 2*M) - 12; // trừ lề trong khớp x=M+6 dùng cho ảnh
+      let idx = 0, ty = y+16;
+      while(idx < n){
+        const remaining = n - idx;
+        const count = Math.min(IMG_PER_ROW, remaining);
+        // Hàng đủ IMG_PER_ROW ảnh: chia đều. Hàng cuối lẻ (chỉ 1 ảnh còn lại):
+        // ảnh đó kéo full chiều rộng thay vì để trống nửa còn lại.
+        const boxW = count===IMG_PER_ROW ? (contentW - (IMG_PER_ROW-1)*IMG_GAP)/IMG_PER_ROW : contentW;
+        let tx = M+6;
+        for(let c=0;c<count;c++){
+          const href = p.thumbs[idx];
+          const cid = `thimg${clipCounter++}`;
+          svg += `<clipPath id="${cid}"><rect x="${tx}" y="${ty}" width="${boxW}" height="${IMG_ROW_H}" rx="8"/></clipPath>`;
+          svg += `<image href="${href}" x="${tx}" y="${ty}" width="${boxW}" height="${IMG_ROW_H}" preserveAspectRatio="xMidYMid slice" clip-path="url(#${cid})"/>`;
+          svg += `<rect x="${tx}" y="${ty}" width="${boxW}" height="${IMG_ROW_H}" rx="8" fill="none" stroke="#CBD5E1" stroke-width="1.5"/>`;
+          tx += boxW + IMG_GAP;
+          idx++;
+        }
+        ty += IMG_ROW_H + IMG_GAP;
+      }
+      if(p.total > n){
+        svg += `<text x="${M+6}" y="${ty+4}" font-size="10" fill="#94A3B8">+${p.total-n} ảnh khác (xem đầy đủ trong "🌐 Xuất báo cáo HTML đầy đủ")</text>`;
       }
     }
     else if(p.t==='footer'){
@@ -3506,13 +3521,18 @@ async function buildImagesLineForCheckpoint(cp){
   for(const im of shown){
     const src = imgSrc(im);
     if(!src) continue;
-    const t = await thumbDataUrl(src, 220);
+    const t = await thumbDataUrl(src, 500); // ảnh giờ hiển thị to hơn nhiều (full chiều rộng báo cáo) — cần nguồn nét hơn 220px cũ
     if(t) thumbs.push(t);
   }
   if(thumbs.length===0) return null;
   return { t:'images', total: imgs.length, thumbs };
 }
-async function buildReportSVG(dateVal, shiftVal){
+// qmsOnly (tuỳ chọn, mặc định false): chỉ hiện chỉ tiêu đã đánh dấu "Xuất
+// trong báo cáo QMS" ở tab Specs (isQMS) — cùng cơ chế/dữ liệu với nút
+// "Xuất theo mẫu Process/QMS", cho phép báo cáo ảnh gọn lại chỉ còn số liệu
+// QMS thay vì mọi Parameters đã nhập. Mặc định false = giữ nguyên hành vi
+// cũ (hiện mọi chỉ tiêu có giá trị).
+async function buildReportSVG(dateVal, shiftVal, qmsOnly){
   const W = 760;
   const lines = [];
   lines.push({t:'title', text:'ILD COFFEE VIETNAM — SHIFTLY REPORT'});
@@ -3535,16 +3555,16 @@ async function buildReportSVG(dateVal, shiftVal){
     const secCps = cps.filter(cp=>cp.section===sec.id);
     if(secCps.length===0) continue;
     for(const cp of secCps){
-      lines.push({t:'section', text:`${sec.name} — PO ${cp.po||'—'} (QC: ${cp.technician||'—'})`});
+      lines.push({t:'section', text:`${sec.name} — PO ${cp.po||'—'}${cp.recipe?' · Recipe '+cp.recipe:''} (QC: ${cp.technician||'—'})`});
       const rows = [];
-      sec.fields.forEach(f=>{
+      sec.fields.filter(f=>!qmsOnly || f.isQMS).forEach(f=>{
         const v = cp.fields[f.id];
         if(v===undefined||v===null||v==='') return;
         let disp, color='#0F172A';
         if(f.type==='boolean'){ disp = boolDisp(f, v); color = v?'#15803D':'#B91C1C'; }
         else if(f.type==='number'){ const ok=inSpec(f,v); disp=String(v); color= ok===false?'#B91C1C':ok===true?'#15803D':'#0F172A'; }
         else disp = String(v).replace(/\n/g,' / ');
-        rows.push({label: f.label.split('\n')[0], disp, color});
+        rows.push({label: (qmsOnly && f.qmsLabel) || f.label.split('\n')[0], disp, color});
       });
       if(rows.length===0) lines.push({t:'empty', text:'— Không có dữ liệu —'});
       else rows.forEach(r=>lines.push({t:'row', label:r.label, disp:r.disp, color:r.color}));
@@ -3557,7 +3577,7 @@ async function buildReportSVG(dateVal, shiftVal){
   lines.push({t:'footer', text:`Xuất lúc: ${fmtDateTimeVN(Date.now())}`});
   return renderLinesToSVG(lines, W);
 }
-async function buildPOReportSVG(poQuery, matches){
+async function buildPOReportSVG(poQuery, matches, qmsOnly){
   const W = 760;
   const lines = [];
   lines.push({t:'title', text:'ILD COFFEE VIETNAM — TRUY XUẤT THEO PO'});
@@ -3567,16 +3587,16 @@ async function buildPOReportSVG(poQuery, matches){
   lines.push({t:'gap'});
   for(const cp of matches){
     const sec = sectionById(cp.section);
-    lines.push({t:'section', text:`${sec?sec.name:cp.section} — Ca ${cp.shift} ${fmtDateVN(cp.date)} (QC: ${cp.technician||'—'})`});
+    lines.push({t:'section', text:`${sec?sec.name:cp.section} — Ca ${cp.shift} ${fmtDateVN(cp.date)}${cp.recipe?' · Recipe '+cp.recipe:''} (QC: ${cp.technician||'—'})`});
     const rows = [];
-    (sec?sec.fields:[]).forEach(f=>{
+    (sec?sec.fields:[]).filter(f=>!qmsOnly || f.isQMS).forEach(f=>{
       const v = cp.fields[f.id];
       if(v===undefined||v===null||v==='') return;
       let disp, color='#0F172A';
       if(f.type==='boolean'){ disp = boolDisp(f, v); color = v?'#15803D':'#B91C1C'; }
       else if(f.type==='number'){ const ok=inSpec(f,v); disp=String(v); color= ok===false?'#B91C1C':ok===true?'#15803D':'#0F172A'; }
       else disp = String(v).replace(/\n/g,' / ');
-      rows.push({label:f.label.split('\n')[0], disp, color});
+      rows.push({label: (qmsOnly && f.qmsLabel) || f.label.split('\n')[0], disp, color});
     });
     if(rows.length===0) lines.push({t:'empty', text:'— Không có dữ liệu —'});
     else rows.forEach(r=>lines.push({t:'row', label:r.label, disp:r.disp, color:r.color}));
@@ -3629,83 +3649,31 @@ function renderReport(){
   shiftModeBtn.addEventListener('click', ()=>{ renderReport._mode='shift'; renderReport(); });
   poModeBtn.addEventListener('click', ()=>{ renderReport._mode='po'; renderReport(); });
 
+  const qmsOnlyChk = el('input',{type:'checkbox', id:'reportQmsOnlyChk'},[]);
+  const qmsOnlyRow = el('label',{style:'display:flex;align-items:center;gap:7px;margin:0 0 10px;font-size:12.5px;'},[
+    qmsOnlyChk, 'Chỉ hiện chỉ tiêu QMS trong báo cáo ảnh (đã đánh dấu "Xuất trong báo cáo QMS" ở tab Specs)',
+  ]);
+  card.appendChild(qmsOnlyRow);
   const pickerBox = el('div',{},[]);
   card.appendChild(pickerBox);
   const previewWrap = el('div',{class:'reportcard', style:'margin-top:14px;'},[]);
   card.appendChild(previewWrap);
+  // Mỗi định dạng xuất là 1 nút riêng, thấy ngay không cần mở dropdown —
+  // .row đã tự xuống dòng (flex-wrap) nên không cần lo tràn màn hình nhỏ.
   const btnRow = el('div',{class:'row', style:'margin-top:12px;align-items:center;'},[
-    el('button',{class:'btn coffee sm'},['🖼️ Tải ảnh PNG']),
-    el('button',{class:'btn ghost sm'},['📤 Chia sẻ ảnh']),
-    (()=>{
-      const sel = el('select',{class:'inp', style:'width:auto;min-height:40px;padding:8px 30px 8px 10px;font-size:12.5px;'},[
-        el('option',{value:''},['Định dạng khác...']),
-        el('option',{value:'pdf'},['📄 Xuất PDF (in trang)']),
-        el('option',{value:'html'},['🌐 Xuất báo cáo HTML đầy đủ (đẹp, có ảnh)']),
-        el('option',{value:'multi'},['🖼️ Xuất nhiều ảnh (mỗi công đoạn)']),
-        el('option',{value:'qms-xlsx'},['📊 Xuất Excel theo mẫu (Process/QMS)']),
-        el('option',{value:'qms-pdf'},['📄 Xuất PDF theo mẫu (Process/QMS)']),
-      ]);
-      sel.addEventListener('change', async ()=>{
-        if(sel.value==='pdf'){
-          if(!currentGen){ toast('Chưa có báo cáo để xuất'); }
-          else {
-            const gen = currentGen();
-            const suggestedName = gen.filename.replace(/\.png$/i,'');
-            printReport(gen.printHtml(), suggestedName);
-          }
-        } else if(sel.value==='html'){
-          if(!currentGen){ toast('Chưa có báo cáo để xuất'); }
-          else {
-            const gen = currentGen();
-            const htmlStr = gen.htmlReport();
-            const name = gen.filename.replace(/\.png$/i, '.html');
-            const file = new File([htmlStr], name, {type:'text/html'});
-            await exportFileToPreferredLocation(file, {title:'Shiftly Report', fallbackMsg:'Đã tải báo cáo HTML về máy'});
-          }
-        } else if(sel.value==='multi'){
-          if(!currentGen){ toast('Chưa có báo cáo để xuất'); }
-          else {
-            const {checkpointList, headerTitle} = currentGen();
-            const list = (checkpointList||[]).filter(cp=>cp.section!=='META');
-            if(list.length===0){ toast('Không có công đoạn nào để xuất riêng từng ảnh'); }
-            else{
-              toast(`Đang tạo ${list.length} ảnh...`);
-              const specs = buildCheckpointImageSVGs(list, headerTitle);
-              const files = [];
-              for(const s of specs){
-                try{
-                  const blob = await svgToPngBlob(s.svg, s.width, s.height);
-                  files.push(new File([blob], s.filename, {type:'image/png'}));
-                }catch(e){ console.error(e); }
-              }
-              if(files.length) await robustShareMultipleOrDownload(files, {title:'Shiftly Report', fallbackMsg:`Đã tải ${files.length} ảnh về máy`});
-            }
-          }
-        } else if(sel.value==='qms-xlsx' || sel.value==='qms-pdf'){
-          if(!currentGen){ toast('Chưa có báo cáo để xuất'); }
-          else {
-            const subset = currentQmsSubset();
-            const noQmsConfigured = SCHEMA.every(s=>!s.fields.some(f=>f.isQMS));
-            if(noQmsConfigured && !confirm('Chưa có chỉ tiêu nào được đánh dấu "Xuất trong báo cáo QMS" ở tab Specs, nên file xuất ra sẽ chỉ có phần MAIN INFORMATION (Date/Shift/Process/Item Code/PO/ISSUES/ACTION), thiếu hẳn các cột QMS (Moisture, Color, %TC...). Vào tab Specs → sửa từng chỉ tiêu → tick "Xuất trong báo cáo QMS" trước rồi quay lại đây. Vẫn xuất luôn (chỉ có MAIN INFORMATION)?')){
-              sel.value=''; return;
-            }
-            if(subset.length===0){ toast('Không có điểm kiểm tra nào khớp Ngày/Ca/Công đoạn đã chọn'); }
-            else if(sel.value==='qms-xlsx'){
-              const file = new File([buildProcessQmsExcelXml(subset)], `Shiftly_ProcessQMS_${todayStr()}.xls`, {type:'application/vnd.ms-excel'});
-              await exportFileToPreferredLocation(file, {title:'Shiftly Process/QMS', fallbackMsg:`Đã tải Excel theo mẫu (${subset.length} điểm kiểm tra) về máy`});
-            } else {
-              printReport(buildProcessQmsPrintHtml(subset), `Shiftly_ProcessQMS_${todayStr()}`);
-            }
-          }
-        }
-        sel.value='';
-      });
-      return sel;
-    })(),
+    el('button',{class:'btn coffee sm', id:'btnRepPng'},['🖼️ Tải ảnh PNG']),
+    el('button',{class:'btn ghost sm', id:'btnRepShare'},['📤 Chia sẻ ảnh']),
+    el('button',{class:'btn ghost sm', id:'btnRepPdf'},['📄 PDF (in trang)']),
+    el('button',{class:'btn ghost sm', id:'btnRepHtml'},['🌐 HTML đầy đủ']),
+    el('button',{class:'btn ghost sm', id:'btnRepMulti'},['🖼️ Nhiều ảnh (mỗi công đoạn)']),
+    el('button',{class:'btn ghost sm', id:'btnRepQmsXlsx'},['📊 Excel theo mẫu']),
+    el('button',{class:'btn ghost sm', id:'btnRepQmsPdf'},['📄 PDF theo mẫu']),
   ]);
   card.appendChild(btnRow);
   root.appendChild(card);
-  const [pngBtn, shareBtn] = qsa('button', btnRow);
+  const pngBtn = qs('#btnRepPng', btnRow), shareBtn = qs('#btnRepShare', btnRow),
+    pdfBtn = qs('#btnRepPdf', btnRow), htmlBtn = qs('#btnRepHtml', btnRow), multiBtn = qs('#btnRepMulti', btnRow),
+    qmsXlsxBtn = qs('#btnRepQmsXlsx', btnRow), qmsPdfBtn = qs('#btnRepQmsPdf', btnRow);
 
   let currentGen = null; // () => {svg,width,height,filename,printHtml,checkpointList,headerTitle}
   // Scope for "Xuất Excel/PDF theo mẫu (Process/QMS)": luôn dựa trên đúng
@@ -3736,32 +3704,37 @@ function renderReport(){
     async function draw(){
       const [d,s] = shiftKeys[parseInt(sel.value||'0',10)].split('|');
       previewWrap.innerHTML = '<div class="sub" style="padding:16px;margin:0;">Đang tạo báo cáo…</div>';
-      const {svg,width,height} = await buildReportSVG(d, s);
+      const {svg,width,height} = await buildReportSVG(d, s, qmsOnlyChk.checked);
       previewWrap.innerHTML = svg;
       currentGen = ()=>({svg,width,height, filename:`Shiftly_${d}_Ca${s}.png`, printHtml:()=>buildPrintableReportHTML(d,s),
         htmlReport:()=>buildFullHtmlReport(d,s),
         checkpointList: checkpointsFor(d,s), headerTitle:`ILD Coffee — Ca ${s} ngày ${fmtDateVN(d)}` });
     }
     sel.addEventListener('change', draw);
+    qmsOnlyChk.addEventListener('change', draw);
     draw();
   } else {
     const poInp = el('input',{class:'inp', type:'text', placeholder:'Nhập mã PO cần truy xuất, VD: 712600007'},[]);
     const findBtn = el('button',{class:'btn teal sm', style:'margin-top:8px;'},['🔎 Tìm & Tạo báo cáo']);
     pickerBox.appendChild(poInp);
     pickerBox.appendChild(findBtn);
-    findBtn.addEventListener('click', async ()=>{
+    async function doSearch(){
       const q = poInp.value.trim();
       if(!q){ toast('Nhập mã PO cần tìm'); return; }
       const matches = allCheckpoints.filter(rec=>matchPO(rec, q));
       matches.sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
       if(matches.length===0){ toast('Không tìm thấy PO này trong dữ liệu'); previewWrap.innerHTML=''; currentGen=null; return; }
       previewWrap.innerHTML = '<div class="sub" style="padding:16px;margin:0;">Đang tạo báo cáo…</div>';
-      const {svg,width,height} = await buildPOReportSVG(q, matches);
+      const {svg,width,height} = await buildPOReportSVG(q, matches, qmsOnlyChk.checked);
       previewWrap.innerHTML = svg;
       currentGen = ()=>({svg,width,height, filename:`Shiftly_PO_${q}.png`, printHtml:()=>buildPrintablePOReportHTML(q,matches),
         htmlReport:()=>buildFullHtmlPOReport(q,matches),
         checkpointList: matches, headerTitle:`ILD Coffee — Truy xuất PO ${q}` });
-    });
+    }
+    findBtn.addEventListener('click', doSearch);
+    // Đổi chế độ QMS-only chỉ vẽ lại nếu đã có 1 lần tìm kiếm trước đó
+    // (currentGen khác null) — chưa tìm gì thì không có PO nào để vẽ lại.
+    qmsOnlyChk.addEventListener('change', ()=>{ if(currentGen) doSearch(); });
   }
 
   pngBtn.addEventListener('click', async ()=>{
@@ -3781,6 +3754,48 @@ function renderReport(){
       await exportFileToPreferredLocation(file, {title:'Shiftly Report', fallbackMsg:'Đã tải ảnh về máy'});
     }catch(e){ console.error(e); toast('Không tạo được ảnh PNG'); }
   });
+  pdfBtn.addEventListener('click', ()=>{
+    if(!currentGen){ toast('Chưa có báo cáo để xuất'); return; }
+    const gen = currentGen();
+    printReport(gen.printHtml(), gen.filename.replace(/\.png$/i,''));
+  });
+  htmlBtn.addEventListener('click', async ()=>{
+    if(!currentGen){ toast('Chưa có báo cáo để xuất'); return; }
+    const gen = currentGen();
+    const file = new File([gen.htmlReport()], gen.filename.replace(/\.png$/i, '.html'), {type:'text/html'});
+    await exportFileToPreferredLocation(file, {title:'Shiftly Report', fallbackMsg:'Đã tải báo cáo HTML về máy'});
+  });
+  multiBtn.addEventListener('click', async ()=>{
+    if(!currentGen){ toast('Chưa có báo cáo để xuất'); return; }
+    const {checkpointList, headerTitle} = currentGen();
+    const list = (checkpointList||[]).filter(cp=>cp.section!=='META');
+    if(list.length===0){ toast('Không có công đoạn nào để xuất riêng từng ảnh'); return; }
+    toast(`Đang tạo ${list.length} ảnh...`);
+    const specs = buildCheckpointImageSVGs(list, headerTitle);
+    const files = [];
+    for(const s of specs){
+      try{
+        const blob = await svgToPngBlob(s.svg, s.width, s.height);
+        files.push(new File([blob], s.filename, {type:'image/png'}));
+      }catch(e){ console.error(e); }
+    }
+    if(files.length) await robustShareMultipleOrDownload(files, {title:'Shiftly Report', fallbackMsg:`Đã tải ${files.length} ảnh về máy`});
+  });
+  async function exportQmsTemplate(kind){
+    if(!currentGen){ toast('Chưa có báo cáo để xuất'); return; }
+    const subset = currentQmsSubset();
+    const noQmsConfigured = SCHEMA.every(s=>!s.fields.some(f=>f.isQMS));
+    if(noQmsConfigured && !confirm('Chưa có chỉ tiêu nào được đánh dấu "Xuất trong báo cáo QMS" ở tab Specs, nên file xuất ra sẽ chỉ có phần MAIN INFORMATION (Date/Shift/Process/Item Code/PO/ISSUES/ACTION), thiếu hẳn các cột QMS (Moisture, Color, %TC...). Vào tab Specs → sửa từng chỉ tiêu → tick "Xuất trong báo cáo QMS" trước rồi quay lại đây. Vẫn xuất luôn (chỉ có MAIN INFORMATION)?')) return;
+    if(subset.length===0){ toast('Không có điểm kiểm tra nào khớp Ngày/Ca/Công đoạn đã chọn'); return; }
+    if(kind==='xlsx'){
+      const file = new File([buildProcessQmsExcelXml(subset)], `Shiftly_ProcessQMS_${todayStr()}.xls`, {type:'application/vnd.ms-excel'});
+      await exportFileToPreferredLocation(file, {title:'Shiftly Process/QMS', fallbackMsg:`Đã tải Excel theo mẫu (${subset.length} điểm kiểm tra) về máy`});
+    } else {
+      printReport(buildProcessQmsPrintHtml(subset), `Shiftly_ProcessQMS_${todayStr()}`);
+    }
+  }
+  qmsXlsxBtn.addEventListener('click', ()=>exportQmsTemplate('xlsx'));
+  qmsPdfBtn.addEventListener('click', ()=>exportQmsTemplate('pdf'));
 }
 
 /* ===================== STATS TAB ===================== */
@@ -4953,7 +4968,9 @@ function renderGuide(){
     <h4>15. Sắp xếp lại thứ tự chỉ tiêu (Specs)</h4>
     <p>Mỗi chỉ tiêu trong tab Specs có 2 nút ▲ ▼ để di chuyển lên/xuống trong danh sách của công đoạn đó — thứ tự này cũng là thứ tự hiển thị ở tab Nhập liệu.</p>
     <h4>16. Báo cáo theo PO (tab Báo cáo)</h4>
-    <p>Ngoài xem theo ca (gộp mọi điểm kiểm tra + Bàn giao ca của ca đó), tab Báo cáo có chế độ <b>"Theo PO"</b>: nhập mã PO → app gom tất cả các điểm kiểm tra liên quan đến PO đó (có thể ở nhiều ca, nhiều công đoạn khác nhau) thành 1 ảnh báo cáo truy xuất duy nhất. Báo cáo giờ có thêm thanh <b>Tổng quan Đạt/Cảnh báo/Lỗi</b> ở đầu, dải màu xen kẽ theo từng công đoạn cho dễ đọc, tự xuống dòng đúng cách khi ghi chú dài (không còn bị đè chữ), và ảnh PNG xuất ra <b>nét hơn hẳn</b> (độ phân giải cao gấp 2.5 lần trước đây — không còn bị mờ khi zoom). Cạnh 2 nút "Tải ảnh PNG" / "Chia sẻ ảnh" có ô chọn <b>"Định dạng khác..."</b> với 2 lựa chọn: <b>"📄 Xuất PDF (in trang)"</b> (mở hộp thoại In của trình duyệt, chọn "Lưu dưới dạng PDF") hoặc <b>"🖼️ Xuất nhiều ảnh (mỗi công đoạn)"</b> — thay vì 1 ảnh dài gộp hết, tạo riêng 1 ảnh nét cho từng công đoạn/điểm kiểm tra rồi chia sẻ/tải về cùng lúc, tiện xem hoặc gửi từng phần.</p>
+    <p>Ngoài xem theo ca (gộp mọi điểm kiểm tra + Bàn giao ca của ca đó), tab Báo cáo có chế độ <b>"Theo PO"</b>: nhập mã PO → app gom tất cả các điểm kiểm tra liên quan đến PO đó (có thể ở nhiều ca, nhiều công đoạn khác nhau) thành 1 ảnh báo cáo truy xuất duy nhất. Báo cáo có thêm thanh <b>Tổng quan Đạt/Cảnh báo/Lỗi</b> ở đầu, dải màu xen kẽ theo từng công đoạn cho dễ đọc, tự xuống dòng đúng cách khi ghi chú dài (không còn bị đè chữ), hiển thị <b>Recipe</b> ngay trên tiêu đề mỗi công đoạn, và ảnh PNG xuất ra <b>nét hơn hẳn</b> (độ phân giải cao gấp 2.5 lần — không còn bị mờ khi zoom). Mỗi định dạng xuất giờ là <b>1 nút riêng</b> hiện sẵn (không còn ẩn trong dropdown "Định dạng khác..."): "📄 PDF (in trang)", "🌐 HTML đầy đủ", "🖼️ Nhiều ảnh (mỗi công đoạn)", "📊 Excel theo mẫu", "📄 PDF theo mẫu".</p>
+    <h4>16b. Ảnh đính kèm full chiều rộng + lọc chỉ tiêu QMS trong báo cáo ảnh</h4>
+    <p>Ảnh đính kèm trong báo cáo ảnh (PNG/chia sẻ) giờ hiển thị lớn hơn hẳn — tối đa 2 ảnh/hàng, mỗi ảnh chia đều chiều rộng báo cáo; nếu lẻ 1 ảnh ở hàng cuối, ảnh đó tự kéo full chiều rộng thay vì để trống 1 nửa như trước. Ô <b>"Chỉ hiện chỉ tiêu QMS trong báo cáo ảnh"</b> (phía trên khung xem trước) cho chuyển qua lại giữa 2 chế độ: bỏ tick (mặc định) hiện mọi chỉ tiêu đã nhập như trước giờ; tick vào chỉ còn các chỉ tiêu đã đánh dấu "Xuất trong báo cáo QMS" ở tab Specs (dùng chung đúng cấu hình với nút "Excel/PDF theo mẫu") — tiện khi cần báo cáo ảnh gọn, chỉ có số liệu QMS thay vì đầy đủ mọi Parameters đã nhập.</p>
     <h4>17. Định dạng ngày DD/MM/YYYY</h4>
     <p>Toàn bộ ngày hiển thị trong app (và cột Date khi xuất CSV/Excel) đều theo định dạng <b>DD/MM/YYYY</b> (VD: 17/07/2026). Khi nhập lại file CSV cũ có định dạng khác, app vẫn tự nhận diện được.</p>
     <h4>18. Xuất dữ liệu nhiều định dạng (CSV / Excel / JSON)</h4>

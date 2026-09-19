@@ -122,10 +122,9 @@ test('Báo cáo tab: template export is scoped to the selected Date+Shift+Proces
 
     const doc = w.document;
     const selects = doc.querySelectorAll('#view-report select');
-    assert.equal(selects.length, 3, 'expects Date+Shift picker, Process filter, and the format dropdown');
+    assert.equal(selects.length, 2, 'expects Date+Shift picker and Process filter (format is buttons now, not a select)');
     selects[1].value = 'ROA'; // narrow the shift's report down to just the ROA process
-    selects[2].value = 'qms-xlsx';
-    selects[2].dispatchEvent(new w.Event('change'));
+    doc.querySelector('#btnRepQmsXlsx').click();
     await new Promise(r => setTimeout(r, 100));
 
     const xmlContent = await w.eval('window.__capturedFile.text()');
@@ -152,9 +151,8 @@ test('Báo cáo tab: warns (and can be cancelled) when exporting the template wi
     let confirmCalls = 0;
     w.confirm = (msg) => { confirmCalls++; assert.ok(msg.includes('QMS'), 'the warning must mention QMS'); return false; };
     const doc = w.document;
-    const fmtSel = doc.querySelectorAll('#view-report select')[2];
-    fmtSel.value = 'qms-xlsx';
-    fmtSel.dispatchEvent(new w.Event('change'));
+    const xlsxBtn = doc.querySelector('#btnRepQmsXlsx');
+    xlsxBtn.click();
     await new Promise(r => setTimeout(r, 80));
     assert.equal(confirmCalls, 1, 'must warn once when no field anywhere is marked isQMS');
     assert.equal(w.eval('window.__capturedFile'), undefined, 'cancelling the warning must abort the export');
@@ -162,8 +160,7 @@ test('Báo cáo tab: warns (and can be cancelled) when exporting the template wi
     // Mark one field isQMS anywhere in SCHEMA — the warning must no longer fire.
     w.eval(`SCHEMA.find(s=>s.id==='ROA').fields.find(f=>f.id==='ROA_R6E').isQMS = true;`);
     confirmCalls = 0;
-    fmtSel.value = 'qms-xlsx';
-    fmtSel.dispatchEvent(new w.Event('change'));
+    xlsxBtn.click();
     await new Promise(r => setTimeout(r, 80));
     assert.equal(confirmCalls, 0, 'must not warn once at least one field is marked isQMS');
     assert.ok(w.eval('window.__capturedFile'), 'export must proceed without confirmation this time');
@@ -227,6 +224,98 @@ test('Item Code: typed value survives a PO change before Save (same draft-safety
 
     const itemCodeAfter = [...doc.querySelectorAll('#view-input input[placeholder="VD: 1100011"]')][0];
     assert.equal(itemCodeAfter.value, '1100099', 'Item Code must survive the Recipe-change re-render');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+// ===================== Ảnh báo cáo full-width + Recipe + lọc QMS-only =====================
+
+test('image report (SVG): a single attached photo stretches to the full report width; two photos split it evenly', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const cp1 = w.blankCheckpoint('2026-09-19', '1', 'ROA', 'PO1', 'QA');
+    cp1.fields = {};
+    cp1.images = [{ name: 'a.jpg', dataUrl: 'data:image/jpeg;base64,AAAA', ts: 1 }];
+    await w.idbPut('shifts', cp1);
+    await w.refreshCache();
+    const oneImg = await w.eval(`(async()=>{ const r = await buildReportSVG('2026-09-19','1', false); return r.svg; })()`);
+    // W=760, M=20 -> content width 720, minus 12px inner margin used for images = 708.
+    assert.ok(oneImg.includes('width="708"'), 'a single photo must span the full content width');
+
+    const cp2 = w.blankCheckpoint('2026-09-19', '2', 'EXT', 'PO2', 'QA');
+    cp2.fields = {};
+    cp2.images = [
+      { name: 'a.jpg', dataUrl: 'data:image/jpeg;base64,AAAA', ts: 1 },
+      { name: 'b.jpg', dataUrl: 'data:image/jpeg;base64,BBBB', ts: 2 },
+    ];
+    await w.idbPut('shifts', cp2);
+    await w.refreshCache();
+    const twoImg = await w.eval(`(async()=>{ const r = await buildReportSVG('2026-09-19','2', false); return r.svg; })()`);
+    // (708 - 10 gap) / 2 = 349.
+    assert.ok(twoImg.includes('width="349"'), 'two photos side by side must each get half the content width');
+    assert.ok(!twoImg.includes('width="84"'), 'must not fall back to the old small fixed thumbnail size');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('image report (SVG): Recipe is shown in the checkpoint header when set', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const cp = w.blankCheckpoint('2026-09-19', '1', 'ROA', 'PO1', 'QA');
+    cp.fields = {}; cp.recipe = '302C';
+    await w.idbPut('shifts', cp);
+    await w.refreshCache();
+    const svg = await w.eval(`(async()=>{ const r = await buildReportSVG('2026-09-19','1', false); return r.svg; })()`);
+    assert.ok(svg.includes('Recipe 302C'), 'the section header must show the checkpoint\'s Recipe');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('image report (SVG): qmsOnly=true shows only isQMS fields (using qmsLabel when set); default (false) shows everything as before', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    w.eval(`(() => {
+      const f = SCHEMA.find(s=>s.id==='ROA').fields.find(x=>x.id==='ROA_R6E');
+      f.isQMS = true; f.qmsLabel = 'Color';
+    })()`);
+    const cp = w.blankCheckpoint('2026-09-19', '1', 'ROA', 'PO1', 'QA');
+    cp.fields = { ROA_R6E: 45, ROA_R6C: 120 }; // R6E marked QMS, R6C (Roasting time) is not
+    await w.idbPut('shifts', cp);
+    await w.refreshCache();
+
+    const fullSvg = await w.eval(`(async()=>{ const r = await buildReportSVG('2026-09-19','1', false); return r.svg; })()`);
+    assert.ok(fullSvg.includes('Roasting time'), 'default view must still show every field with a value, unchanged');
+
+    const qmsSvg = await w.eval(`(async()=>{ const r = await buildReportSVG('2026-09-19','1', true); return r.svg; })()`);
+    assert.ok(qmsSvg.includes('Color'), 'qmsOnly must show the QMS field, using its qmsLabel');
+    assert.ok(!qmsSvg.includes('Roasting time'), 'qmsOnly must hide a non-QMS field entirely');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('Báo cáo tab: export formats are individual buttons, not a dropdown; the QMS-only checkbox toggles the live preview', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const cp = w.blankCheckpoint('2026-09-19', '1', 'ROA', 'PO1', 'QA');
+    cp.fields = { ROA_R6C: 120 };
+    await w.idbPut('shifts', cp);
+    await w.refreshCache();
+    w.showTab('report');
+    await new Promise(r => setTimeout(r, 100));
+
+    const doc = w.document;
+    assert.equal(doc.querySelectorAll('#view-report select').length, 2, 'only the Date+Shift and Process pickers remain <select> elements');
+    ['btnRepPng', 'btnRepShare', 'btnRepPdf', 'btnRepHtml', 'btnRepMulti', 'btnRepQmsXlsx', 'btnRepQmsPdf'].forEach(id => {
+      assert.ok(doc.querySelector('#' + id), `button #${id} must exist`);
+    });
+
+    assert.ok(doc.querySelector('#view-report').textContent.includes('Roasting time'), 'preview must show the field by default (qmsOnly off)');
+    const qmsChk = doc.querySelector('#reportQmsOnlyChk');
+    assert.ok(qmsChk, 'the QMS-only checkbox must exist');
+    qmsChk.checked = true;
+    qmsChk.dispatchEvent(new w.Event('change'));
+    await new Promise(r => setTimeout(r, 100));
+    assert.ok(!doc.querySelector('#view-report').textContent.includes('Roasting time'), 'toggling QMS-only must hide the non-QMS field from the live preview');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
