@@ -684,6 +684,50 @@ function buildExcelXml(recordsSubset){
   xml += `</Table></Worksheet></Workbook>`;
   return xml;
 }
+// Excel export of the Specs CONFIGURATION itself (chỉ tiêu + giới hạn của
+// mỗi công đoạn) — khác với buildExcelXml() ở trên vốn xuất DỮ LIỆU các ca
+// đã nhập. Dùng cho việc xem lại/in/gửi toàn bộ bảng chỉ tiêu hiện tại dưới
+// dạng quen thuộc với người không quen đọc JSON (bản JSON ở nút cạnh bên
+// vẫn là định dạng dùng để nhập lại vào app, xuất Excel này chỉ để xem/lưu).
+function buildSpecsExcelXml(){
+  const headers = ['Công đoạn','Chỉ tiêu','Loại','Bắt buộc','LSL (Spec Min)','USL (Spec Max)','LCL (Control Min)','UCL (Control Max)','Lựa chọn (Select)','Nhãn Đạt','Nhãn Lỗi','Cho phép ghi chú','Cho phép số âm','Ghi đè theo Recipe'];
+  let xml = `<?xml version="1.0"?>\n<?mso-application progid="Excel.Sheet"?>\n`;
+  xml += `<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n`;
+  xml += `<Styles><Style ss:ID="hdr"><Font ss:Bold="1"/><Interior ss:Color="#EEF1F6" ss:Pattern="Solid"/></Style></Styles>\n`;
+  xml += `<Worksheet ss:Name="Specs"><Table>\n`;
+  xml += '<Row>' + headers.map(h=>`<Cell ss:StyleID="hdr"><Data ss:Type="String">${xmlEscape(h)}</Data></Cell>`).join('') + '</Row>\n';
+  const typeLabel = {number:'Số',boolean:'Đạt/Lỗi',text:'Chữ',select:'Danh sách',textarea:'Ghi chú'};
+  const numCell = v => (v===undefined||v===null||v==='') ? '<Cell/>' : `<Cell><Data ss:Type="Number">${v}</Data></Cell>`;
+  const strCell = v => (v===undefined||v===null||v==='') ? '<Cell/>' : `<Cell><Data ss:Type="String">${xmlEscape(v)}</Data></Cell>`;
+  SCHEMA.forEach(sec=>{
+    sec.fields.forEach(f=>{
+      const overrides = f.recipeOverrides ? Object.keys(f.recipeOverrides).map(rc=>{
+        const o = f.recipeOverrides[rc];
+        const parts = [];
+        if(o.hardMin!=null || o.hardMax!=null) parts.push(`LSL-USL ${o.hardMin??''}~${o.hardMax??''}`);
+        if(o.tMin!=null || o.tMax!=null) parts.push(`LCL-UCL ${o.tMin??''}~${o.tMax??''}`);
+        return `${rc}: ${parts.join(', ')}`;
+      }).join('; ') : '';
+      let cells = strCell(sec.name);
+      cells += strCell(f.label);
+      cells += strCell(typeLabel[f.type] || f.type);
+      cells += strCell(f.required ? 'Có' : '');
+      if(f.type==='number'){
+        cells += numCell(f.hardMin); cells += numCell(f.hardMax);
+        cells += numCell(f.tMin); cells += numCell(f.tMax);
+      } else { cells += '<Cell/><Cell/><Cell/><Cell/>'; }
+      cells += strCell(f.type==='select' ? (f.options||[]).join(', ') : '');
+      cells += strCell(f.type==='boolean' ? boolLabels(f).t : '');
+      cells += strCell(f.type==='boolean' ? boolLabels(f).f : '');
+      cells += strCell(f.allowNote ? 'Có' : '');
+      cells += strCell(f.allowNegative ? 'Có' : '');
+      cells += strCell(overrides);
+      xml += `<Row>${cells}</Row>\n`;
+    });
+  });
+  xml += `</Table></Worksheet></Workbook>`;
+  return xml;
+}
 function parseCsvRows(text){
   // Full-text CSV tokenizer: respects quoted fields that contain embedded
   // commas, newlines (\n or \r\n) and doubled quotes ("").
@@ -3836,16 +3880,23 @@ function renderSpecs(){
     el('p',{class:'sub', style:'margin:0 0 10px;'},['Cấu hình chỉ tiêu (Specs) lưu riêng trên từng máy. Nếu dùng nhiều tablet, xuất file này từ máy đã chỉnh xong rồi nhập vào các máy khác để đồng bộ — file này KHÔNG chứa dữ liệu ca, chỉ chứa danh sách chỉ tiêu & giới hạn.']),
     el('div',{class:'row'},[
       el('button',{class:'btn ghost sm', id:'btnExportSpecs'},['⬇️ Xuất cấu hình Specs (JSON)']),
+      el('button',{class:'btn ghost sm', id:'btnExportSpecsXlsx'},['📊 Xuất Excel Specs']),
       el('label',{class:'btn ghost sm', style:'position:relative;'},['⬆️ Nhập cấu hình Specs (JSON)',
         el('input',{type:'file', accept:'.json', id:'importSpecsInput', style:'position:absolute;inset:0;opacity:0;cursor:pointer;'})
       ]),
     ]),
+    el('p',{class:'sub', style:'margin:10px 0 0;'},['File JSON dùng để đồng bộ/nhập lại vào app (mục "⬆️ Nhập cấu hình Specs" ở trên). File Excel chỉ để xem/in/lưu hồ sơ — không nhập lại được vào app.']),
   ]);
   root.appendChild(syncCard);
   qs('#btnExportSpecs', syncCard).addEventListener('click', ()=>{
     const blob = new Blob([JSON.stringify(SCHEMA, null, 2)], {type:'application/json'});
     downloadBlob(blob, `Shiftly_Specs_${todayStr()}.json`);
     toast('Đã xuất cấu hình Specs');
+  });
+  qs('#btnExportSpecsXlsx', syncCard).addEventListener('click', async ()=>{
+    const xml = buildSpecsExcelXml();
+    const file = new File([xml], `Shiftly_Specs_${todayStr()}.xls`, {type:'application/vnd.ms-excel'});
+    await robustShareOrDownload(file, {title:'Shiftly Specs', fallbackMsg:'Đã tải Excel cấu hình Specs về máy'});
   });
   qs('#importSpecsInput', syncCard).addEventListener('change', async (e)=>{
     const file = e.target.files[0]; if(!file) return;
