@@ -3612,6 +3612,10 @@ function renderReport(){
           if(!currentGen){ toast('Chưa có báo cáo để xuất'); }
           else {
             const subset = currentQmsSubset();
+            const noQmsConfigured = SCHEMA.every(s=>!s.fields.some(f=>f.isQMS));
+            if(noQmsConfigured && !confirm('Chưa có chỉ tiêu nào được đánh dấu "Xuất trong báo cáo QMS" ở tab Specs, nên file xuất ra sẽ chỉ có phần MAIN INFORMATION (Date/Shift/Process/Item Code/PO/ISSUES/ACTION), thiếu hẳn các cột QMS (Moisture, Color, %TC...). Vào tab Specs → sửa từng chỉ tiêu → tick "Xuất trong báo cáo QMS" trước rồi quay lại đây. Vẫn xuất luôn (chỉ có MAIN INFORMATION)?')){
+              sel.value=''; return;
+            }
             if(subset.length===0){ toast('Không có điểm kiểm tra nào khớp Ngày/Ca/Công đoạn đã chọn'); }
             else if(sel.value==='qms-xlsx'){
               const file = new File([buildProcessQmsExcelXml(subset)], `Shiftly_ProcessQMS_${todayStr()}.xls`, {type:'application/vnd.ms-excel'});

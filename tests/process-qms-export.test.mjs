@@ -115,6 +115,10 @@ test('Báo cáo tab: template export is scoped to the selected Date+Shift+Proces
     // Stub the file-writing step so this test only checks WHAT gets built,
     // not the browser download/share plumbing (not fully implemented in jsdom).
     w.eval('window.exportFileToPreferredLocation = async (file) => { window.__capturedFile = file; };');
+    // No field is marked isQMS in this test's SCHEMA, which now triggers a
+    // confirm() warning ("file will be MAIN INFORMATION only") — proceed
+    // anyway, since this test is only about Date/Shift/Process scoping.
+    w.confirm = () => true;
 
     const doc = w.document;
     const selects = doc.querySelectorAll('#view-report select');
@@ -128,6 +132,40 @@ test('Báo cáo tab: template export is scoped to the selected Date+Shift+Proces
     assert.ok(xmlContent.includes('PO1'), 'must include the ROA checkpoint from the selected shift');
     assert.ok(!xmlContent.includes('PO2'), 'must exclude EXT once the Process filter narrows to ROA');
     assert.ok(!xmlContent.includes('PO3'), 'must exclude a checkpoint from a completely different date/shift');
+  } finally { dom.window.close(); }
+});
+
+test('Báo cáo tab: warns (and can be cancelled) when exporting the template with zero isQMS fields configured anywhere', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const cp1 = w.blankCheckpoint('2026-09-19', '1', 'ROA', 'PO1', 'QA'); cp1.fields = {};
+    await w.idbPut('shifts', cp1);
+    await w.refreshCache();
+    w.showTab('report');
+    await new Promise(r => setTimeout(r, 80));
+    w.eval('window.exportFileToPreferredLocation = async (file) => { window.__capturedFile = file; };');
+
+    let confirmCalls = 0;
+    w.confirm = (msg) => { confirmCalls++; assert.ok(msg.includes('QMS'), 'the warning must mention QMS'); return false; };
+    const doc = w.document;
+    const fmtSel = doc.querySelectorAll('#view-report select')[2];
+    fmtSel.value = 'qms-xlsx';
+    fmtSel.dispatchEvent(new w.Event('change'));
+    await new Promise(r => setTimeout(r, 80));
+    assert.equal(confirmCalls, 1, 'must warn once when no field anywhere is marked isQMS');
+    assert.equal(w.eval('window.__capturedFile'), undefined, 'cancelling the warning must abort the export');
+
+    // Mark one field isQMS anywhere in SCHEMA — the warning must no longer fire.
+    w.eval(`SCHEMA.find(s=>s.id==='ROA').fields.find(f=>f.id==='ROA_R6E').isQMS = true;`);
+    confirmCalls = 0;
+    fmtSel.value = 'qms-xlsx';
+    fmtSel.dispatchEvent(new w.Event('change'));
+    await new Promise(r => setTimeout(r, 80));
+    assert.equal(confirmCalls, 0, 'must not warn once at least one field is marked isQMS');
+    assert.ok(w.eval('window.__capturedFile'), 'export must proceed without confirmation this time');
+    // Not asserting errors.length===0 here: jsdom has no <canvas> implementation
+    // (see package.json — the `canvas` package isn't installed), and drawing the
+    // shift's report preview touches it incidentally; unrelated to this test.
   } finally { dom.window.close(); }
 });
 
