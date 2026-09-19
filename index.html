@@ -1886,11 +1886,9 @@ function renderInputForm(){
     renderInputForm._draft = { scope: draftScope, fields: draftFields, fieldNotes: draftNotes };
   }
 
-  const qcSel = el('select',{class:'inp'},[]);
-  qcSel.appendChild(el('option',{value:''},['— Chọn QC —']));
-  TECHNICIANS.forEach(t=>{ const o=el('option',{value:t},[t]); if(t===cp.technician) o.setAttribute('selected','selected'); qcSel.appendChild(o); });
-  formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Tên QC']), qcSel]));
-
+  // Thứ tự nhập liệu (theo yêu cầu người dùng): Công đoạn => Nhập PO (đã
+  // chọn ở trên) => Chọn Recipe (+ Client) => Chọn Technician (QC) — Recipe/
+  // Client đứng TRƯỚC QC, khác thứ tự cũ (QC trước Recipe/Client).
   const recipeVal0 = editingCp ? (cp.recipe||'') : (renderInputForm._newRecipe||'');
   const clientVal0 = editingCp ? (cp.client||'') : (renderInputForm._newClient||'');
   const recipeSel = el('select',{class:'inp'},[]);
@@ -1926,6 +1924,11 @@ function renderInputForm(){
       clientBannerSlot.appendChild(banner);
     }
   })();
+
+  const qcSel = el('select',{class:'inp'},[]);
+  qcSel.appendChild(el('option',{value:''},['— Chọn QC —']));
+  TECHNICIANS.forEach(t=>{ const o=el('option',{value:t},[t]); if(t===cp.technician) o.setAttribute('selected','selected'); qcSel.appendChild(o); });
+  formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Tên QC']), qcSel]));
 
   const copiedFieldIds = new Set();
   const fieldEls = {};
@@ -3663,16 +3666,12 @@ function renderReport(){
   const btnRow = el('div',{class:'row', style:'margin-top:12px;align-items:center;'},[
     el('button',{class:'btn coffee sm', id:'btnRepPng'},['🖼️ Tải ảnh PNG']),
     el('button',{class:'btn ghost sm', id:'btnRepShare'},['📤 Chia sẻ ảnh']),
-    el('button',{class:'btn ghost sm', id:'btnRepPdf'},['📄 PDF (in trang)']),
-    el('button',{class:'btn ghost sm', id:'btnRepHtml'},['🌐 HTML đầy đủ']),
-    el('button',{class:'btn ghost sm', id:'btnRepMulti'},['🖼️ Nhiều ảnh (mỗi công đoạn)']),
     el('button',{class:'btn ghost sm', id:'btnRepQmsXlsx'},['📊 Excel theo mẫu']),
     el('button',{class:'btn ghost sm', id:'btnRepQmsPdf'},['📄 PDF theo mẫu']),
   ]);
   card.appendChild(btnRow);
   root.appendChild(card);
   const pngBtn = qs('#btnRepPng', btnRow), shareBtn = qs('#btnRepShare', btnRow),
-    pdfBtn = qs('#btnRepPdf', btnRow), htmlBtn = qs('#btnRepHtml', btnRow), multiBtn = qs('#btnRepMulti', btnRow),
     qmsXlsxBtn = qs('#btnRepQmsXlsx', btnRow), qmsPdfBtn = qs('#btnRepQmsPdf', btnRow);
 
   let currentGen = null; // () => {svg,width,height,filename,printHtml,checkpointList,headerTitle}
@@ -3753,33 +3752,6 @@ function renderReport(){
       const file = new File([blob], filename, {type:'image/png'});
       await exportFileToPreferredLocation(file, {title:'Shiftly Report', fallbackMsg:'Đã tải ảnh về máy'});
     }catch(e){ console.error(e); toast('Không tạo được ảnh PNG'); }
-  });
-  pdfBtn.addEventListener('click', ()=>{
-    if(!currentGen){ toast('Chưa có báo cáo để xuất'); return; }
-    const gen = currentGen();
-    printReport(gen.printHtml(), gen.filename.replace(/\.png$/i,''));
-  });
-  htmlBtn.addEventListener('click', async ()=>{
-    if(!currentGen){ toast('Chưa có báo cáo để xuất'); return; }
-    const gen = currentGen();
-    const file = new File([gen.htmlReport()], gen.filename.replace(/\.png$/i, '.html'), {type:'text/html'});
-    await exportFileToPreferredLocation(file, {title:'Shiftly Report', fallbackMsg:'Đã tải báo cáo HTML về máy'});
-  });
-  multiBtn.addEventListener('click', async ()=>{
-    if(!currentGen){ toast('Chưa có báo cáo để xuất'); return; }
-    const {checkpointList, headerTitle} = currentGen();
-    const list = (checkpointList||[]).filter(cp=>cp.section!=='META');
-    if(list.length===0){ toast('Không có công đoạn nào để xuất riêng từng ảnh'); return; }
-    toast(`Đang tạo ${list.length} ảnh...`);
-    const specs = buildCheckpointImageSVGs(list, headerTitle);
-    const files = [];
-    for(const s of specs){
-      try{
-        const blob = await svgToPngBlob(s.svg, s.width, s.height);
-        files.push(new File([blob], s.filename, {type:'image/png'}));
-      }catch(e){ console.error(e); }
-    }
-    if(files.length) await robustShareMultipleOrDownload(files, {title:'Shiftly Report', fallbackMsg:`Đã tải ${files.length} ảnh về máy`});
   });
   async function exportQmsTemplate(kind){
     if(!currentGen){ toast('Chưa có báo cáo để xuất'); return; }
@@ -4926,7 +4898,7 @@ function renderGuide(){
     <h4>1c. Admin tuỳ chỉnh thứ tự & ẩn/hiện Tab theo vai trò</h4>
     <p>Ở tab Cài đặt, mục "🗂️ Sắp xếp &amp; Ẩn/hiện Tab" (chỉ Admin thấy) cho phép đổi thứ tự hiện ở thanh tab trên cùng (nút ▲▼, áp dụng chung cho mọi thiết bị/mọi người sau khi bấm Lưu), và chọn ẩn riêng từng tab với vai trò Nhân viên và/hoặc Giám sát/Quản lý — VD ẩn tab Specs với Nhân viên nếu không muốn họ tự sửa chỉ tiêu. Admin luôn thấy đủ mọi tab bất kể cấu hình này. Tab Cài đặt không bao giờ ẩn được (đây là nơi duy nhất có nút đăng xuất/ngắt kết nối, ẩn đi sẽ nhốt luôn tài khoản đó). Mặc định, vai trò Giám sát/Quản lý bị ẩn sẵn tab Nhập liệu.</p>
     <h4>2. Nhập liệu theo Điểm kiểm tra</h4>
-    <p>Ở tab <b>Nhập liệu</b>: chọn Ngày + Ca → phần "Bàn giao ca" (Tình hình/Sự cố, Bàn giao) không cần PO, điền được ngay. Bên dưới là danh sách các điểm kiểm tra đã có trong ca này. Bấm <b>"➕ Thêm điểm kiểm tra"</b> → chọn Công đoạn + nhập/chọn mã PO → chọn QC → nhập chỉ tiêu → <b>"Lưu điểm kiểm tra"</b>. Muốn nhập PO khác cho cùng công đoạn (VD: PO 89 rồi PO 90 đều ở Trích ly), bấm "➕ Thêm điểm kiểm tra" lần nữa với PO mới — không bị ghi đè lên nhau.</p>
+    <p>Ở tab <b>Nhập liệu</b>: chọn Ngày + Ca → phần "Bàn giao ca" (Tình hình/Sự cố, Bàn giao) không cần PO, điền được ngay. Bên dưới là danh sách các điểm kiểm tra đã có trong ca này. Bấm <b>"➕ Thêm điểm kiểm tra"</b> → theo đúng thứ tự: chọn <b>Công đoạn</b> → nhập/chọn <b>mã PO</b> (và Item Code nếu có) → chọn <b>Recipe</b> (+ Client nếu có) → chọn <b>Technician (QC)</b> → nhập chỉ tiêu → <b>"Lưu điểm kiểm tra"</b>. Muốn nhập PO khác cho cùng công đoạn (VD: PO 89 rồi PO 90 đều ở Trích ly), bấm "➕ Thêm điểm kiểm tra" lần nữa với PO mới — không bị ghi đè lên nhau.</p>
     <h4>3. Ô Đạt / Lỗi</h4>
     <p>Với các chỉ tiêu kiểm tra ngoại quan (không có số liệu), chạm nút để chuyển trạng thái: — — (chưa kiểm) → ✅ Đạt → ❌ Lỗi → quay lại — —.</p>
     <h4>4. Xem lại & sửa</h4>
@@ -4968,7 +4940,7 @@ function renderGuide(){
     <h4>15. Sắp xếp lại thứ tự chỉ tiêu (Specs)</h4>
     <p>Mỗi chỉ tiêu trong tab Specs có 2 nút ▲ ▼ để di chuyển lên/xuống trong danh sách của công đoạn đó — thứ tự này cũng là thứ tự hiển thị ở tab Nhập liệu.</p>
     <h4>16. Báo cáo theo PO (tab Báo cáo)</h4>
-    <p>Ngoài xem theo ca (gộp mọi điểm kiểm tra + Bàn giao ca của ca đó), tab Báo cáo có chế độ <b>"Theo PO"</b>: nhập mã PO → app gom tất cả các điểm kiểm tra liên quan đến PO đó (có thể ở nhiều ca, nhiều công đoạn khác nhau) thành 1 ảnh báo cáo truy xuất duy nhất. Báo cáo có thêm thanh <b>Tổng quan Đạt/Cảnh báo/Lỗi</b> ở đầu, dải màu xen kẽ theo từng công đoạn cho dễ đọc, tự xuống dòng đúng cách khi ghi chú dài (không còn bị đè chữ), hiển thị <b>Recipe</b> ngay trên tiêu đề mỗi công đoạn, và ảnh PNG xuất ra <b>nét hơn hẳn</b> (độ phân giải cao gấp 2.5 lần — không còn bị mờ khi zoom). Mỗi định dạng xuất giờ là <b>1 nút riêng</b> hiện sẵn (không còn ẩn trong dropdown "Định dạng khác..."): "📄 PDF (in trang)", "🌐 HTML đầy đủ", "🖼️ Nhiều ảnh (mỗi công đoạn)", "📊 Excel theo mẫu", "📄 PDF theo mẫu".</p>
+    <p>Ngoài xem theo ca (gộp mọi điểm kiểm tra + Bàn giao ca của ca đó), tab Báo cáo có chế độ <b>"Theo PO"</b>: nhập mã PO → app gom tất cả các điểm kiểm tra liên quan đến PO đó (có thể ở nhiều ca, nhiều công đoạn khác nhau) thành 1 ảnh báo cáo truy xuất duy nhất. Báo cáo có thêm thanh <b>Tổng quan Đạt/Cảnh báo/Lỗi</b> ở đầu, dải màu xen kẽ theo từng công đoạn cho dễ đọc, tự xuống dòng đúng cách khi ghi chú dài (không còn bị đè chữ), hiển thị <b>Recipe</b> ngay trên tiêu đề mỗi công đoạn, và ảnh PNG xuất ra <b>nét hơn hẳn</b> (độ phân giải cao gấp 2.5 lần — không còn bị mờ khi zoom). Các định dạng xuất là các <b>nút riêng</b> hiện sẵn cạnh "🖼️ Tải ảnh PNG"/"📤 Chia sẻ ảnh": "📊 Excel theo mẫu", "📄 PDF theo mẫu" (Process/QMS — xem mục 34).</p>
     <h4>16b. Ảnh đính kèm full chiều rộng + lọc chỉ tiêu QMS trong báo cáo ảnh</h4>
     <p>Ảnh đính kèm trong báo cáo ảnh (PNG/chia sẻ) giờ hiển thị lớn hơn hẳn — tối đa 2 ảnh/hàng, mỗi ảnh chia đều chiều rộng báo cáo; nếu lẻ 1 ảnh ở hàng cuối, ảnh đó tự kéo full chiều rộng thay vì để trống 1 nửa như trước. Ô <b>"Chỉ hiện chỉ tiêu QMS trong báo cáo ảnh"</b> (phía trên khung xem trước) cho chuyển qua lại giữa 2 chế độ: bỏ tick (mặc định) hiện mọi chỉ tiêu đã nhập như trước giờ; tick vào chỉ còn các chỉ tiêu đã đánh dấu "Xuất trong báo cáo QMS" ở tab Specs (dùng chung đúng cấu hình với nút "Excel/PDF theo mẫu") — tiện khi cần báo cáo ảnh gọn, chỉ có số liệu QMS thay vì đầy đủ mọi Parameters đã nhập.</p>
     <h4>17. Định dạng ngày DD/MM/YYYY</h4>
