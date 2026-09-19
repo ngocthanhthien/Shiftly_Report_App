@@ -193,17 +193,25 @@ begin
       continue;
     end if;
     select updated_at into v_current_updated_at from checkpoints where key = v_key;
+    -- Tối ưu băng thông cho Tablet: `images` (ảnh base64, nặng nhất trong
+    -- payload) là CỘT DUY NHẤT client được phép lược bỏ khỏi 1 dòng khi push
+    -- — dùng khi chỉ sửa số liệu, ảnh không đổi (xem imagesFingerprint() +
+    -- stripLocalMarkers() trong index.html). Phân biệt "không gửi field này"
+    -- (giữ nguyên ảnh cũ, toán tử `?`kiểm tra key có tồn tại trong JSON hay
+    -- không) với "gửi mảng ảnh rỗng" (xoá hết ảnh — vẫn hỗ trợ bình thường).
     insert into checkpoints (key, date, shift, section, po, item_code, recipe, client, technician, fields, field_notes, images, updated_at, deleted, seq)
     values (
       v_key, v_row->>'date', v_row->>'shift', v_row->>'section', coalesce(v_row->>'po', ''),
       coalesce(v_row->>'itemCode', ''), coalesce(v_row->>'recipe', ''), coalesce(v_row->>'client', ''), coalesce(v_row->>'technician', ''),
-      coalesce(v_row->'fields', '{}'::jsonb), coalesce(v_row->'fieldNotes', '{}'::jsonb), coalesce(v_row->'images', '[]'::jsonb),
+      coalesce(v_row->'fields', '{}'::jsonb), coalesce(v_row->'fieldNotes', '{}'::jsonb),
+      case when v_row ? 'images' then coalesce(v_row->'images', '[]'::jsonb) else '[]'::jsonb end,
       v_updated_at, false, nextval('checkpoints_seq')
     )
     on conflict (key) do update set
       date = excluded.date, shift = excluded.shift, section = excluded.section, po = excluded.po,
       item_code = excluded.item_code, recipe = excluded.recipe, client = excluded.client, technician = excluded.technician,
-      fields = excluded.fields, field_notes = excluded.field_notes, images = excluded.images,
+      fields = excluded.fields, field_notes = excluded.field_notes,
+      images = case when v_row ? 'images' then excluded.images else checkpoints.images end,
       updated_at = excluded.updated_at, deleted = false, seq = excluded.seq
     where excluded.updated_at > checkpoints.updated_at;
     v_results := v_results || jsonb_build_object('key', v_key, 'applied', v_current_updated_at is null or v_updated_at > v_current_updated_at);
@@ -292,6 +300,31 @@ begin
   return jsonb_build_object('ok', true);
 end;
 $$;
+
+-- ===================== Data retention (Data Log) — MANUAL, KHÔNG tự chạy =====================
+-- `logs` (tab Data Log — lịch sử mọi thay đổi số liệu) tăng vô hạn theo thời
+-- gian, không có gì tự dọn. KHÔNG tạo pg_cron job xoá tự động ở đây — đây
+-- là dữ liệu truy xuất QC (có thể cần cho audit FSSC/khách hàng), nên thời
+-- hạn lưu là quyết định nghiệp vụ, không phải điều app này tự ý chọn thay.
+-- Hàm dưới đây chỉ để ADMIN tự chạy thủ công trong SQL Editor khi đã chốt
+-- được thời hạn cần giữ (KHÔNG grant cho anon/authenticated — không có nút
+-- nào trong app gọi hàm này). Ví dụ dùng: `select prune_logs_older_than(730)`
+-- (giữ 730 ngày ~ 2 năm, xoá phần cũ hơn). Muốn tự động hoá sau khi đã chốt
+-- thời hạn, tạo pg_cron job gọi lại đúng hàm này (xem cách CloseCAPGMP làm
+-- với gmp_audit trong project song song, cùng tác giả).
+create or replace function prune_logs_older_than(p_days int) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare v_deleted bigint;
+begin
+  -- `ts` lưu dạng text ISO 8601 (client ghi bằng new Date().toISOString()) —
+  -- ép kiểu sang timestamptz để so sánh đúng thời gian thực, KHÔNG so sánh
+  -- text trực tiếp với now()::text (khác định dạng, sai lệch âm thầm).
+  delete from logs where ts::timestamptz < (now() - (p_days || ' days')::interval);
+  get diagnostics v_deleted = row_count;
+  return v_deleted;
+end;
+$$;
+revoke all on function prune_logs_older_than(int) from public;
 
 -- ===================== Cleanup of the old shared-secret model =====================
 -- Shiftly used to authorize every sync_* call with a shared password argument

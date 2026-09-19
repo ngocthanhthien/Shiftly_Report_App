@@ -551,10 +551,20 @@ function allPOsEverUsed(){
 let DB = null;
 function idbOpen(){
   return new Promise((resolve,reject)=>{
-    const req = indexedDB.open('shiftly_db', 3);
+    const req = indexedDB.open('shiftly_db', 4);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if(!db.objectStoreNames.contains('shifts')) db.createObjectStore('shifts', {keyPath:'key'});
+      let shiftsStore;
+      if(!db.objectStoreNames.contains('shifts')) shiftsStore = db.createObjectStore('shifts', {keyPath:'key'});
+      else shiftsStore = req.transaction.objectStore('shifts');
+      // Chuẩn bị cho truy vấn theo khoảng ngày / theo PO thay vì phải load
+      // toàn bộ `shifts` vào RAM mỗi lần (xem refreshCache) — bản thân việc
+      // thêm index này an toàn/không phá vỡ gì (IndexedDB tự lập chỉ mục lại
+      // dữ liệu cũ); các hàm đọc dữ liệu (renderTable/renderTrace/...) CHƯA
+      // được chuyển sang dùng index này — đó là bước tối ưu lớn hơn, cân
+      // nhắc làm riêng để tránh rủi ro ảnh hưởng nhiều tab cùng lúc.
+      if(!shiftsStore.indexNames.contains('by_date')) shiftsStore.createIndex('by_date','date');
+      if(!shiftsStore.indexNames.contains('by_po')) shiftsStore.createIndex('by_po','po');
       if(!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', {keyPath:'k'});
       if(!db.objectStoreNames.contains('logs')) db.createObjectStore('logs', {keyPath:'id', autoIncrement:true});
       // Outbox: pending changes not yet confirmed synced to Supabase —
@@ -1073,10 +1083,41 @@ function scheduleFlush(delayMs){
   flushScheduled = true;
   setTimeout(()=>{ flushScheduled = false; flushOutbox(); }, delayMs==null?800:delayMs);
 }
+// Cheap fingerprint of a checkpoint's attached photos — photos are only ever
+// added or removed (never edited in place) via the UI, so the sorted set of
+// each photo's own timestamp reliably detects any real change while being
+// far cheaper than hashing/comparing the actual base64 data.
+function imagesFingerprint(cp){
+  return (cp.images||[]).map(im=>im.ts).sort((a,b)=>a-b).join(',');
+}
 function stripLocalMarkers(cp){
   const clean = Object.assign({}, cp);
   delete clean._syncedAt;
-  return clean; // images (incl. base64 dataUrl) travel as-is — see CLOUD SYNC comment above.
+  // Tối ưu băng thông cho Tablet (mạng xưởng thường yếu): nếu ảnh đính kèm
+  // không đổi kể từ lần đồng bộ thành công gần nhất, LƯỢC BỎ hẳn field
+  // `images` khỏi payload thay vì gửi lại (có thể vài MB) chỉ vì 1 con số
+  // khác vừa được sửa — sync_put_checkpoints() phía server tự giữ nguyên
+  // ảnh cũ khi thấy thiếu field này (xem comment trong supabase/schema.sql).
+  if(clean._imagesSyncedFp !== undefined && clean._imagesSyncedFp === imagesFingerprint(cp)){
+    delete clean.images;
+  }
+  delete clean._imagesSyncedFp;
+  return clean;
+}
+// Gộp các dòng cần đẩy lên theo TỔNG DUNG LƯỢNG JSON ước tính (không phải
+// đếm cố định số dòng) — xem lý do trong flushOutbox(). Luôn có ít nhất 1
+// dòng/nhóm kể cả khi dòng đó một mình đã vượt maxBytes (không bao giờ bỏ
+// sót dữ liệu chỉ vì nó quá nặng).
+function chunkRowsBySize(rows, maxBytes){
+  const chunks = [];
+  let cur = [], curSize = 0;
+  for(const row of rows){
+    const size = JSON.stringify(row).length;
+    if(cur.length && curSize + size > maxBytes){ chunks.push(cur); cur = []; curSize = 0; }
+    cur.push(row); curSize += size;
+  }
+  if(cur.length) chunks.push(cur);
+  return chunks;
 }
 async function collectDirtyCheckpointRows(){
   const rows = [];
@@ -1141,7 +1182,7 @@ async function pullFromCloud(){
         await idbPut('shifts', {
           key:row.key, date:row.date, shift:row.shift, section:row.section, po:row.po, itemCode:row.itemCode||'', recipe:row.recipe,
           client:row.client, technician:row.technician, fields:row.fields||{}, fieldNotes:row.fieldNotes||{},
-          images:row.images||[], updatedAt:row.updatedAt, _syncedAt: row.updatedAt,
+          images:row.images||[], updatedAt:row.updatedAt, _syncedAt: row.updatedAt, _imagesSyncedFp: imagesFingerprint(row),
         });
         changed = true;
       }
@@ -1184,17 +1225,27 @@ async function flushOutbox(){
     cpItems.forEach(i=>{ const cp=i.payload; if(!byKey[cp.key] || cp.updatedAt>byKey[cp.key].updatedAt) byKey[cp.key]=cp; });
     (await collectDirtyCheckpointRows()).forEach(cp=>{ if(!byKey[cp.key] || cp.updatedAt>byKey[cp.key].updatedAt) byKey[cp.key]=cp; });
     const allRows = Object.values(byKey);
-    // Smaller batches than before: images now travel inline as base64 (see
-    // CLOUD SYNC comment above), so each row can be noticeably larger.
-    for(let offset=0;offset<allRows.length;offset+=5){
-    const rows=allRows.slice(offset,offset+5);
+    // Nhóm theo TỔNG DUNG LƯỢNG ước tính (không phải đếm cố định số dòng) —
+    // 1 dòng có ảnh mới đổi (xem stripLocalMarkers) có thể nặng gấp hàng
+    // trăm lần 1 dòng chỉ sửa số liệu; đếm cố định dễ khiến 1 lần gọi vượt
+    // quá khả năng chịu tải của Wi-Fi xưởng (Tablet) trong khi phần lớn các
+    // lần đẩy thực tế (chỉ sửa số liệu, ảnh đã lược bỏ) nhẹ hơn nhiều và có
+    // thể gộp nhiều dòng hơn hẳn 5 dòng/lần.
+    for(const rows of chunkRowsBySize(allRows, 1500000)){
     if(rows.length){
       const res = await cloudFetch('sync_put_checkpoints', {p_rows: rows});
       if(res){
         for(const cp of rows){
           const local = await idbGet('shifts', cp.key);
           const ack=(res.results||[]).find(r=>r.key===cp.key);
-          if(local && local.updatedAt===cp.updatedAt && ack && (ack.applied || ack.reason==='stale')){ local._syncedAt = cp.updatedAt; await idbPut('shifts', local); }
+          if(local && local.updatedAt===cp.updatedAt && ack && (ack.applied || ack.reason==='stale')){
+            local._syncedAt = cp.updatedAt;
+            // Chỉ cập nhật dấu vân tay ảnh nếu lần push NÀY thật sự có gửi
+            // `images` — nếu bị lược bỏ (ảnh không đổi), vân tay cũ vẫn còn
+            // đúng, không cần tính lại.
+            if('images' in cp) local._imagesSyncedFp = imagesFingerprint(local);
+            await idbPut('shifts', local);
+          }
         }
         const accepted = new Set((res.results||[]).filter(r=>r.applied || r.reason==='stale').map(r=>r.key));
         cpItems.filter(i=>accepted.has(i.payload.key) && rows.some(r=>r.key===i.payload.key)).forEach(i=>doneIds.push(i.id));
@@ -1246,7 +1297,7 @@ async function flushOutbox(){
     setCloudStatus('error');
   }
   flushing = false;
-  syncDelay = cloudStatus==='error' ? Math.min(syncDelay*2, 300000) : lastPullCount ? 20000 : Math.min(syncDelay*1.5, 120000);
+  syncDelay = cloudStatus==='error' ? Math.min(syncDelay*2, 300000) : lastPullCount ? baseSyncDelay() : Math.min(syncDelay*1.5, 120000);
   armSync();
 }
 function manualSync(){
@@ -1287,10 +1338,20 @@ function armSync(){
   if(document.visibilityState==='hidden' || !navigator.onLine) return;
   syncTimer=setTimeout(()=>{ flushOutbox().finally(armSync); },syncDelay);
 }
+// Tablet (tab Nhập liệu — chủ yếu GHI) không cần poll dồn dập: ghi của
+// chính máy đã tự đẩy ngay qua persistAll(), và Realtime Broadcast đã lo
+// phần "có ai vừa đổi gì" gần như tức thời khi kết nối được. PC (các tab
+// quản lý/xem còn lại) muốn thấy dữ liệu mới nhanh hơn khi đang mở xem —
+// vô hại khi không có realtime lẫn không tốn thêm gì đáng kể (chỉ vài GET
+// nhỏ mỗi lần, xem cloudFetch).
+function baseSyncDelay(){
+  const active = qs('.tab[aria-selected="true"]');
+  return (active && active.dataset.tab!=='input') ? 8000 : 20000;
+}
 function wakeSync(){
   if(document.visibilityState==='hidden'){ clearTimeout(syncTimer); return; }
   if(Date.now()-lastWake<1500) return;
-  lastWake=Date.now(); syncDelay=20000;
+  lastWake=Date.now(); syncDelay=baseSyncDelay();
   if(cloudConfigured()) scheduleFlush(0);
   armSync();
 }
@@ -1981,6 +2042,11 @@ function renderInputForm(){
   root.appendChild(formCard);
   root.appendChild(metaCard);
 }
+// Ảnh (base64, ~150-400KB/ảnh sau nén) là phần nặng nhất của 1 checkpoint —
+// và cả mảng ảnh phải re-upload nguyên khi có ảnh thay đổi (xem
+// imagesFingerprint/stripLocalMarkers) — giới hạn để tránh 1 checkpoint bị
+// gắn quá nhiều ảnh làm đồng bộ chậm/lỗi trên mạng Wi-Fi xưởng yếu.
+const MAX_IMAGES_PER_CHECKPOINT = 8;
 function compressImageFile(file, maxDim, quality){
   return new Promise((resolve, reject)=>{
     const img = new Image();
@@ -2059,10 +2125,16 @@ function renderImageAttach(cp){
   const attachInp = el('input',{type:'file', accept:'image/*', style:'display:none;'},[]);
   const cameraInp = el('input',{type:'file', accept:'image/*', capture:'environment', style:'display:none;'},[]);
   async function handleFiles(fileList){
+    let skipped = 0;
     for(const file of Array.from(fileList)){
+      cp.images = cp.images || [];
+      // Mỗi ảnh thêm vào là nặng nhất trong dữ liệu 1 checkpoint, và TOÀN
+      // BỘ mảng ảnh phải re-upload lại mỗi khi có thay đổi thật (xem
+      // imagesFingerprint/stripLocalMarkers) — giới hạn để 1 checkpoint
+      // không phình to tới mức đồng bộ chậm/lỗi trên mạng xưởng yếu.
+      if(cp.images.length >= MAX_IMAGES_PER_CHECKPOINT){ skipped++; continue; }
       try{
         const dataUrl = await compressImageFile(file, 1280, 0.72);
-        cp.images = cp.images || [];
         const ts = Date.now();
         cp.images.push({name:file.name, dataUrl, ts});
         cp.updatedAt = new Date().toISOString();
@@ -2072,7 +2144,8 @@ function renderImageAttach(cp){
       }catch(e){ console.error(e); toast('Không đọc được ảnh'); }
     }
     renderThumbs();
-    toast('Đã đính kèm ảnh bất thường');
+    if(skipped>0) toast(`Đã đính kèm ảnh — bỏ qua ${skipped} ảnh vì đã đạt tối đa ${MAX_IMAGES_PER_CHECKPOINT} ảnh/điểm kiểm tra`);
+    else toast('Đã đính kèm ảnh bất thường');
   }
   attachInp.addEventListener('change', e=>{ if(e.target.files.length) handleFiles(e.target.files); e.target.value=''; });
   cameraInp.addEventListener('change', e=>{ if(e.target.files.length) handleFiles(e.target.files); e.target.value=''; });
@@ -4501,8 +4574,9 @@ async function renderShare(){
     if(!poV){ toast('Cần nhập mã PO của điểm kiểm tra'); return; }
     const cp = getOrInitCheckpoint(dateV, shiftV, secId, poV);
     cp.images = cp.images || [];
-    let n=0;
+    let n=0, skipped=0;
     for(const file of Array.from(files)){
+      if(cp.images.length >= MAX_IMAGES_PER_CHECKPOINT){ skipped++; continue; }
       try{
         const dataUrl = await compressImageFile(file, 1280, 0.72);
         cp.images.push({name:file.name, dataUrl, ts:Date.now()});
@@ -4513,7 +4587,7 @@ async function renderShare(){
     await idbPut('shifts', cp);
     await refreshCache();
     await persistAll();
-    toast(`Đã đính kèm ${n} ảnh vào ${sectionById(secId).name} — PO ${poV} — Ca ${shiftV} ngày ${fmtDateVN(dateV)}`);
+    toast(`Đã đính kèm ${n} ảnh vào ${sectionById(secId).name} — PO ${poV} — Ca ${shiftV} ngày ${fmtDateVN(dateV)}`+(skipped>0?` — bỏ qua ${skipped} ảnh vì đã đạt tối đa ${MAX_IMAGES_PER_CHECKPOINT} ảnh`:''));
     e.target.value = '';
   });
 }
@@ -4718,6 +4792,16 @@ function renderSettings(){
   root.appendChild(cloudCard);
 
   if(currentMember && currentMember.role==='admin'){ root.appendChild(renderMemberManagementCard()); root.appendChild(renderTabConfigCard()); }
+
+  const persistCard = el('div',{class:'card'},[
+    el('div',{class:'card-h'},['🔒 Lưu trữ bền vững (chống trình duyệt tự xoá dữ liệu)', el('div',{class:'rule'})]),
+    el('p',{class:'sub', style:'margin:0 0 10px;'},['Đặc biệt quan trọng trên Tablet: khi máy thiếu dung lượng, trình duyệt (nhất là Chrome Android) có thể tự ý xoá dữ liệu app đã lưu trong máy nếu chưa được đánh dấu "bền vững". App tự xin quyền này mỗi khi mở lên — không cần thao tác gì thêm.']),
+    el('div',{class:'filepill'+(storagePersisted?' linked':'')},[
+      el('span',{class:'ic'},[storagePersisted?'✅':(navigator.storage && navigator.storage.persist)?'⚠️':'❔']),
+      el('span',{class:'nm'},[storagePersisted?'Đã được bảo vệ — dữ liệu không bị trình duyệt tự xoá khi thiếu dung lượng' : (navigator.storage && navigator.storage.persist)?'Chưa được cấp — trình duyệt có thể tự xoá dữ liệu khi máy sắp hết dung lượng' : 'Trình duyệt này không hỗ trợ kiểm tra — không có gì cần làm thêm']),
+    ]),
+  ]);
+  root.appendChild(persistCard);
 
   const saveDirCard = el('div',{class:'card'},[
     el('div',{class:'card-h'},['📁 Thư mục lưu xuất tự động', el('div',{class:'rule'})]),
@@ -4965,6 +5049,23 @@ async function robustShareMultipleOrDownload(files, opts){
   return false;
 }
 
+/* ===================== STORAGE DURABILITY (Tablet) =====================
+   Trình duyệt (đặc biệt Android Chrome trên Tablet) có thể tự ý xoá dữ liệu
+   IndexedDB của 1 origin dưới áp lực thiếu dung lượng máy, TRỪ KHI origin đó
+   được đánh dấu "persistent". Với 1 app mà toàn bộ giá trị nằm ở việc không
+   bao giờ mất dữ liệu offline, đây là lớp bảo vệ nền tảng — xin 1 lần lúc
+   khởi động, không chặn/làm chậm gì nếu trình duyệt không hỗ trợ hoặc từ
+   chối (một số trình duyệt tự cấp âm thầm dựa trên "site engagement", không
+   phải lúc nào cũng hiện hộp thoại hỏi). Trạng thái hiện ở tab Cài đặt. */
+let storagePersisted = null; // null = chưa biết/không hỗ trợ, true/false = đã hỏi xong
+async function ensureStoragePersisted(){
+  try{
+    if(!navigator.storage || !navigator.storage.persist){ storagePersisted = null; return; }
+    const already = await navigator.storage.persisted();
+    storagePersisted = already || await navigator.storage.persist();
+  }catch(e){ console.error(e); storagePersisted = null; }
+}
+
 /* ===================== AUTO-SAVE FOLDER (File System Access API) =====================
    "Cho phép thiết đặt 1 lần ổ đĩa lưu khi xuất về" — chọn 1 thư mục MỘT LẦN
    (Chrome/Edge trên máy tính; API này không tồn tại trên Safari/Firefox và
@@ -5041,6 +5142,41 @@ async function exportFileToPreferredLocation(file, opts){
    hoặc tên đúng "Action" — nếu công đoạn chưa có field này (Specs), cột để
    trống — thêm field đó qua tab Specs (kiểu "Ghi chú") nếu cần dùng cột này.
    Không xuất ảnh — đúng yêu cầu "không xuất hình". */
+// Bộ mặc định tích sẵn "Xuất trong báo cáo QMS" cho các chỉ tiêu khớp rõ
+// nhất với file mẫu (theo yêu cầu người dùng 2026-09-19: "mặc định tích
+// chọn giúp tôi, trường hợp tôi không thể hiện có thể bỏ chọn sau"). Chỉ áp
+// dụng MỘT LẦN DUY NHẤT lúc khởi động (xem seedQmsDefaults trong init()) —
+// không bao giờ tự bật lại 1 field mà người dùng đã tự tắt sau đó. EXT có
+// 3 chỉ tiêu "%TC" khác nhau (VG2/Conilon/Decaf) nên tích cả 3, đặt tên cột
+// riêng — bỏ bớt cột nào không dùng ngay trong Specs. FP thiếu hẳn chỉ tiêu
+// Color/Sediment/Cupping (chưa tồn tại) nên KHÔNG có trong danh sách này —
+// cần tự thêm field đó qua Specs trước khi đánh dấu QMS được.
+const QMS_DEFAULT_SEED = {
+  ROA_R5E: 'Moisture',
+  ROA_R6E: 'Color',
+  EXT_R10E: '%TC (VG2)',
+  EXT_R11E: '%TC (Conilon)',
+  EXT_R12E: '%TC (Decaf)',
+  EXT_R13E: 'Cupping',
+  EVA_R21E: 'Sediment Clarifier',
+  EVA_R22E: 'Sediment set tank 2',
+  EVA_R23E: 'pH',
+  EVA_R24E: 'Cupping',
+  EVA_R25E: 'TS',
+  FP_MOISTURE: 'Moisture',
+  FP_DENSITY: 'Density',
+};
+async function seedQmsDefaults(){
+  if(await idbGet('meta','qmsDefaultsSeeded')) return;
+  let changed = false;
+  SCHEMA.forEach(sec=>sec.fields.forEach(f=>{
+    if(QMS_DEFAULT_SEED[f.id] && f.isQMS===undefined){
+      f.isQMS = true; f.qmsLabel = QMS_DEFAULT_SEED[f.id]; changed = true;
+    }
+  }));
+  await idbPut('meta', {k:'qmsDefaultsSeeded', value:true});
+  if(changed) await saveSchema();
+}
 const EXPORT_MONTHS_EN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 // "dd-mmm-yyy" theo file mẫu (numfmt thực tế trong file là d-mmm-yyyy kiểu
 // Anh-Mỹ: ngày KHÔNG có số 0 đứng đầu, tên tháng viết tắt tiếng Anh).
@@ -5138,6 +5274,7 @@ function renderAll(){
   DB = await idbOpen();
   await loadCloudState();
   await loadSaveDirHandle();
+  ensureStoragePersisted(); // không await — không cần chặn boot để chờ hộp thoại quyền (nếu có)
   const metaTabConfig = await idbGet('meta','tabConfig');
   if(metaTabConfig && metaTabConfig.value) TAB_CONFIG = normalizeTabConfig(metaTabConfig.value);
   const metaTech = await idbGet('meta','technicians');
@@ -5159,6 +5296,7 @@ function renderAll(){
     }
   }));
   if(migrated) await saveSchema();
+  await seedQmsDefaults();
   if(!stageIds().includes(currentStage)) currentStage = stageIds()[0];
   const metaPoClosures = await idbGet('meta','poClosures');
   if(metaPoClosures && metaPoClosures.value) poClosures = metaPoClosures.value;

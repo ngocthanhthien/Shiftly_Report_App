@@ -144,6 +144,10 @@ test('Báo cáo tab: warns (and can be cancelled) when exporting the template wi
     w.showTab('report');
     await new Promise(r => setTimeout(r, 80));
     w.eval('window.exportFileToPreferredLocation = async (file) => { window.__capturedFile = file; };');
+    // seedQmsDefaults() (run once at boot) pre-checks isQMS for the fields
+    // that clearly match the template (see QMS_DEFAULT_SEED) — clear all of
+    // them here to exercise the "nothing configured yet" warning in isolation.
+    w.eval(`SCHEMA.forEach(s=>s.fields.forEach(f=>{ delete f.isQMS; delete f.qmsLabel; }));`);
 
     let confirmCalls = 0;
     w.confirm = (msg) => { confirmCalls++; assert.ok(msg.includes('QMS'), 'the warning must mention QMS'); return false; };
@@ -166,6 +170,32 @@ test('Báo cáo tab: warns (and can be cancelled) when exporting the template wi
     // Not asserting errors.length===0 here: jsdom has no <canvas> implementation
     // (see package.json — the `canvas` package isn't installed), and drawing the
     // shift's report preview touches it incidentally; unrelated to this test.
+  } finally { dom.window.close(); }
+});
+
+test('stripLocalMarkers: omits `images` only when unchanged since the last sync; always includes it on first sync or a real change', async () => {
+  const {dom, w} = await boot();
+  try {
+    const cp = w.blankCheckpoint('2026-09-19', '1', 'ROA', 'PO1', 'QA');
+    cp.images = [{ name: 'a.jpg', dataUrl: 'data:image/jpeg;base64,AAAA', ts: 100 }];
+
+    // Never synced yet (no _imagesSyncedFp) -> first push must include images.
+    let clean = w.eval(`stripLocalMarkers(${JSON.stringify(cp)})`);
+    assert.ok('images' in clean, 'first-ever sync must include images');
+
+    // Mark it as already synced at the CURRENT fingerprint -> a pure field
+    // edit (photos untouched) must omit `images` from the outgoing payload.
+    cp._imagesSyncedFp = w.eval(`imagesFingerprint(${JSON.stringify(cp)})`);
+    clean = w.eval(`stripLocalMarkers(${JSON.stringify(cp)})`);
+    assert.ok(!('images' in clean), 'unchanged photos must be omitted from the push payload');
+    assert.ok(!('_imagesSyncedFp' in clean), 'the local-only marker must never itself be sent to the server');
+    assert.ok(!('_syncedAt' in clean), 'the pre-existing _syncedAt marker must still be stripped too');
+
+    // Add a new photo -> fingerprint changes -> must include images again.
+    cp.images.push({ name: 'b.jpg', dataUrl: 'data:image/jpeg;base64,BBBB', ts: 200 });
+    clean = w.eval(`stripLocalMarkers(${JSON.stringify(cp)})`);
+    assert.ok('images' in clean, 'a real photo change must be included in the push payload');
+    assert.equal(clean.images.length, 2);
   } finally { dom.window.close(); }
 });
 

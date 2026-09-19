@@ -218,6 +218,33 @@ test('images travel inline as base64 dataUrl inside the checkpoint row — no se
   assert.equal(got.images[0].dataUrl, 'data:image/jpeg;base64,AAAA');
 });
 
+test('checkpoints: omitting the `images` key on a later push preserves the existing photos (bandwidth optimization); sending an empty array still clears them', async () => {
+  const db = await backend();
+  const uid = await createMember(db);
+  await signInAs(db, uid);
+  const withImage = {
+    key: 'k3', date: '2026-09-19', shift: '1', section: 'FP', po: 'PO3', recipe: '', client: '', technician: 'QA',
+    fields: { a: 1 }, fieldNotes: {}, images: [{ name: 'a.jpg', dataUrl: 'data:image/jpeg;base64,AAAA', ts: 111 }], updatedAt: '2026-09-19T01:00:00Z',
+  };
+  await rpc(db, 'sync_put_checkpoints', { p_rows: [withImage] });
+
+  // Field-only edit: build the row WITHOUT an `images` key at all (mirrors
+  // what stripLocalMarkers() does client-side when the photo set hasn't changed).
+  const fieldOnlyEdit = { key: 'k3', date: '2026-09-19', shift: '1', section: 'FP', po: 'PO3', recipe: '', client: '', technician: 'QA', fields: { a: 2 }, fieldNotes: {}, updatedAt: '2026-09-19T02:00:00Z' };
+  assert.ok(!('images' in fieldOnlyEdit));
+  await rpc(db, 'sync_put_checkpoints', { p_rows: [fieldOnlyEdit] });
+  let row = (await rpc(db, 'sync_get_checkpoints', { p_since: 0 })).rows.find(r => r.key === 'k3');
+  assert.equal(row.fields.a, 2, 'the field edit itself must still apply');
+  assert.equal(row.images.length, 1, 'existing photo must survive a push that omits `images`');
+  assert.equal(row.images[0].dataUrl, 'data:image/jpeg;base64,AAAA');
+
+  // A deliberate clear (client sends images: []) must still actually clear them.
+  const clearImages = { ...fieldOnlyEdit, images: [], updatedAt: '2026-09-19T03:00:00Z' };
+  await rpc(db, 'sync_put_checkpoints', { p_rows: [clearImages] });
+  row = (await rpc(db, 'sync_get_checkpoints', { p_since: 0 })).rows.find(r => r.key === 'k3');
+  assert.equal(row.images.length, 0, 'explicitly sending an empty array must still clear existing photos');
+});
+
 test('meta: last-write-wins round trip', async () => {
   const db = await backend();
   const uid = await createMember(db);
@@ -237,6 +264,27 @@ test('logs: entries are recorded', async () => {
   await signInAs(db, uid);
   await rpc(db, 'sync_post_logs', { p_entries: [{ ts: '2026-09-18T01:00:00Z', date: '2026-09-18', shift: '1', po: 'PO1', section: 'ROA', technician: 'QA', changes: [{ fieldId: 'x', from: 1, to: 2 }] }] });
   assert.equal((await db.query('select count(*)::int as n from logs')).rows[0].n, 1);
+});
+
+test('prune_logs_older_than: deletes only rows past the given retention window, and is never reachable via the API roles', async () => {
+  const db = await backend();
+  const priv = await db.query(`
+    select has_function_privilege('anon', 'prune_logs_older_than(int)', 'execute') as a,
+           has_function_privilege('authenticated', 'prune_logs_older_than(int)', 'execute') as b
+  `);
+  assert.equal(priv.rows[0].a, false);
+  assert.equal(priv.rows[0].b, false);
+
+  // Insert one very old log (real ISO text, like the client writes) and one recent one.
+  await db.query(`insert into logs (ts, date, shift, changes) values ($1, '2020-01-01', '1', '[]'::jsonb)`, [new Date(Date.now() - 800 * 86400000).toISOString()]);
+  await db.query(`insert into logs (ts, date, shift, changes) values ($1, '2026-09-19', '1', '[]'::jsonb)`, [new Date().toISOString()]);
+  assert.equal((await db.query('select count(*)::int as n from logs')).rows[0].n, 2);
+
+  const res = await db.query('select prune_logs_older_than(730) as n'); // ~2 năm
+  assert.equal(res.rows[0].n, 1, 'only the row older than the retention window must be deleted');
+  const remaining = await db.query('select date from logs');
+  assert.equal(remaining.rows.length, 1);
+  assert.equal(remaining.rows[0].date, '2026-09-19');
 });
 
 test('bulk push: every row gets a distinct seq (Postgres sequence, no shared per-batch counter, no ties to break)', async () => {
@@ -350,6 +398,13 @@ test('full app boots, requires login once cloud sync is configured, then syncs a
       await flushOutbox();
       return cp.key;
     })()`);
+    // seedQmsDefaults() (run once at boot) also queues a 'meta' outbox item
+    // for the Specs schema change — give any such background flush
+    // (scheduleFlush()'s own 800ms timer, or verifyAndEnter()'s fire-and-
+    // forget flushOutbox() right after login) a moment to land, then sweep
+    // once more explicitly, before asserting the outbox is fully drained.
+    await new Promise(r => setTimeout(r, 900));
+    await w.eval('(async () => { await flushOutbox(); })()');
 
     assert.equal(errors.length, 0, errors.join('\n'));
     assert.equal((await w.idbGetAll('outbox')).length, 0);

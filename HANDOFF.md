@@ -1,6 +1,6 @@
 # HANDOFF — Shiftly Report App
 
-Tài liệu bàn giao để tiếp tục làm việc ở phiên AI/công cụ khác. Cập nhật lần cuối: 2026-09-18.
+Tài liệu bàn giao để tiếp tục làm việc ở phiên AI/công cụ khác. Cập nhật lần cuối: 2026-09-19.
 
 ---
 
@@ -129,7 +129,24 @@ Người dùng cung cấp 1 file mẫu thứ 2 (`Template Data export.xlsx`, cù
 - [x] Access control thật (Supabase Auth Admin/User + Edge Function quản lý tài khoản), thay thế mô hình mật khẩu chung — xong 2026-09-18.
 - [x] Vai trò Supervisor (chỉ xem, chặn ghi ở server qua `is_writer_member()`) + Admin tự sắp xếp/ẩn-hiện Tab theo vai trò (`TAB_CONFIG`) — xong 2026-09-18.
 - [x] Yêu cầu (1) Xuất dữ liệu — Item Code, cờ isQMS, xuất Excel/PDF theo mẫu Process/QMS, thư mục lưu tự động (File System Access API) — xong 2026-09-19 (chi tiết mục 3 ở trên).
+- [x] **Audit dữ liệu + đồng bộ (2026-09-19)**, tối ưu theo đúng bối cảnh "Tablet nhập liệu / PC quản lý-truy xuất" — xem mục 3b ngay dưới đây cho chi tiết từng phần.
 - [ ] Thêm cơ chế lọc "QMS-only" cho **báo cáo ảnh** (`buildReportSVG`, tab Báo cáo — KHÁC với tính năng xuất Excel/PDF mới ở mục 3, vẫn chưa đụng tới `buildReportSVG`) + hiển thị Recipe + ảnh full-width.
 - [ ] Hỏi lại câu 4.6: thứ tự UI Recipe/Client vs Technician trong form Nhập liệu có cần đổi không.
-- [ ] Người dùng cần: (a) chạy lại `supabase/schema.sql` mới nhất (thêm `item_code`, `members.role` cho phép `supervisor`, `is_writer_member()`) trên project Supabase thật; (b) vào Specs đánh dấu `isQMS` cho các chỉ tiêu muốn xuất theo mẫu — mặc định TẤT CẢ đang tắt; (c) nếu chưa làm ở phiên trước: bật Email auth, tạo Admin đầu tiên bằng SQL, deploy lại Edge Function `admin-users` bằng Supabase CLI (đã sửa để nhận thêm role `supervisor`).
+- [ ] Người dùng cần: (a) chạy lại `supabase/schema.sql` mới nhất (thêm `item_code`, `members.role` cho phép `supervisor`, `is_writer_member()`, tối ưu `sync_put_checkpoints` bỏ-qua-ảnh-không-đổi, `prune_logs_older_than`) trên project Supabase thật; (b) tự rà lại danh sách chỉ tiêu đã được TỰ ĐỘNG tích "isQMS" (xem `QMS_DEFAULT_SEED` trong index.html) — bỏ chọn cái nào không đúng; (c) nếu chưa làm ở phiên trước: bật Email auth, tạo Admin đầu tiên bằng SQL, deploy lại Edge Function `admin-users` bằng Supabase CLI (đã sửa để nhận thêm role `supervisor`).
 - [ ] Chưa test Edge Function `admin-users` với 1 project Supabase thật (không có runtime Deno trong sandbox) — người dùng cần tự thử luồng tạo/vô hiệu hóa tài khoản qua UI "👥 Quản lý tài khoản" sau khi deploy, và báo lại nếu có lỗi.
+- [ ] **Quyết định nghiệp vụ còn treo (KHÔNG tự làm)**: thời hạn lưu `logs` (Data Log) — hàm `prune_logs_older_than(days)` đã có trong schema.sql nhưng KHÔNG tự chạy (không grant, không pg_cron) vì đây có thể là dữ liệu cần cho audit FSSC/khách hàng — chỉ Admin tự chạy thủ công trong SQL Editor khi đã chốt được thời hạn, xem comment ngay phía trên hàm đó trong schema.sql.
+
+### 3b. Chi tiết Audit dữ liệu + đồng bộ (2026-09-19)
+
+Người dùng yêu cầu audit + thực hiện toàn bộ đề xuất, với lăng kính "Tablet nhập liệu (mạng yếu) / PC quản lý-truy xuất":
+
+1. **Không re-upload ảnh không đổi khi chỉ sửa số liệu** — `sync_put_checkpoints` giờ phân biệt "client không gửi field `images`" (giữ nguyên ảnh cũ, dùng toán tử jsonb `?`) với "client gửi mảng rỗng" (xoá thật). Client: `imagesFingerprint(cp)` (dấu vân tay rẻ = danh sách `ts` của từng ảnh) + `stripLocalMarkers()` tự lược bỏ `images` khỏi payload khi vân tay không đổi so với `_imagesSyncedFp` (cập nhật lại đúng lúc ack thành công VÀ có gửi ảnh lần đó). Đây là thay đổi tác động lớn nhất tới băng thông Tablet.
+2. **Giới hạn `MAX_IMAGES_PER_CHECKPOINT = 8`** — áp dụng ở cả 2 nơi đính kèm ảnh (`renderImageAttach`, và "Nhập ảnh đính kèm từ xa" ở tab Xuất nhập dữ liệu).
+3. **`ensureStoragePersisted()`** — gọi `navigator.storage.persist()` lúc khởi động (không chặn boot), hiển thị trạng thái ở Cài đặt. Chỉ hoạt động trên trình duyệt hỗ trợ; không hỗ trợ thì hiện "❔" thay vì lỗi.
+4. **IndexedDB index `by_date`/`by_po` trên store `shifts`** (bump version DB → 4) — CHỈ thêm index, CHƯA đổi bất kỳ hàm đọc dữ liệu nào (`refreshCache()` vẫn `idbGetAll` toàn bộ) — việc chuyển các tab sang dùng index này (thay vì load hết vào RAM) là 1 refactor lớn hơn, cố tình CHƯA làm để tránh rủi ro ảnh hưởng nhiều tab cùng lúc trong 1 lần đổi.
+5. **`chunkRowsBySize()`** — `flushOutbox()` giờ gộp các dòng cần đẩy theo tổng dung lượng JSON ước tính (~1.5MB/lần gọi) thay vì đếm cố định 5 dòng.
+6. **`baseSyncDelay()`** — nhịp poll nền co giãn theo tab đang xem: tab Nhập liệu (Tablet, chủ yếu ghi) giữ 20s như cũ; các tab khác (PC, quản lý/xem) rút xuống 8s.
+7. Kế hoạch lưu trữ/archival dài hạn — CHƯA implement (quyết định nghiệp vụ, không phải kỹ thuật).
+8. `prune_logs_older_than(days)` — xem mục treo ở trên, KHÔNG tự động chạy.
+
+Test: `tests/supabase.test.mjs` có thêm test cho hành vi bỏ-qua-ảnh-không-đổi (SQL) và `prune_logs_older_than`; `tests/process-qms-export.test.mjs` có thêm test đơn vị cho `stripLocalMarkers`/`imagesFingerprint` phía client.
