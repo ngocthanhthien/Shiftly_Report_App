@@ -109,14 +109,39 @@ test('sync_whoami returns the caller\'s own membership row for an active member'
   assert.equal(who.role, 'admin');
 });
 
-test('is_active_member() is not reachable by anon, only authenticated', async () => {
+test('a supervisor can read everything but every write RPC rejects with {error:"forbidden_role"}', async () => {
+  const db = await backend();
+  const uid = await createMember(db, { role: 'supervisor', displayName: 'Giám sát A' });
+  await signInAs(db, uid);
+
+  // Reads: unaffected — a supervisor's whole purpose is viewing reports/data.
+  assert.equal((await rpc(db, 'sync_whoami', {})).role, 'supervisor');
+  assert.deepEqual((await rpc(db, 'sync_get_checkpoints', {})).rows, []);
+  assert.deepEqual((await rpc(db, 'sync_get_meta', {})).items, {});
+
+  // Writes: every one of them, rejected — never silently a no-op, always this exact error shape.
+  const cp = { key: 'sup1', date: '2026-09-19', shift: '1', section: 'ROA', po: '', recipe: '', client: '', technician: '', fields: {}, fieldNotes: {}, images: [], updatedAt: '2026-09-19T00:00:00Z' };
+  assert.equal((await rpc(db, 'sync_put_checkpoints', { p_rows: [cp] })).error, 'forbidden_role');
+  assert.equal((await rpc(db, 'sync_delete_checkpoints', { p_keys: ['sup1'], p_updated_at: '2026-09-19T00:00:01Z' })).error, 'forbidden_role');
+  assert.equal((await rpc(db, 'sync_put_meta', { p_items: { poList: { value: ['X'], updatedAt: '2026-09-19T00:00:00Z' } } })).error, 'forbidden_role');
+  assert.equal((await rpc(db, 'sync_post_logs', { p_entries: [{ ts: '2026-09-19T00:00:00Z' }] })).error, 'forbidden_role');
+
+  // Confirm the rejected checkpoint write never actually landed.
+  assert.equal((await db.query('select count(*)::int as n from checkpoints')).rows[0].n, 0);
+});
+
+test('is_active_member() and is_writer_member() are not reachable by anon, only authenticated', async () => {
   const db = await backend();
   const res = await db.query(`
     select has_function_privilege('anon', 'is_active_member()', 'execute') as a,
-           has_function_privilege('authenticated', 'is_active_member()', 'execute') as b
+           has_function_privilege('authenticated', 'is_active_member()', 'execute') as b,
+           has_function_privilege('anon', 'is_writer_member()', 'execute') as c,
+           has_function_privilege('authenticated', 'is_writer_member()', 'execute') as d
   `);
   assert.equal(res.rows[0].a, false);
   assert.equal(res.rows[0].b, true);
+  assert.equal(res.rows[0].c, false);
+  assert.equal(res.rows[0].d, true);
 });
 
 test('every real table has row level security enabled (no policies -> direct REST access denied)', async () => {

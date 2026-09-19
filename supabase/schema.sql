@@ -73,11 +73,16 @@ create table if not exists members (
   user_id uuid primary key references auth.users (id) on delete cascade,
   display_name text not null default '',
   username text,
-  role text not null default 'user' check (role in ('admin', 'user')),
+  role text not null default 'user' check (role in ('admin', 'user', 'supervisor')),
   disabled boolean not null default false,
   created_at timestamptz not null default now()
 );
 create unique index if not exists idx_members_username on members (lower(username)) where username is not null;
+-- Migration for a project created before the 'supervisor' role existed:
+-- `create table if not exists` above doesn't touch an already-existing
+-- table's CHECK constraint, so widen it explicitly (safe/idempotent).
+alter table members drop constraint if exists members_role_check;
+alter table members add constraint members_role_check check (role in ('admin', 'user', 'supervisor'));
 
 create table if not exists member_audit (
   id bigserial primary key,
@@ -108,6 +113,21 @@ language sql stable security definer set search_path = public as $$
 $$;
 revoke all on function is_active_member() from public;
 grant execute on function is_active_member() to authenticated;
+
+-- is_writer_member() is the extra check every WRITE sync_* function (put/
+-- delete/post) calls on top of is_active_member(): a 'supervisor' is an
+-- active member (can read everything — reports, lookups, stats) but is
+-- never allowed to write. A read-only 'supervisor' role exists specifically
+-- for people who should see data, not enter or change it — see index.html's
+-- ACCESS CONTROL comments for the 3 roles (admin/user/supervisor).
+create or replace function is_writer_member() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from members where user_id = auth.uid() and not disabled and role <> 'supervisor'
+  );
+$$;
+revoke all on function is_writer_member() from public;
+grant execute on function is_writer_member() to authenticated;
 
 -- Returns the caller's own membership row, or {"error":"unauthorized"} if
 -- not signed in / not a member / disabled. This is how the app learns its
@@ -160,6 +180,7 @@ declare
   v_results jsonb := '[]'::jsonb;
 begin
   if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
+  if not is_writer_member() then return jsonb_build_object('error', 'forbidden_role'); end if;
   for v_row in select * from jsonb_array_elements(p_rows) loop
     v_key := v_row->>'key';
     v_updated_at := v_row->>'updatedAt';
@@ -195,6 +216,7 @@ declare
   v_key text;
 begin
   if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
+  if not is_writer_member() then return jsonb_build_object('error', 'forbidden_role'); end if;
   foreach v_key in array p_keys loop
     insert into checkpoints (key, date, shift, section, po, recipe, client, technician, fields, field_notes, images, updated_at, deleted, seq)
     values (v_key, '', '', '', '', '', '', '', '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, p_updated_at, true, nextval('checkpoints_seq'))
@@ -230,6 +252,7 @@ declare
   v_results jsonb := '{}'::jsonb;
 begin
   if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
+  if not is_writer_member() then return jsonb_build_object('error', 'forbidden_role'); end if;
   for v_key, v_val in select * from jsonb_each(p_items) loop
     v_updated_at := v_val->>'updatedAt';
     if v_updated_at is null then
@@ -254,6 +277,7 @@ language plpgsql security definer set search_path = public as $$
 declare v_entry jsonb;
 begin
   if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
+  if not is_writer_member() then return jsonb_build_object('error', 'forbidden_role'); end if;
   for v_entry in select * from jsonb_array_elements(p_entries) loop
     insert into logs (ts, date, shift, po, section, technician, changes)
     values (

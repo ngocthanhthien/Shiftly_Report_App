@@ -158,7 +158,7 @@ serve(async (req: Request) => {
       const trimmedUsername = String(username || "").trim().toLowerCase();
       const trimmedEmail = String(email || "").trim().toLowerCase();
       const userPassword = String(password || "");
-      const selectedRole = role === "admin" ? "admin" : "user";
+      const selectedRole = ["admin", "supervisor"].includes(role) ? role : "user";
       // Username login (no email) for the common case; a real email stays available for
       // Admin accounts, or anyone who explicitly needs to sign in with one.
       const usingUsername = !trimmedEmail && !!trimmedUsername;
@@ -271,8 +271,8 @@ serve(async (req: Request) => {
         });
       }
 
-      if (!["user", "admin"].includes(newRole)) {
-        return new Response(JSON.stringify({ error: "Vai trò mới không hợp lệ (chỉ chấp nhận user hoặc admin)." }), {
+      if (!["user", "admin", "supervisor"].includes(newRole)) {
+        return new Response(JSON.stringify({ error: "Vai trò mới không hợp lệ (chỉ chấp nhận user, supervisor hoặc admin)." }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });

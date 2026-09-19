@@ -1009,6 +1009,13 @@ async function cloudFetch(fn, params){
       throw new Error('HTTP '+res.status);
     }
     if(body && body.error){
+      if(body.error === 'forbidden_role'){
+        // Vai trò Giám sát/Quản lý cố ghi dữ liệu — KHÔNG đăng xuất, chỉ là
+        // hành động này không cho phép với vai trò hiện tại (xem
+        // is_writer_member() trong supabase/schema.sql).
+        lastCloudError = 'Tài khoản Giám sát/Quản lý chỉ được xem, không được nhập/sửa dữ liệu';
+        return null;
+      }
       lastCloudError = 'Tài khoản không có quyền truy cập (chưa được cấp quyền hoặc đã bị vô hiệu hóa)';
       onAccessRevoked();
       return null;
@@ -1109,6 +1116,7 @@ function applyRemoteMeta(key, value){
   else if(key==='clientList' && Array.isArray(value)){ CLIENT_LIST = value; idbPut('meta', {k:'clientList', value: CLIENT_LIST}); }
   else if(key==='technicians' && Array.isArray(value) && value.length){ TECHNICIANS = value; idbPut('meta', {k:'technicians', value: TECHNICIANS}); }
   else if(key==='poClosures' && value && typeof value==='object'){ poClosures = value; idbPut('meta', {k:'poClosures', value: poClosures}); }
+  else if(key==='tabConfig' && value && typeof value==='object'){ TAB_CONFIG = normalizeTabConfig(value); idbPut('meta', {k:'tabConfig', value: TAB_CONFIG}); applyTabConfig(); }
 }
 let pulling = false;
 async function pullFromCloud(){
@@ -1560,6 +1568,49 @@ function showTab(name){
   if(name!=='settings' && name!=='guide' && cloudConfigured() && Date.now()-lastWake>20000) wakeSync();
 }
 qsa('.tab').forEach(t => t.addEventListener('click', ()=>showTab(t.dataset.tab)));
+
+/* ===================== TAB LAYOUT & PER-ROLE VISIBILITY =====================
+   Admin-configurable: reorder the tab bar, and hide individual tabs for the
+   'user' and/or 'supervisor' role (Admin always sees every tab, regardless
+   of this config — Admin can't lock themselves out). Stored as a single
+   meta key ('tabConfig'), synced like PO_LIST/RECIPES/etc. — see
+   applyRemoteMeta() and the "🗂️ Sắp xếp & Ẩn/hiện Tab" card in Cài đặt. */
+const TAB_ORDER_DEFAULT = ['input','table','trace','polist','recipelist','clientlist','datalog','report','stats','specs','share','settings','guide'];
+const TAB_LABELS = {input:'Nhập liệu', table:'Dữ liệu', trace:'Truy xuất', polist:'Danh sách PO', recipelist:'Danh sách Recipe', clientlist:'Danh sách Client', datalog:'Data Log', report:'Báo cáo', stats:'Thống kê', specs:'Specs', share:'Xuất nhập dữ liệu', settings:'Cài đặt', guide:'Hướng dẫn'};
+// Mặc định: Nhân viên (user) thấy đủ mọi tab như trước (không đổi hành vi
+// cũ); Giám sát/Quản lý (supervisor) mặc định ẩn tab Nhập liệu vì vai trò
+// này chỉ để xem — Admin chỉnh thêm được trong Cài đặt.
+let TAB_CONFIG = { order: TAB_ORDER_DEFAULT.slice(), hidden: { user: [], supervisor: ['input'] } };
+function normalizeTabConfig(cfg){
+  const order = Array.isArray(cfg && cfg.order) ? cfg.order.filter(id=>TAB_ORDER_DEFAULT.includes(id)) : [];
+  TAB_ORDER_DEFAULT.forEach(id=>{ if(!order.includes(id)) order.push(id); }); // tab nào thiếu trong cấu hình cũ (VD thêm mới sau này) vẫn không bị mất, đưa xuống cuối
+  const hidden = {};
+  ['user','supervisor'].forEach(role=>{
+    // 'settings' không bao giờ ẩn được — đây là nơi duy nhất có nút Đăng
+    // xuất/Ngắt kết nối, ẩn nó sẽ nhốt luôn người dùng trong tài khoản đó.
+    hidden[role] = Array.isArray(cfg && cfg.hidden && cfg.hidden[role]) ? cfg.hidden[role].filter(id=>TAB_ORDER_DEFAULT.includes(id) && id!=='settings') : [];
+  });
+  return { order, hidden };
+}
+// Sắp xếp lại DOM theo TAB_CONFIG.order, ẩn/hiện theo vai trò hiện tại (bỏ
+// qua hoàn toàn với Admin — luôn thấy đủ), và tự chuyển sang tab đầu tiên
+// còn hiện nếu tab đang chọn vừa bị ẩn (VD Supervisor vừa đăng nhập, tab
+// mặc định "Nhập liệu" bị ẩn với vai trò này).
+function applyTabConfig(){
+  const tabsRow = qs('.tabs');
+  if(!tabsRow) return;
+  const btns = {};
+  qsa('.tab', tabsRow).forEach(b=>{ btns[b.dataset.tab] = b; });
+  TAB_CONFIG.order.forEach(id=>{ if(btns[id]) tabsRow.appendChild(btns[id]); });
+  const role = currentMember ? currentMember.role : null;
+  const hiddenIds = (role && role!=='admin' && TAB_CONFIG.hidden[role]) ? TAB_CONFIG.hidden[role] : [];
+  Object.keys(btns).forEach(id=>{ btns[id].style.display = hiddenIds.includes(id) ? 'none' : ''; });
+  const activeBtn = qs('.tab[aria-selected="true"]', tabsRow);
+  if(activeBtn && hiddenIds.includes(activeBtn.dataset.tab)){
+    const firstVisible = TAB_CONFIG.order.find(id=>!hiddenIds.includes(id) && btns[id]);
+    if(firstVisible) showTab(firstVisible);
+  }
+}
 
 /* ===================== INPUT TAB ===================== */
 // Online build: no file-linking gate — IndexedDB is always available, so
@@ -4420,16 +4471,23 @@ async function adminUsersCall(action, params){
     return body;
   }catch(e){ return {error:'Không gọi được admin-users (đã deploy Edge Function chưa? xem supabase/README.md)'}; }
 }
+// role -> {label, icon} — dùng chung cho danh sách tài khoản, ô chọn vai
+// trò khi tạo mới, và các nơi khác cần hiển thị tên vai trò bằng tiếng Việt.
+const ROLE_INFO = {
+  user: {label:'Nhân viên (User)', icon:'👤'},
+  supervisor: {label:'Giám sát/Quản lý (chỉ xem)', icon:'👁️'},
+  admin: {label:'Admin', icon:'🛡️'},
+};
 function renderMemberManagementCard(){
   const card = el('div',{class:'card'},[
     el('div',{class:'card-h'},['👥 Quản lý tài khoản', el('div',{class:'rule'})]),
-    el('p',{class:'sub', style:'margin:0 0 10px;'},['Chỉ Admin thấy mục này. Tạo tài khoản Nhân viên (đăng nhập bằng tên đăng nhập) hoặc Admin (đăng nhập bằng email).']),
+    el('p',{class:'sub', style:'margin:0 0 10px;'},['Chỉ Admin thấy mục này. 3 vai trò: Admin (toàn quyền, đăng nhập bằng email), Nhân viên (nhập liệu, đăng nhập bằng tên đăng nhập), Giám sát/Quản lý (chỉ xem báo cáo/dữ liệu/thống kê, không nhập được — đăng nhập bằng tên đăng nhập).']),
   ]);
   const listBox = el('div',{style:'margin:0 0 14px;'},[el('p',{class:'sub'},['Đang tải danh sách…'])]);
   card.appendChild(listBox);
 
   const nameInp = el('input',{class:'inp', type:'text', placeholder:'Họ và tên'},[]);
-  const roleSel = el('select',{class:'inp'},[el('option',{value:'user'},['Nhân viên (User)']),el('option',{value:'admin'},['Admin'])]);
+  const roleSel = el('select',{class:'inp'},Object.keys(ROLE_INFO).map(r=>el('option',{value:r},[ROLE_INFO[r].label])));
   const loginModeSel = el('select',{class:'inp'},[el('option',{value:'username'},['Đăng nhập bằng tên đăng nhập']),el('option',{value:'email'},['Đăng nhập bằng email'])]);
   const userOrEmailInp = el('input',{class:'inp', type:'text', placeholder:'Tên đăng nhập (chữ thường, không dấu)'},[]);
   const passInp = el('input',{class:'inp', type:'password', placeholder:'Mật khẩu (tối thiểu 6 ký tự)'},[]);
@@ -4450,18 +4508,21 @@ function renderMemberManagementCard(){
     listBox.innerHTML = '';
     if(res.error){ listBox.appendChild(el('p',{class:'sub', style:'color:var(--fail);'},[res.error])); return; }
     (res.users||[]).forEach(u=>{
+      const info = ROLE_INFO[u.role] || ROLE_INFO.user;
       const row = el('div',{class:'filepill', style:'margin-bottom:8px;'+(u.status==='Disabled'?'opacity:.55;':'')},[
-        el('span',{class:'ic'},[u.role==='admin'?'🛡️':'👤']),
-        el('span',{class:'nm'},[`${u.displayName} — ${u.username?('@'+u.username):u.email} — ${u.role==='admin'?'Admin':'User'} — ${u.status==='Disabled'?'Đã vô hiệu hóa':'Đang hoạt động'}`]),
+        el('span',{class:'ic'},[info.icon]),
+        el('span',{class:'nm'},[`${u.displayName} — ${u.username?('@'+u.username):u.email} — ${info.label} — ${u.status==='Disabled'?'Đã vô hiệu hóa':'Đang hoạt động'}`]),
       ]);
       const isSelf = currentMember && currentMember.userId===u.userId;
       if(!isSelf){
-        const toggleRoleBtn = el('button',{class:'btn ghost sm'},[u.role==='admin'?'Hạ về User':'Nâng lên Admin']);
-        toggleRoleBtn.addEventListener('click', async ()=>{
-          const r = await adminUsersCall('change-role', {targetUserId:u.userId, newRole: u.role==='admin'?'user':'admin'});
-          if(r.error) toast(r.error); else { toast('Đã cập nhật vai trò'); refreshList(); }
+        const roleChangeSel = el('select',{class:'inp', style:'width:auto;'},Object.keys(ROLE_INFO).map(r=>el('option',{value:r},[ROLE_INFO[r].label])));
+        roleChangeSel.value = u.role;
+        roleChangeSel.addEventListener('change', async ()=>{
+          const newRole = roleChangeSel.value;
+          const r = await adminUsersCall('change-role', {targetUserId:u.userId, newRole});
+          if(r.error){ toast(r.error); roleChangeSel.value = u.role; } else { toast('Đã cập nhật vai trò'); refreshList(); }
         });
-        row.appendChild(toggleRoleBtn);
+        row.appendChild(roleChangeSel);
         const toggleActiveBtn = el('button',{class:'btn '+(u.status==='Disabled'?'teal':'danger')+' sm'},[u.status==='Disabled'?'Kích hoạt lại':'Vô hiệu hóa']);
         toggleActiveBtn.addEventListener('click', async ()=>{
           if(u.status!=='Disabled' && !confirm(`Vô hiệu hóa tài khoản "${u.displayName}"? Người này sẽ không đăng nhập được nữa.`)) return;
@@ -4491,6 +4552,59 @@ function renderMemberManagementCard(){
   });
   refreshList();
   card.appendChild(createCard);
+  return card;
+}
+
+/* ===================== ADMIN — TAB LAYOUT & PER-ROLE VISIBILITY =====================
+   Lets Admin reorder the tab bar and hide individual tabs for the 'user'
+   and/or 'supervisor' role — see the TAB LAYOUT & PER-ROLE VISIBILITY module
+   (applyTabConfig/TAB_CONFIG) for how this is enforced. Only rendered for a
+   verified Admin (see renderSettings). Works on a local draft copy of
+   TAB_CONFIG so "Lưu" is one explicit action, not applied keystroke-by-keystroke. */
+function renderTabConfigCard(){
+  const draft = { order: TAB_CONFIG.order.slice(), hidden: {user: TAB_CONFIG.hidden.user.slice(), supervisor: TAB_CONFIG.hidden.supervisor.slice()} };
+  const card = el('div',{class:'card'},[
+    el('div',{class:'card-h'},['🗂️ Sắp xếp & Ẩn/hiện Tab', el('div',{class:'rule'})]),
+    el('p',{class:'sub', style:'margin:0 0 10px;'},['Đổi thứ tự hiện ở thanh tab trên cùng, và chọn ẩn tab nào với vai trò Nhân viên/Giám sát. Admin luôn thấy đủ mọi tab. Tab Cài đặt không ẩn được (nơi duy nhất có nút đăng xuất).']),
+  ]);
+  const listBox = el('div',{},[]);
+  card.appendChild(listBox);
+  function renderList(){
+    listBox.innerHTML = '';
+    draft.order.forEach((id,idx)=>{
+      const isSettings = id==='settings';
+      const upAttrs = {class:'btn ghost sm', title:'Lên trên'}; if(idx===0) upAttrs.disabled='disabled';
+      const downAttrs = {class:'btn ghost sm', title:'Xuống dưới'}; if(idx===draft.order.length-1) downAttrs.disabled='disabled';
+      const userChk = el('input',{type:'checkbox'},[]); userChk.checked = draft.hidden.user.includes(id); userChk.disabled = isSettings;
+      const supChk = el('input',{type:'checkbox'},[]); supChk.checked = draft.hidden.supervisor.includes(id); supChk.disabled = isSettings;
+      const row = el('div',{class:'specfield'},[
+        el('div',{class:'reorder'},[el('button',upAttrs,['▲']),el('button',downAttrs,['▼'])]),
+        el('div',{class:'fi'},[el('b',{},[TAB_LABELS[id]||id])]),
+        el('label',{style:'display:flex;align-items:center;gap:5px;font-size:12.5px;white-space:nowrap;'},[userChk,'Ẩn/User']),
+        el('label',{style:'display:flex;align-items:center;gap:5px;font-size:12.5px;white-space:nowrap;margin-left:10px;'},[supChk,'Ẩn/Giám sát']),
+      ]);
+      const [upBtn, downBtn] = qsa('button', row);
+      upBtn.addEventListener('click', ()=>{ if(idx===0) return; [draft.order[idx-1],draft.order[idx]]=[draft.order[idx],draft.order[idx-1]]; renderList(); });
+      downBtn.addEventListener('click', ()=>{ if(idx===draft.order.length-1) return; [draft.order[idx+1],draft.order[idx]]=[draft.order[idx],draft.order[idx+1]]; renderList(); });
+      userChk.addEventListener('change', ()=>{
+        draft.hidden.user = userChk.checked ? [...new Set([...draft.hidden.user, id])] : draft.hidden.user.filter(x=>x!==id);
+      });
+      supChk.addEventListener('change', ()=>{
+        draft.hidden.supervisor = supChk.checked ? [...new Set([...draft.hidden.supervisor, id])] : draft.hidden.supervisor.filter(x=>x!==id);
+      });
+      listBox.appendChild(row);
+    });
+  }
+  renderList();
+  const saveBtn = el('button',{class:'btn teal sm', style:'margin-top:10px;'},['💾 Lưu cấu hình Tab']);
+  saveBtn.addEventListener('click', async ()=>{
+    TAB_CONFIG = normalizeTabConfig(draft);
+    await idbPut('meta', {k:'tabConfig', value: TAB_CONFIG});
+    await queueMetaSync('tabConfig', TAB_CONFIG);
+    applyTabConfig();
+    toast('Đã lưu cấu hình Tab');
+  });
+  card.appendChild(saveBtn);
   return card;
 }
 
@@ -4536,7 +4650,7 @@ function renderSettings(){
   }
   root.appendChild(cloudCard);
 
-  if(currentMember && currentMember.role==='admin') root.appendChild(renderMemberManagementCard());
+  if(currentMember && currentMember.role==='admin'){ root.appendChild(renderMemberManagementCard()); root.appendChild(renderTabConfigCard()); }
 
   const backupCard = el('div',{class:'card'},[
     el('div',{class:'card-h'},['Sao lưu / Phục hồi', el('div',{class:'rule'})]),
@@ -4623,7 +4737,9 @@ function renderGuide(){
     <h4>1. Đồng bộ Supabase (tuỳ chọn, khuyên bật để dùng nhiều thiết bị)</h4>
     <p>Đây là bản Online của Shiftly Report — dữ liệu luôn được lưu trước trong chính máy đang dùng (IndexedDB), giống hệt bản offline gốc, nên mất mạng vẫn nhập liệu bình thường. Muốn nhiều tablet/máy tính cùng thấy chung 1 bộ dữ liệu, vào tab <b>Cài đặt</b> → mục "☁️ Đồng bộ Supabase" → nhập <b>Supabase URL</b> và <b>Anon public key</b> (do người triển khai app cung cấp — xem <code>supabase/README.md</code> trong mã nguồn) → "💾 Lưu cấu hình". Sau đó app sẽ yêu cầu <b>đăng nhập</b> (tài khoản do Admin tạo trong tab Cài đặt → "👥 Quản lý tài khoản") — mỗi người dùng riêng, đăng nhập xong app tự đẩy/kéo dữ liệu, không cần thao tác thêm.</p>
     <h4>1b. Đăng nhập & quản lý tài khoản</h4>
-    <p>Khi đã cấu hình Đồng bộ Supabase, app yêu cầu đăng nhập trước khi vào — có 2 loại tài khoản: <b>Admin</b> (đăng nhập bằng email + mật khẩu) và <b>Nhân viên/User</b> (đăng nhập bằng tên đăng nhập + mật khẩu). Chỉ Admin thấy mục "👥 Quản lý tài khoản" trong tab Cài đặt để tạo tài khoản mới, đổi vai trò, hoặc vô hiệu hóa một tài khoản (người bị vô hiệu hóa không đăng nhập được nữa, kể cả trên thiết bị đang mở sẵn — lần gọi đồng bộ tiếp theo sẽ bị từ chối và quay lại màn hình đăng nhập). Tài khoản Admin đầu tiên phải được tạo thủ công 1 lần trong Supabase Dashboard — xem <code>supabase/README.md</code>. Nếu chưa cấu hình Đồng bộ Supabase, app dùng bình thường không cần đăng nhập gì cả (y hệt trước đây).</p>
+    <p>Khi đã cấu hình Đồng bộ Supabase, app yêu cầu đăng nhập trước khi vào — có 3 loại tài khoản: <b>Admin</b> (toàn quyền, đăng nhập bằng email + mật khẩu), <b>Nhân viên/User</b> (nhập liệu bình thường, đăng nhập bằng tên đăng nhập + mật khẩu), và <b>Giám sát/Quản lý</b> (chỉ xem — Báo cáo, Truy xuất, Thống kê, Dữ liệu... — không nhập/sửa được dữ liệu; cũng đăng nhập bằng tên đăng nhập + mật khẩu). Chỉ Admin thấy mục "👥 Quản lý tài khoản" trong tab Cài đặt để tạo tài khoản mới, đổi vai trò (kể cả đổi qua lại giữa 3 vai trò), hoặc vô hiệu hóa một tài khoản (người bị vô hiệu hóa không đăng nhập được nữa, kể cả trên thiết bị đang mở sẵn — lần gọi đồng bộ tiếp theo sẽ bị từ chối và quay lại màn hình đăng nhập). Tài khoản Admin đầu tiên phải được tạo thủ công 1 lần trong Supabase Dashboard — xem <code>supabase/README.md</code>. Nếu chưa cấu hình Đồng bộ Supabase, app dùng bình thường không cần đăng nhập gì cả (y hệt trước đây).</p>
+    <h4>1c. Admin tuỳ chỉnh thứ tự & ẩn/hiện Tab theo vai trò</h4>
+    <p>Ở tab Cài đặt, mục "🗂️ Sắp xếp &amp; Ẩn/hiện Tab" (chỉ Admin thấy) cho phép đổi thứ tự hiện ở thanh tab trên cùng (nút ▲▼, áp dụng chung cho mọi thiết bị/mọi người sau khi bấm Lưu), và chọn ẩn riêng từng tab với vai trò Nhân viên và/hoặc Giám sát/Quản lý — VD ẩn tab Specs với Nhân viên nếu không muốn họ tự sửa chỉ tiêu. Admin luôn thấy đủ mọi tab bất kể cấu hình này. Tab Cài đặt không bao giờ ẩn được (đây là nơi duy nhất có nút đăng xuất/ngắt kết nối, ẩn đi sẽ nhốt luôn tài khoản đó). Mặc định, vai trò Giám sát/Quản lý bị ẩn sẵn tab Nhập liệu.</p>
     <h4>2. Nhập liệu theo Điểm kiểm tra</h4>
     <p>Ở tab <b>Nhập liệu</b>: chọn Ngày + Ca → phần "Bàn giao ca" (Tình hình/Sự cố, Bàn giao) không cần PO, điền được ngay. Bên dưới là danh sách các điểm kiểm tra đã có trong ca này. Bấm <b>"➕ Thêm điểm kiểm tra"</b> → chọn Công đoạn + nhập/chọn mã PO → chọn QC → nhập chỉ tiêu → <b>"Lưu điểm kiểm tra"</b>. Muốn nhập PO khác cho cùng công đoạn (VD: PO 89 rồi PO 90 đều ở Trích ly), bấm "➕ Thêm điểm kiểm tra" lần nữa với PO mới — không bị ghi đè lên nhau.</p>
     <h4>3. Ô Đạt / Lỗi</h4>
@@ -4758,6 +4874,7 @@ async function robustShareMultipleOrDownload(files, opts){
 
 /* ===================== BOOT ===================== */
 function renderAll(){
+  applyTabConfig();
   renderInputGate();
   const active = qs('.tab[aria-selected="true"]');
   if(active && active.dataset.tab!=='input') showTab(active.dataset.tab);
@@ -4765,6 +4882,8 @@ function renderAll(){
 (async function init(){
   DB = await idbOpen();
   await loadCloudState();
+  const metaTabConfig = await idbGet('meta','tabConfig');
+  if(metaTabConfig && metaTabConfig.value) TAB_CONFIG = normalizeTabConfig(metaTabConfig.value);
   const metaTech = await idbGet('meta','technicians');
   if(metaTech && Array.isArray(metaTech.value) && metaTech.value.length) TECHNICIANS = metaTech.value;
   const metaRecipes = await idbGet('meta','recipes');
