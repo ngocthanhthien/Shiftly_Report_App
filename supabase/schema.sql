@@ -22,6 +22,7 @@ create table if not exists checkpoints (
   shift text not null,
   section text not null,
   po text not null default '',
+  item_code text not null default '',
   recipe text not null default '',
   client text not null default '',
   technician text not null default '',
@@ -32,6 +33,9 @@ create table if not exists checkpoints (
   deleted boolean not null default false,
   seq bigint not null default 0
 );
+-- Migration for a project created before item_code existed — `create table
+-- if not exists` above doesn't touch an already-existing table's columns.
+alter table checkpoints add column if not exists item_code text not null default '';
 create sequence if not exists checkpoints_seq;
 create index if not exists idx_checkpoints_seq on checkpoints (seq);
 create index if not exists idx_checkpoints_date_shift on checkpoints (date, shift);
@@ -158,7 +162,7 @@ begin
   if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
   select coalesce(jsonb_agg(jsonb_build_object(
       'key', c.key, 'date', c.date, 'shift', c.shift, 'section', c.section, 'po', c.po,
-      'recipe', c.recipe, 'client', c.client, 'technician', c.technician,
+      'itemCode', c.item_code, 'recipe', c.recipe, 'client', c.client, 'technician', c.technician,
       'fields', c.fields, 'fieldNotes', c.field_notes, 'images', c.images,
       'updatedAt', c.updated_at, 'deleted', c.deleted
     ) order by c.seq), '[]'::jsonb), max(c.seq)
@@ -189,16 +193,16 @@ begin
       continue;
     end if;
     select updated_at into v_current_updated_at from checkpoints where key = v_key;
-    insert into checkpoints (key, date, shift, section, po, recipe, client, technician, fields, field_notes, images, updated_at, deleted, seq)
+    insert into checkpoints (key, date, shift, section, po, item_code, recipe, client, technician, fields, field_notes, images, updated_at, deleted, seq)
     values (
       v_key, v_row->>'date', v_row->>'shift', v_row->>'section', coalesce(v_row->>'po', ''),
-      coalesce(v_row->>'recipe', ''), coalesce(v_row->>'client', ''), coalesce(v_row->>'technician', ''),
+      coalesce(v_row->>'itemCode', ''), coalesce(v_row->>'recipe', ''), coalesce(v_row->>'client', ''), coalesce(v_row->>'technician', ''),
       coalesce(v_row->'fields', '{}'::jsonb), coalesce(v_row->'fieldNotes', '{}'::jsonb), coalesce(v_row->'images', '[]'::jsonb),
       v_updated_at, false, nextval('checkpoints_seq')
     )
     on conflict (key) do update set
       date = excluded.date, shift = excluded.shift, section = excluded.section, po = excluded.po,
-      recipe = excluded.recipe, client = excluded.client, technician = excluded.technician,
+      item_code = excluded.item_code, recipe = excluded.recipe, client = excluded.client, technician = excluded.technician,
       fields = excluded.fields, field_notes = excluded.field_notes, images = excluded.images,
       updated_at = excluded.updated_at, deleted = false, seq = excluded.seq
     where excluded.updated_at > checkpoints.updated_at;

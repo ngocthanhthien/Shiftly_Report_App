@@ -46,7 +46,7 @@ Tài liệu bàn giao để tiếp tục làm việc ở phiên AI/công cụ kh
 
 Ghi chú bảo mật: mật khẩu app hardcode `const APP_PASSWORD = '1234'` ở [index.html:496](index.html:496) — dùng cho `promptPasswordOK()` (gate 1 số thao tác nhạy cảm trong app, VD xoá dữ liệu, sửa PO đã đóng), KHÁC HẲN với đăng nhập Supabase Auth ở trên — 2 lớp độc lập, đừng nhầm lẫn khi sửa 1 trong 2.
 
-**Test**: `npm ci && npm test` — chạy schema.sql THẬT qua Postgres nhúng (`@electric-sql/pglite`, không phải giả lập, có thêm stand-in `auth.users`/`auth.uid()` CHỈ trong test harness để mô phỏng Supabase Auth thật) + boot toàn bộ app qua jsdom rồi đăng nhập + đồng bộ thật qua đúng luồng RPC, kể cả case tài khoản bị vô hiệu hóa giữa phiên bị đá về màn hình đăng nhập. Xem `tests/supabase.test.mjs` (15 test, tất cả đang pass) và `tests/input-draft.test.mjs`. **Chưa/không thể test được**: Edge Function `admin-users` (chạy trên Deno, không có runtime Deno trong môi trường test này) — chỉ được review code thủ công, chưa chạy tự động; nếu sửa file này, test bằng tay qua Supabase Dashboard → Edge Functions → Invoke, hoặc deploy thật rồi thử qua UI "👥 Quản lý tài khoản".
+**Test**: `npm ci && npm test` — chạy schema.sql THẬT qua Postgres nhúng (`@electric-sql/pglite`, không phải giả lập, có thêm stand-in `auth.users`/`auth.uid()` CHỈ trong test harness để mô phỏng Supabase Auth thật) + boot toàn bộ app qua jsdom rồi đăng nhập + đồng bộ thật qua đúng luồng RPC, kể cả case tài khoản bị vô hiệu hóa giữa phiên bị đá về màn hình đăng nhập, vai trò supervisor bị chặn ghi, và tính năng xuất Process/QMS (Item Code, cờ isQMS, định dạng ngày, không lộ ảnh). 27 test / 4 file, tất cả đang pass: `tests/supabase.test.mjs`, `tests/input-draft.test.mjs`, `tests/tab-config.test.mjs`, `tests/process-qms-export.test.mjs`. **Chưa/không thể test được**: Edge Function `admin-users` (chạy trên Deno, không có runtime Deno trong môi trường test này) — chỉ được review code thủ công, chưa chạy tự động; nếu sửa file này, test bằng tay qua Supabase Dashboard → Edge Functions → Invoke, hoặc deploy thật rồi thử qua UI "👥 Quản lý tài khoản".
 
 ---
 
@@ -93,24 +93,32 @@ Nguyên nhân đã xác nhận: [renderInputForm](index.html:1307) trước đâ
 - Dòng tiêu đề mỗi checkpoint: `${sec.name} — PO ${cp.po} (QC: ${cp.technician})` — **KHÔNG có Recipe/Client**, trong khi bản HTML report ([fullHtmlReportCheckpointCard](index.html:2941)) đã có hiển thị Recipe/Client. Cần thêm Recipe vào bản SVG.
 - Ảnh đính kèm ([buildImagesLineForCheckpoint](index.html:3079)) chỉ là thumbnail nhỏ (`thumbDataUrl(src, 220)` — 220px), không phải full-width. Cần đổi sang full width của report (W=760).
 
-### 🟢 Yêu cầu (1) — Xuất dữ liệu — CHƯA SỬA
+### ✅ Yêu cầu (1) — Xuất dữ liệu — ĐÃ SỬA (2026-09-19), bằng 1 nút xuất RIÊNG, không đổi CSV/Excel tổng hiện có
 
-- CSV/Excel export hiện dùng [fmtDateVN](index.html:397) → `DD/MM/YYYY`, khác định dạng mẫu `dd-mmm-yyy` (`10-Jan-2026`). Cần hàm format mới hoặc field lựa chọn định dạng.
-- Không xuất hình ảnh: [buildCsv](index.html:623)/[buildExcelXml](index.html:649) hiện đã KHÔNG xuất ảnh (chỉ xuất field data) — điểm này **có vẻ đã đáp ứng sẵn**, cần xác nhận lại với người dùng xem họ đang phàn nàn về đâu (có thể về bản HTML report có gallery ảnh, không phải CSV).
-- "Tự động xuất về 1 vị trí sau khi share": hiện dùng [robustShareOrDownload](index.html:4330) (share sheet / tải file thủ công qua trình duyệt) — không tự ghi vào 1 thư mục cố định. **Cập nhật quan trọng**: giờ đã có Đồng bộ Supabase — nếu user coi "đồng bộ tự động lên cloud" là đáp ứng đủ yêu cầu này thì coi như đã xong (mọi thiết bị đã cấu hình đều tự thấy dữ liệu mới, không cần thao tác "xuất" gì thêm); cần hỏi lại xem có thực sự cần auto-save ra 1 thư mục cục bộ (File System Access API, chỉ khả thi trên desktop Chrome/Edge) hay đồng bộ cloud là đủ.
-- **"Item Code" chưa tồn tại field nào tương ứng** trong app hiện tại (Recipe dạng "300"/"302C"..., PO là mã khác — cả hai đều không khớp format số 7 và 9 chữ số trong mẫu `1100011` / `612600011`). Cần hỏi người dùng ý nghĩa thật của Item Code trước khi thêm field.
-- **"ACTION"** — cột hoàn toàn mới, hiện app chỉ có field `..._ISSUE` (textarea Issue/Abnormal) mỗi section, chưa có field Action (hành động khắc phục) riêng.
+Người dùng cung cấp 1 file mẫu thứ 2 (`Template Data export.xlsx`, cùng bố cục A1:R12 với PAPERLESS.xlsx trước đó) làm rõ chính xác layout mong muốn. Thay vì sửa CSV/Excel tổng (`buildCsv`/`buildExcelXml`, vẫn giữ nguyên `DD/MM/YYYY` + đầy đủ mọi field như trước — dùng cho backup/nhập lại), đã thêm 1 tính năng xuất RIÊNG, đúng bố cục mẫu:
+
+- **Item Code**: xác nhận với người dùng là field MỚI, nhập tay (giống PO) — đã thêm `cp.itemCode` (top-level, như `cp.po`/`cp.recipe`), ô nhập cạnh Mã PO trong [renderInputForm](index.html:1636), cột "ItemCode" trong CSV/Excel tổng + JSON backup (ngay sau PO), cột `item_code` trong `checkpoints` table + `sync_get/put_checkpoints`. Dùng đúng cơ chế draft-safety (`captureDraft`) đã sửa cho bug mất dữ liệu.
+- **QMS-only columns**: xác nhận chọn cách "cờ `isQMS` chỉnh được trong Specs" (không hard-code field nào ứng với cột nào — tên cột QMS trong mẫu, VD "%TC"/"Sediment set tank 2", khớp NHIỀU field ứng viên khác nhau tuỳ diễn giải, và 1 số cột QMS trong mẫu — Color/Sediment/Cupping cho FP — **chưa hề có field tương ứng nào tồn tại trong Specs hiện tại**, nên không thể đoán). Mỗi field trong Specs giờ có `isQMS:boolean` + `qmsLabel:string` (tên cột khi xuất, mặc định dùng tên chỉ tiêu) — sửa ở [renderSpecs](index.html) (checkbox "Xuất trong báo cáo QMS"). **Người dùng cần tự vào tab Specs đánh dấu đúng field của mình** trước khi dùng tính năng xuất — mặc định TẤT CẢ đang tắt (không tự đoán/tự bật sẵn field nào, kể cả các field khớp tên rõ ràng như "Moisture").
+- **ACTION**: xử lý KHÔNG PHẢI bằng field mới per-checkpoint (khác Item Code) — thay vào đó, cột ACTION trong export tự tìm 1 field có sẵn (id kết thúc `_ACTION`, hoặc tên đúng "Action") trong Specs của công đoạn đó; để trống nếu chưa có. Người dùng tự thêm field này qua Specs (kiểu "Ghi chú") cho công đoạn nào cần — không cần sửa code thêm.
+- **ISSUES/Abnormal**: tự động lấy từ field có sẵn kết thúc `_ISSUE` (đã tồn tại đồng nhất ở mọi section) — không cần cấu hình gì thêm.
+- **Định dạng ngày**: `dd-mmm-yyyy` kiểu Anh-Mỹ (VD `19-Sep-2026`, ngày không có số 0 đứng đầu — khớp đúng numfmt thật trong file mẫu) — CHỈ áp dụng cho tính năng xuất mới này qua [fmtDateExport](index.html); CSV/Excel tổng và mọi chỗ khác trong app vẫn giữ `DD/MM/YYYY` như cũ, không đổi.
+- **Không xuất ảnh**: đúng yêu cầu — [buildProcessQmsExcelXml](index.html)/[buildProcessQmsPrintHtml](index.html) không đụng tới `cp.images` (có test riêng khẳng định điều này).
+- **"Tự động xuất về 1 vị trí"**: implement bằng File System Access API (`showDirectoryPicker`, chọn 1 lần ở tab Cài đặt, lưu `FileSystemDirectoryHandle` trong IndexedDB — clone được sẵn trên Chromium) — hàm [exportFileToPreferredLocation](index.html) thay thế `robustShareOrDownload` ở MỌI nút xuất file Blob trong app (Short CSV, Truy xuất Excel, Báo cáo HTML/PNG, Specs Excel, Xuất nhập dữ liệu, và tính năng mới này) — tự ghi thẳng vào thư mục đã chọn, rơi về hộp thoại tải/chia sẻ cũ nếu chưa chọn/mất quyền/trình duyệt không hỗ trợ. **Giới hạn quan trọng, đã báo người dùng**: chỉ Chrome/Edge trên máy tính — KHÔNG có trên điện thoại/tablet (kể cả Chrome Android) hoặc Safari/Firefox; và KHÔNG áp dụng được cho xuất PDF (qua `window.print()`, trình duyệt tự kiểm soát việc lưu).
+
+Vị trí: nút "📊 Xuất Excel theo mẫu" / "📄 Xuất PDF theo mẫu" ở tab **Dữ liệu** (cạnh nút Short CSV có sẵn) — dùng `selectedKeys` đã tick chọn nếu có, mặc định xuất toàn bộ nếu không tick gì.
+
+**Câu hỏi CŨ giờ đã có câu trả lời** (giữ lại mục 4 dưới đây để tham khảo lịch sử, KHÔNG cần hỏi lại): ý nghĩa Item Code, vị trí ACTION, cách đánh dấu QMS, và "tự động xuất về 1 vị trí" đều đã chốt như mô tả ở trên. Câu hỏi 6 (thứ tự Recipe/Technician trong UI) **vẫn chưa hỏi lại** — chưa đổi.
 
 ---
 
-## 4. Câu hỏi CẦN xác nhận với người dùng trước khi code tiếp (chưa có câu trả lời)
+## 4. (Lịch sử) Câu hỏi từng cần xác nhận — xem mục 3 ở trên để biết câu trả lời đã chốt
 
-1. **Ý nghĩa "Item Code"**: là field mới độc lập? là đổi tên hiển thị của Recipe? hay tự động suy ra theo Client đã chọn?
-2. **Field "ACTION" đặt ở đâu**: thêm cho mọi section (cạnh Issue/Abnormal)? chỉ hiện khi Issue có giá trị? hay dùng cơ chế `fieldNotes` sẵn có thay vì thêm field mới?
-3. **Cách đánh dấu field nào thuộc nhóm "QMS"** để lọc báo cáo: thêm cờ `isQMS` chỉnh được trong tab Specs (linh hoạt), hay hard-code cứng đúng danh sách trong file mẫu cho ROA/EXT/EVA/FD/FP (và hỏi thêm cho FOAMING/REWORK vì mẫu không đề cập)?
-4. **"Tự động xuất về 1 vị trí"** — Đồng bộ Supabase đã có sẵn có được coi là đáp ứng đủ chưa, hay vẫn cần auto-save ra thư mục cục bộ trên 1 thiết bị cụ thể?
-5. Định dạng ngày `dd-mmm-yyy` áp dụng cho **xuất CSV/Excel**, cho **báo cáo hiển thị**, hay cả hai? (Hiện toàn bộ app dùng `DD/MM/YYYY` xuyên suốt các tab.)
-6. Thứ tự "Chọn Recipe, chọn Technician" trong yêu cầu (3) — trong code hiện tại, ô Technician (QC) hiển thị TRƯỚC ô Recipe/Client. Có cần đổi thứ tự UI cho khớp đúng luồng nêu trong feedback không, hay chỉ là liệt kê không theo thứ tự?
+1. ~~Ý nghĩa "Item Code"~~ → field mới, nhập tay (xem mục 3).
+2. ~~Field "ACTION" đặt ở đâu~~ → field tuỳ chọn tự thêm qua Specs, export tự tìm theo id/tên (xem mục 3).
+3. ~~Cách đánh dấu field nào thuộc nhóm "QMS"~~ → cờ `isQMS` chỉnh trong Specs (xem mục 3).
+4. ~~"Tự động xuất về 1 vị trí"~~ → File System Access API, chọn thư mục 1 lần ở Cài đặt (xem mục 3).
+5. Định dạng ngày `dd-mmm-yyy` áp dụng cho **xuất CSV/Excel**, cho **báo cáo hiển thị**, hay cả hai? — đã chốt: CHỈ áp dụng cho tính năng xuất mới (mục 3), không đổi phần còn lại của app.
+6. Thứ tự "Chọn Recipe, chọn Technician" trong yêu cầu (3) — trong code hiện tại, ô Technician (QC) hiển thị TRƯỚC ô Recipe/Client. Có cần đổi thứ tự UI cho khớp đúng luồng nêu trong feedback không, hay chỉ là liệt kê không theo thứ tự? **VẪN CHƯA HỎI LẠI.**
 
 ---
 
@@ -119,9 +127,9 @@ Nguyên nhân đã xác nhận: [renderInputForm](index.html:1307) trước đâ
 - [x] Fix bug mất dữ liệu khi nhập (mục 3) — xong 2026-09-18.
 - [x] Gỡ bỏ Cloudflare, chuyển sang GitHub Pages + Supabase — xong 2026-09-18.
 - [x] Access control thật (Supabase Auth Admin/User + Edge Function quản lý tài khoản), thay thế mô hình mật khẩu chung — xong 2026-09-18.
-- [ ] Thêm cơ chế lọc "QMS-only" cho báo cáo ảnh + hiển thị Recipe + ảnh full-width trong `buildReportSVG`.
-- [ ] Làm rõ & implement "Item Code" và "ACTION" sau khi có câu trả lời từ người dùng (mục 4.1, 4.2).
-- [ ] Định dạng ngày `dd-mmm-yyy` cho export (và/hoặc report) sau khi xác nhận phạm vi áp dụng (mục 4.5).
-- [ ] Xác nhận Đồng bộ Supabase có đáp ứng đủ yêu cầu "xuất về 1 vị trí" hay còn cần thêm gì (mục 4.4).
-- [ ] Người dùng cần tự làm lại toàn bộ setup Supabase theo `supabase/README.md` mới (project cũ dùng mật khẩu chung phải chạy lại `schema.sql` — tự xoá mô hình cũ — rồi bật Email auth, tạo Admin đầu tiên bằng SQL, deploy Edge Function `admin-users` bằng Supabase CLI, rồi mới cấu hình lại tab Cài đặt + đăng nhập trên mọi thiết bị).
+- [x] Vai trò Supervisor (chỉ xem, chặn ghi ở server qua `is_writer_member()`) + Admin tự sắp xếp/ẩn-hiện Tab theo vai trò (`TAB_CONFIG`) — xong 2026-09-18.
+- [x] Yêu cầu (1) Xuất dữ liệu — Item Code, cờ isQMS, xuất Excel/PDF theo mẫu Process/QMS, thư mục lưu tự động (File System Access API) — xong 2026-09-19 (chi tiết mục 3 ở trên).
+- [ ] Thêm cơ chế lọc "QMS-only" cho **báo cáo ảnh** (`buildReportSVG`, tab Báo cáo — KHÁC với tính năng xuất Excel/PDF mới ở mục 3, vẫn chưa đụng tới `buildReportSVG`) + hiển thị Recipe + ảnh full-width.
+- [ ] Hỏi lại câu 4.6: thứ tự UI Recipe/Client vs Technician trong form Nhập liệu có cần đổi không.
+- [ ] Người dùng cần: (a) chạy lại `supabase/schema.sql` mới nhất (thêm `item_code`, `members.role` cho phép `supervisor`, `is_writer_member()`) trên project Supabase thật; (b) vào Specs đánh dấu `isQMS` cho các chỉ tiêu muốn xuất theo mẫu — mặc định TẤT CẢ đang tắt; (c) nếu chưa làm ở phiên trước: bật Email auth, tạo Admin đầu tiên bằng SQL, deploy lại Edge Function `admin-users` bằng Supabase CLI (đã sửa để nhận thêm role `supervisor`).
 - [ ] Chưa test Edge Function `admin-users` với 1 project Supabase thật (không có runtime Deno trong sandbox) — người dùng cần tự thử luồng tạo/vô hiệu hóa tài khoản qua UI "👥 Quản lý tài khoản" sau khi deploy, và báo lại nếu có lỗi.

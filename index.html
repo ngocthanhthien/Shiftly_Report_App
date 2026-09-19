@@ -336,7 +336,7 @@ function stageIds(){ return SCHEMA.map(s => s.id); }
    user-edited) SCHEMA. Mirrors the same dedup logic used to build the
    original static header list, but runs live so Specs edits stay in sync. */
 function computeHeaderMap(){
-  const headers = ["Date","Shift","Section","PO","Recipe","Client","Technician"];
+  const headers = ["Date","Shift","Section","PO","ItemCode","Recipe","Client","Technician"];
   const map = [];
   const seen = new Set(headers);
   for(const s of SCHEMA){
@@ -610,7 +610,7 @@ async function refreshCache(){
 }
 
 function blankCheckpoint(date, shift, section, po, technician){
-  return { key: checkpointKey(date,shift,section,po), date, shift: String(shift), section, po: po||'', technician: technician||'', recipe:'', client:'', fields:{}, fieldNotes:{}, images:[], updatedAt: new Date().toISOString() };
+  return { key: checkpointKey(date,shift,section,po), date, shift: String(shift), section, po: po||'', itemCode:'', technician: technician||'', recipe:'', client:'', fields:{}, fieldNotes:{}, images:[], updatedAt: new Date().toISOString() };
 }
 function getOrInitCheckpoint(date, shift, section, po){
   const k = checkpointKey(date, shift, section, po);
@@ -634,7 +634,7 @@ function buildCsv(recordsSubset){
   const src = recordsSubset || allCheckpoints;
   const sorted = [...src].sort((a,b)=> (a.date+a.shift+a.section+a.po).localeCompare(b.date+b.shift+b.section+b.po));
   for(const r of sorted){
-    const row = [fmtDateVN(r.date), r.shift, r.section||'', r.po||'', r.recipe||'', r.client||'', r.technician||''];
+    const row = [fmtDateVN(r.date), r.shift, r.section||'', r.po||'', r.itemCode||'', r.recipe||'', r.client||'', r.technician||''];
     for(const hm of map){
       let v = (hm.section===r.section && r.fields) ? r.fields[hm.field] : undefined;
       if(v===undefined||v===null) v='';
@@ -668,6 +668,7 @@ function buildExcelXml(recordsSubset){
     cells += `<Cell><Data ss:Type="String">${xmlEscape(r.shift)}</Data></Cell>`;
     cells += `<Cell><Data ss:Type="String">${xmlEscape(r.section||'')}</Data></Cell>`;
     cells += `<Cell><Data ss:Type="String">${xmlEscape(r.po||'')}</Data></Cell>`;
+    cells += `<Cell><Data ss:Type="String">${xmlEscape(r.itemCode||'')}</Data></Cell>`;
     cells += `<Cell><Data ss:Type="String">${xmlEscape(r.recipe||'')}</Data></Cell>`;
     cells += `<Cell><Data ss:Type="String">${xmlEscape(r.client||'')}</Data></Cell>`;
     cells += `<Cell><Data ss:Type="String">${xmlEscape(r.technician||'')}</Data></Cell>`;
@@ -765,6 +766,7 @@ function rowsToRecords(lines){
     if(!date || !shift || !section) continue;
     const po = idx['PO']!==undefined ? (cells[idx['PO']]||'') : '';
     const cp = blankCheckpoint(date, shift, section, po, cells[idx['Technician']]||'');
+    cp.itemCode = idx['ItemCode']!==undefined ? (cells[idx['ItemCode']]||'') : '';
     cp.recipe = idx['Recipe']!==undefined ? (cells[idx['Recipe']]||'') : '';
     cp.client = idx['Client']!==undefined ? (cells[idx['Client']]||'') : '';
     for(const hm of map){
@@ -1137,7 +1139,7 @@ async function pullFromCloud(){
         if(local && row.updatedAt >= local.updatedAt){ await idbDelete('shifts', row.key); changed = true; }
       } else if(!local || row.updatedAt > local.updatedAt){
         await idbPut('shifts', {
-          key:row.key, date:row.date, shift:row.shift, section:row.section, po:row.po, recipe:row.recipe,
+          key:row.key, date:row.date, shift:row.shift, section:row.section, po:row.po, itemCode:row.itemCode||'', recipe:row.recipe,
           client:row.client, technician:row.technician, fields:row.fields||{}, fieldNotes:row.fieldNotes||{},
           images:row.images||[], updatedAt:row.updatedAt, _syncedAt: row.updatedAt,
         });
@@ -1721,7 +1723,7 @@ function renderInputForm(){
       const sec2 = sectionById(cp.section);
       const row = el('div',{class:'specfield'},[
         el('div',{class:'fi'},[
-          el('b',{},[`${sec2?sec2.name:cp.section} — PO ${cp.po||'—'}`]),
+          el('b',{},[`${sec2?sec2.name:cp.section} — PO ${cp.po||'—'}${cp.itemCode?' · Item Code '+cp.itemCode:''}`]),
           el('span',{},[`QC: ${cp.technician||'—'} · ${fmtDateTimeVN(new Date(cp.updatedAt).getTime())}`]),
         ]),
         el('button',{class:'btn ghost sm'},['✎ Sửa']),
@@ -1758,20 +1760,34 @@ function renderInputForm(){
 
   let secId;
   let poAC;
+  const itemCodeVal0 = editingCp ? (editingCp.itemCode||'') : (renderInputForm._newItemCode||'');
+  const itemCodeInp = el('input',{class:'inp', type:'text', placeholder:'VD: 1100011', value:itemCodeVal0},[]);
+  // 'blur' (not 'input') to match the PO autocomplete's own commit timing —
+  // both go through captureDraft()+re-render, same safety net as the fix
+  // for the "typing wiped on PO/Recipe/Client change" bug (see HANDOFF.md).
+  itemCodeInp.addEventListener('blur', ()=>{
+    captureDraft();
+    if(editingCp) editingCp.itemCode = itemCodeInp.value; else renderInputForm._newItemCode = itemCodeInp.value;
+    renderInputForm();
+  });
   if(editingCp){
     secId = editingCp.section;
     formCard.appendChild(el('div',{class:'kv', style:'border:none;'},[el('span',{class:'k'},['Công đoạn']), el('span',{class:'v'},[sectionById(secId).name])]));
     poAC = renderAutocomplete(editingCp.po, allPOsEverUsed(), 'Chọn hoặc nhập mã PO');
-    formCard.appendChild(el('label',{class:'fld', style:'margin-top:8px;'},[el('span',{class:'lab'},['Mã PO']), poAC.node]));
+    formCard.appendChild(el('div',{class:'grid g2', style:'margin-top:8px;'},[
+      el('label',{class:'fld'},[el('span',{class:'lab'},['Mã PO']), poAC.node]),
+      el('label',{class:'fld'},[el('span',{class:'lab'},['Item Code']), itemCodeInp]),
+    ]));
   } else {
     secId = renderInputForm._newSection || SCHEMA.find(s=>s.id!=='META').id;
     const poVal0 = renderInputForm._newPO || '';
     const secSel = el('select',{class:'inp'},[]);
     SCHEMA.filter(s=>s.id!=='META').forEach(s=>{ const o=el('option',{value:s.id},[s.name]); if(s.id===secId) o.setAttribute('selected','selected'); secSel.appendChild(o); });
     poAC = renderAutocomplete(poVal0, allKnownPOs(), 'Chọn hoặc nhập mã PO', (v)=>{ captureDraft(); renderInputForm._newPO=v; renderInputForm(); });
-    formCard.appendChild(el('div',{class:'grid g2'},[
+    formCard.appendChild(el('div',{class:'grid g3'},[
       el('label',{class:'fld'},[el('span',{class:'lab'},['Công đoạn']), secSel]),
       el('label',{class:'fld'},[el('span',{class:'lab'},['Mã PO']), poAC.node]),
+      el('label',{class:'fld'},[el('span',{class:'lab'},['Item Code']), itemCodeInp]),
     ]));
     secSel.addEventListener('change', ()=>{ renderInputForm._newSection=secSel.value; renderInputForm(); });
     if(!poVal0){
@@ -1943,6 +1959,7 @@ function renderInputForm(){
     cp.technician = qcSel.value;
     cp.recipe = recipeSel.value;
     cp.client = clientSel.value;
+    cp.itemCode = itemCodeInp.value;
     cp.date = dateVal; cp.shift = shiftVal; cp.section = secId; cp.po = poVal;
     cp.key = newKeyCandidate;
     cp.updatedAt = new Date().toISOString();
@@ -2220,12 +2237,32 @@ function renderTable(){
     if(selectedKeys.size===0){ toast('Chưa chọn ca nào'); return; }
     const subset = allCheckpoints.filter(r=>selectedKeys.has(r.key));
     const file = new File([buildCsv(subset)], `Short_Shiftly_${todayStr()}_${subset.length}ca.csv`, {type:'text/csv'});
-    await robustShareOrDownload(file, {title:'Shiftly Short CSV', fallbackMsg:`Đã tải file Short CSV (${subset.length} ca) về máy`});
+    await exportFileToPreferredLocation(file, {title:'Shiftly Short CSV', fallbackMsg:`Đã tải file Short CSV (${subset.length} ca) về máy`});
+  });
+
+  const qmsCard = el('div',{class:'card'},[
+    el('div',{class:'card-h'},['Xuất theo mẫu Process/QMS', el('div',{class:'rule'})]),
+    el('p',{class:'sub', style:'margin:0 0 10px;'},['Xuất Excel/PDF đúng bố cục theo mẫu: nhóm theo Công đoạn, chỉ gồm các cột QMS đã đánh dấu trong tab Specs, ngày dạng dd-mmm-yyyy, không kèm ảnh. Tick chọn vài ca ở bảng dưới để chỉ xuất phần đó, hoặc để trống để xuất toàn bộ. Muốn thêm/bớt cột QMS, vào tab Specs → sửa chỉ tiêu → "Xuất trong báo cáo QMS".']),
+    el('div',{class:'row'},[
+      el('button',{class:'btn teal sm', id:'btnExportQmsXlsx'},['📊 Xuất Excel theo mẫu']),
+      el('button',{class:'btn ghost sm', id:'btnExportQmsPdf'},['📄 Xuất PDF theo mẫu']),
+    ]),
+  ]);
+  root.appendChild(qmsCard);
+  function qmsExportSubset(){ return selectedKeys.size ? allCheckpoints.filter(r=>selectedKeys.has(r.key)) : allCheckpoints; }
+  qs('#btnExportQmsXlsx', qmsCard).addEventListener('click', async ()=>{
+    const subset = qmsExportSubset();
+    const file = new File([buildProcessQmsExcelXml(subset)], `Shiftly_ProcessQMS_${todayStr()}.xls`, {type:'application/vnd.ms-excel'});
+    await exportFileToPreferredLocation(file, {title:'Shiftly Process/QMS', fallbackMsg:`Đã tải Excel theo mẫu (${subset.length} điểm kiểm tra) về máy`});
+  });
+  qs('#btnExportQmsPdf', qmsCard).addEventListener('click', ()=>{
+    const subset = qmsExportSubset();
+    printReport(buildProcessQmsPrintHtml(subset), `Shiftly_ProcessQMS_${todayStr()}`);
   });
 
   const wrap = el('div',{class:'card tablescroll'},[]);
   const table = el('table',{class:'datatable'},[]);
-  table.innerHTML = '<thead><tr><th><input type="checkbox" id="selAll"></th><th>#</th><th>Ngày</th><th>Ca</th><th>Công đoạn</th><th>PO</th><th>QC</th><th>Điền dữ liệu</th><th>Hành động</th></tr></thead>';
+  table.innerHTML = '<thead><tr><th><input type="checkbox" id="selAll"></th><th>#</th><th>Ngày</th><th>Ca</th><th>Công đoạn</th><th>PO</th><th>Item Code</th><th>QC</th><th>Điền dữ liệu</th><th>Hành động</th></tr></thead>';
   const tbody = el('tbody',{},[]);
   const sortedCps = [...allCheckpoints].sort((a,b)=>(b.date+b.shift+ (b.updatedAt||'')).localeCompare(a.date+a.shift+(a.updatedAt||'')));
   sortedCps.forEach((rec,i)=>{
@@ -2281,6 +2318,7 @@ function renderTable(){
       el('td',{},[rec.shift]),
       el('td',{},[secName]),
       el('td',{},[rec.po || '—']),
+      el('td',{},[rec.itemCode || '—']),
       tdTech,
       el('td',{},[fillCell]),
       tdActions,
@@ -2378,6 +2416,7 @@ function renderDetail(key){
       el('span',{class:'pill'},[`${fr.pct}% điền dữ liệu`])
     ]),
     el('div',{class:'kv'},[el('span',{class:'k'},['Mã PO']), el('span',{class:'v'},[rec.po||'—'])]),
+    el('div',{class:'kv'},[el('span',{class:'k'},['Item Code']), el('span',{class:'v'},[rec.itemCode||'—'])]),
     el('div',{class:'kv'},[el('span',{class:'k'},['Recipe']), el('span',{class:'v'},[rec.recipe||'—'])]),
     el('div',{class:'kv'},[el('span',{class:'k'},['Client']), el('span',{class:'v'},[rec.client||'—'])]),
     el('div',{class:'kv'},[el('span',{class:'k'},['Tên QC']), el('span',{class:'v'},[rec.technician||'—'])]),
@@ -2912,7 +2951,7 @@ function renderTrace(){
       xlsBtn.addEventListener('click', async ()=>{
         const xml = buildExcelXml(matches);
         const file = new File([xml], `Truyxuat_${todayStr()}_${matches.length}.xls`, {type:'application/vnd.ms-excel'});
-        await robustShareOrDownload(file, {title:'Truy xuất Shiftly', fallbackMsg:`Đã tải Excel (${matches.length} dòng) về máy`});
+        await exportFileToPreferredLocation(file, {title:'Truy xuất Shiftly', fallbackMsg:`Đã tải Excel (${matches.length} dòng) về máy`});
       });
       summaryRow.appendChild(xlsBtn);
     }
@@ -3565,7 +3604,7 @@ function renderReport(){
             const htmlStr = gen.htmlReport();
             const name = gen.filename.replace(/\.png$/i, '.html');
             const file = new File([htmlStr], name, {type:'text/html'});
-            await robustShareOrDownload(file, {title:'Shiftly Report', fallbackMsg:'Đã tải báo cáo HTML về máy'});
+            await exportFileToPreferredLocation(file, {title:'Shiftly Report', fallbackMsg:'Đã tải báo cáo HTML về máy'});
           }
         } else if(sel.value==='multi'){
           if(!currentGen){ toast('Chưa có báo cáo để xuất'); }
@@ -3651,7 +3690,7 @@ function renderReport(){
     try{
       const blob = await svgToPngBlob(svg, width, height);
       const file = new File([blob], filename, {type:'image/png'});
-      await robustShareOrDownload(file, {title:'Shiftly Report', fallbackMsg:'Đã tải ảnh về máy'});
+      await exportFileToPreferredLocation(file, {title:'Shiftly Report', fallbackMsg:'Đã tải ảnh về máy'});
     }catch(e){ console.error(e); toast('Không tạo được ảnh PNG'); }
   });
 }
@@ -3947,7 +3986,7 @@ function renderSpecs(){
   qs('#btnExportSpecsXlsx', syncCard).addEventListener('click', async ()=>{
     const xml = buildSpecsExcelXml();
     const file = new File([xml], `Shiftly_Specs_${todayStr()}.xls`, {type:'application/vnd.ms-excel'});
-    await robustShareOrDownload(file, {title:'Shiftly Specs', fallbackMsg:'Đã tải Excel cấu hình Specs về máy'});
+    await exportFileToPreferredLocation(file, {title:'Shiftly Specs', fallbackMsg:'Đã tải Excel cấu hình Specs về máy'});
   });
   qs('#importSpecsInput', syncCard).addEventListener('change', async (e)=>{
     const file = e.target.files[0]; if(!file) return;
@@ -3992,7 +4031,7 @@ function renderSpecs(){
           ]),
           el('span',{class:'typetag'},[{number:'Số',boolean:'Đạt/Lỗi',text:'Chữ',select:'Danh sách',textarea:'Ghi chú'}[f.type] || f.type]),
           el('div',{class:'fi'},[
-            el('b',{},[f.label.split('\n')[0], f.required?el('span',{class:'reqbadge'},['BẮT BUỘC']):null, f.allowNote?el('span',{class:'reqbadge', style:'background:var(--teal-l);color:var(--teal-d);'},['CÓ GHI CHÚ']):null, f.allowNegative?el('span',{class:'reqbadge', style:'background:#F1F5F9;color:#334155;'},['± SỐ ÂM']):null]),
+            el('b',{},[f.label.split('\n')[0], f.required?el('span',{class:'reqbadge'},['BẮT BUỘC']):null, f.allowNote?el('span',{class:'reqbadge', style:'background:var(--teal-l);color:var(--teal-d);'},['CÓ GHI CHÚ']):null, f.allowNegative?el('span',{class:'reqbadge', style:'background:#F1F5F9;color:#334155;'},['± SỐ ÂM']):null, f.isQMS?el('span',{class:'reqbadge', style:'background:#EDE9FE;color:#6D28D9;'},['QMS']):null]),
             specDesc?el('span',{},[specDesc + (f.recipeOverrides && Object.keys(f.recipeOverrides).length ? ` · ${Object.keys(f.recipeOverrides).length} ghi đè theo Recipe` : '')]):null,
           ]),
           el('button',{class:'btn ghost sm'},[editingFieldId===f.id?'✕':'✏️']),
@@ -4083,6 +4122,16 @@ function renderSpecs(){
       const negRow = el('label',{class:'fld', style:'display:flex;align-items:center;gap:8px;margin-bottom:8px;'},[
         negChk, el('span',{class:'lab', style:'margin:0;'},['Cho phép số âm (thêm nút ± khi nhập liệu — dùng cho chỉ tiêu có thể xuống dưới 0, VD: nhiệt độ buồng sấy)']),
       ]);
+      const qmsChk = el('input',{type:'checkbox'},[]);
+      qmsChk.checked = !!(existing && existing.isQMS);
+      const qmsLabelInp = el('input',{class:'inp', type:'text', placeholder:'Để trống dùng luôn tên chỉ tiêu ở trên'},[]);
+      qmsLabelInp.value = (existing && existing.qmsLabel) || '';
+      const qmsLabelRow = el('label',{class:'fld', style:'margin:6px 0 8px;'},[el('span',{class:'lab'},['Tên cột khi xuất báo cáo QMS']), qmsLabelInp]);
+      qmsLabelRow.style.display = qmsChk.checked ? '' : 'none';
+      const qmsRow = el('label',{class:'fld', style:'display:flex;align-items:center;gap:8px;margin-bottom:0;'},[
+        qmsChk, el('span',{class:'lab', style:'margin:0;'},['Xuất trong báo cáo QMS (nút "Xuất theo mẫu" ở tab Dữ liệu)']),
+      ]);
+      qmsChk.addEventListener('change', ()=>{ qmsLabelRow.style.display = qmsChk.checked ? '' : 'none'; });
 
       // Per-Recipe spec overrides (only meaningful for number fields)
       let overrideRows = existing && existing.recipeOverrides
@@ -4134,7 +4183,7 @@ function renderSpecs(){
       const form = el('div',{class:'specform'},[
         el('label',{class:'fld', style:'margin-bottom:8px;'},[el('span',{class:'lab'},['Tên chỉ tiêu']), labelInp]),
         el('label',{class:'fld', style:'margin-bottom:8px;'},[el('span',{class:'lab'},['Kiểu dữ liệu']), typeSel]),
-        reqRow, noteRow,
+        reqRow, noteRow, qmsRow, qmsLabelRow,
         boolBox, numBox, optBox,
         el('div',{class:'row', style:'margin-top:10px;'},[
           el('button',{class:'btn teal sm'},[isEdit?'💾 Lưu thay đổi':'➕ Thêm']),
@@ -4154,6 +4203,9 @@ function renderSpecs(){
         obj.required = reqChk.checked;
         obj.allowNote = noteChk.checked;
         obj.allowNegative = negChk.checked;
+        obj.isQMS = qmsChk.checked;
+        const qmsLabelVal = qmsLabelInp.value.trim();
+        if(qmsLabelVal) obj.qmsLabel = qmsLabelVal; else delete obj.qmsLabel;
         delete obj.hardMin; delete obj.tMin; delete obj.tMax; delete obj.hardMax; delete obj.options; delete obj.recipeOverrides; delete obj.trueLabel; delete obj.falseLabel;
         if(type==='boolean'){
           const tl = trueLabelInp.value.trim(), fl = falseLabelInp.value.trim();
@@ -4321,7 +4373,7 @@ async function renderShare(){
       const name = `Shiftly_${isAll?'all':suffix}_${subset.length}ca.json`;
       file = new File([json], name, {type:'application/json'});
     }
-    await robustShareOrDownload(file, {title:'Shiftly Export', fallbackMsg:`Đã tải file (${subset.length} ca) về máy`});
+    await exportFileToPreferredLocation(file, {title:'Shiftly Export', fallbackMsg:`Đã tải file (${subset.length} ca) về máy`});
   });
 
   /* ---------- NHẬP DỮ LIỆU ---------- */
@@ -4652,6 +4704,25 @@ function renderSettings(){
 
   if(currentMember && currentMember.role==='admin'){ root.appendChild(renderMemberManagementCard()); root.appendChild(renderTabConfigCard()); }
 
+  const saveDirCard = el('div',{class:'card'},[
+    el('div',{class:'card-h'},['📁 Thư mục lưu xuất tự động', el('div',{class:'rule'})]),
+    el('p',{class:'sub', style:'margin:0 0 10px;'},['Chọn 1 thư mục để mọi lần xuất Excel/CSV/ảnh/báo cáo HTML sau này tự động lưu thẳng vào đó, không cần chọn nơi lưu lại mỗi lần. Chỉ hoạt động trên Chrome/Edge trên máy tính (không hỗ trợ trên điện thoại/máy tính bảng hoặc Safari/Firefox — những nơi đó vẫn dùng hộp thoại tải/chia sẻ như bình thường). Xuất PDF (qua hộp thoại In) không tự động hoá được — vẫn tự chọn nơi lưu trong hộp thoại đó như cũ.']),
+  ]);
+  const saveDirStatus = el('div',{class:'filepill'+(saveDirHandle?' linked':''), style:'margin-bottom:10px;'},[
+    el('span',{class:'ic'},[saveDirHandle?'✅':'📁']),
+    el('span',{class:'nm'},[saveDirHandle ? `Đang lưu vào: ${saveDirHandle.name}` : 'Chưa chọn thư mục — xuất file dùng hộp thoại tải/chia sẻ như bình thường']),
+  ]);
+  saveDirCard.appendChild(saveDirStatus);
+  const saveDirRow = el('div',{class:'row'},[
+    el('button',{class:'btn teal sm'},['📂 Chọn thư mục']),
+  ]);
+  if(saveDirHandle) saveDirRow.appendChild(el('button',{class:'btn danger sm'},['⛔ Bỏ chọn']));
+  saveDirCard.appendChild(saveDirRow);
+  const saveDirBtns = qsa('button', saveDirRow);
+  saveDirBtns[0].addEventListener('click', pickSaveDirectory);
+  if(saveDirBtns[1]) saveDirBtns[1].addEventListener('click', clearSaveDirectory);
+  root.appendChild(saveDirCard);
+
   const backupCard = el('div',{class:'card'},[
     el('div',{class:'card-h'},['Sao lưu / Phục hồi', el('div',{class:'rule'})]),
     el('p',{class:'sub', style:'margin:0 0 12px;'},[`Tổng cộng ${allCheckpoints.length} điểm kiểm tra đã lưu trong máy.`]),
@@ -4816,6 +4887,12 @@ function renderGuide(){
     <p>Bản này (<code>index.html</code>) khác với bản offline gốc (<code>Shiftly_Report_App.html</code>) ở 1 điểm duy nhất: có thêm khả năng đồng bộ dữ liệu qua mạng, kèm đăng nhập tài khoản thật. Mã nguồn giao diện (chính file <code>index.html</code> này) được lưu trên GitHub và publish bằng GitHub Pages; dữ liệu thật (điểm kiểm tra kèm ảnh, cấu hình) lưu trong 1 project Supabase (Postgres + Auth) — app gọi thẳng vào các SQL function (RPC) của Supabase, xác thực bằng phiên đăng nhập thật của từng người (xem mục 1b), còn quyền ghi/đọc thật sự do chính các function đó tự kiểm tra người gọi có phải 1 tài khoản còn hoạt động hay không (không dựa vào 1 mật khẩu chung như trước nữa). Việc tạo/vô hiệu hóa tài khoản chạy qua 1 Edge Function riêng (giữ khoá quản trị, không nằm trong mã nguồn public). Xem thư mục <code>supabase/</code> trong mã nguồn (file <code>schema.sql</code> + <code>README.md</code> + <code>functions/admin-users/</code>) để biết chi tiết triển khai và các bước thiết lập.</p>
     <h4>32. Ảnh chụp từ nhiều máy hiển thị lẫn nhau</h4>
     <p>Ảnh đính kèm chụp trên 1 máy đi kèm luôn trong dữ liệu của điểm kiểm tra đó (không tách riêng) — nên ngay khi 1 máy khác đồng bộ nhận được điểm kiểm tra, ảnh cũng đã có sẵn, xem được ngay kể cả trong Báo cáo (PNG/PDF/HTML đầy đủ) mà không cần tải thêm bước nào. Ảnh vừa chụp nhưng máy chưa kịp đồng bộ (đang chờ mạng) sẽ chỉ hiện được trên đúng máy đã chụp cho tới khi đồng bộ xong.</p>
+    <h4>33. Item Code</h4>
+    <p>Mỗi điểm kiểm tra giờ có thêm ô <b>Item Code</b> (cạnh Mã PO khi thêm/sửa) — nhập tay, không có danh sách gợi ý sẵn (khác PO). Hiện ở bảng Dữ liệu, trang Chi tiết, danh sách điểm kiểm tra trong Nhập liệu, và các file CSV/Excel xuất ra (cột "ItemCode", ngay sau cột PO) — kể cả file sao lưu/phục hồi JSON.</p>
+    <h4>34. Xuất theo mẫu Process/QMS (Excel/PDF)</h4>
+    <p>Ở tab <b>Dữ liệu</b>, mục "Xuất theo mẫu Process/QMS" tạo file Excel hoặc PDF theo đúng bố cục mẫu: mỗi Công đoạn 1 khối riêng (Date, Shift, Process, Item Code, PO, ISSUES/Abnormal, ACTION + các cột chỉ tiêu QMS của công đoạn đó), ngày theo định dạng <code>d-mmm-yyyy</code> (VD: 19-Sep-2026), <b>không kèm ảnh đính kèm</b>. Tick chọn vài ca ở bảng bên dưới để chỉ xuất phần đó, để trống để xuất toàn bộ. Cột ISSUES/Abnormal tự lấy từ ô "Issue/ Abnormal" sẵn có của từng công đoạn. Cột ACTION chỉ có dữ liệu nếu công đoạn đó có 1 chỉ tiêu tên "Action" (thêm qua tab Specs, kiểu "Ghi chú", nếu cần). <b>Các cột QMS phải tự đánh dấu trước</b> ở tab Specs → sửa từng chỉ tiêu → tick "Xuất trong báo cáo QMS" (có thể đặt tên cột ngắn gọn riêng, VD chỉ tiêu "Color: 45 ± 2" đặt tên cột là "Color") — app không tự đoán chỉ tiêu nào là QMS vì tên gọi khác nhau tuỳ nhà máy.</p>
+    <h4>35. Thư mục lưu xuất tự động</h4>
+    <p>Ở tab Cài đặt, mục "📁 Thư mục lưu xuất tự động" cho chọn 1 thư mục MỘT LẦN — từ đó mọi lần xuất Excel/CSV/ảnh/báo cáo HTML (kể cả mục 34 ở trên) tự động lưu thẳng vào thư mục đó thay vì hỏi lại mỗi lần. Chỉ hoạt động trên <b>Chrome/Edge trên máy tính</b> (Windows/Mac/Linux) — không có trên điện thoại/máy tính bảng (kể cả Chrome Android) hoặc Safari/Firefox, những nơi đó vẫn dùng hộp thoại tải/chia sẻ bình thường, không có gì bị hỏng. Riêng xuất PDF (qua hộp thoại In của trình duyệt) không tự động hoá được bằng cách này — trình duyệt luôn để bạn tự chọn nơi lưu trong chính hộp thoại In đó.</p>
   </div>`;
 }
 
@@ -4872,6 +4949,168 @@ async function robustShareMultipleOrDownload(files, opts){
   return false;
 }
 
+/* ===================== AUTO-SAVE FOLDER (File System Access API) =====================
+   "Cho phép thiết đặt 1 lần ổ đĩa lưu khi xuất về" — chọn 1 thư mục MỘT LẦN
+   (Chrome/Edge trên máy tính; API này không tồn tại trên Safari/Firefox và
+   không có trên trình duyệt di động, kể cả Chrome Android — những nơi đó tự
+   rơi về hộp thoại tải/chia sẻ file bình thường, không có gì hỏng cả).
+   FileSystemDirectoryHandle clone được vào IndexedDB (hỗ trợ sẵn trên
+   Chromium từ bản 86+), nên chọn 1 lần là nhớ mãi — mỗi lần ghi file sau đó
+   chỉ cần xin lại quyền (queryPermission/requestPermission), không cần chọn
+   lại thư mục. Chỉ áp dụng cho các file app tự tạo ra (Blob) như Excel/CSV —
+   xuất PDF (qua hộp thoại In của trình duyệt) do chính trình duyệt kiểm
+   soát việc lưu, không thể tự động hoá bước đó. */
+let saveDirHandle = null;
+async function loadSaveDirHandle(){
+  try{
+    const rec = await idbGet('meta','saveDirHandle');
+    if(rec && rec.value) saveDirHandle = rec.value;
+  }catch(e){ console.error(e); }
+}
+async function pickSaveDirectory(){
+  if(!window.showDirectoryPicker){ toast('Trình duyệt này không hỗ trợ chọn thư mục lưu tự động (chỉ Chrome/Edge trên máy tính)'); return; }
+  try{
+    const handle = await window.showDirectoryPicker({mode:'readwrite'});
+    await idbPut('meta', {k:'saveDirHandle', value: handle});
+    saveDirHandle = handle;
+    toast('Đã chọn thư mục lưu: ' + handle.name);
+    renderSettings();
+  }catch(e){ if(e && e.name!=='AbortError'){ console.error(e); toast('Không chọn được thư mục'); } }
+}
+async function clearSaveDirectory(){
+  saveDirHandle = null;
+  await idbDelete('meta','saveDirHandle');
+  toast('Đã bỏ chọn thư mục lưu tự động — xuất file sẽ quay về tải/chia sẻ thủ công');
+  renderSettings();
+}
+async function ensureSaveDirPermission(){
+  if(!saveDirHandle) await loadSaveDirHandle();
+  if(!saveDirHandle) return null;
+  try{
+    if(await saveDirHandle.queryPermission({mode:'readwrite'}) === 'granted') return saveDirHandle;
+    if(await saveDirHandle.requestPermission({mode:'readwrite'}) === 'granted') return saveDirHandle;
+  }catch(e){ console.error(e); }
+  return null;
+}
+// Every export button in the app should call THIS instead of
+// robustShareOrDownload() directly whenever it's producing a file the app
+// itself created (a real Blob/File) — it writes straight into the chosen
+// folder when one is configured+permitted, and transparently falls back to
+// the normal share/download prompt otherwise (unconfigured, permission
+// denied, or an unsupported browser).
+async function exportFileToPreferredLocation(file, opts){
+  const dir = await ensureSaveDirPermission();
+  if(dir){
+    try{
+      const fh = await dir.getFileHandle(file.name, {create:true});
+      const writable = await fh.createWritable();
+      await writable.write(file);
+      await writable.close();
+      toast(`Đã lưu "${file.name}" vào thư mục đã chọn`);
+      return true;
+    }catch(e){ console.error(e); /* rơi xuống tải/chia sẻ thủ công bên dưới */ }
+  }
+  await robustShareOrDownload(file, opts);
+  return false;
+}
+
+/* ===================== XUẤT THEO MẪU PROCESS/QMS (Excel/PDF) =====================
+   Layout theo file mẫu người dùng cung cấp: nhóm theo Công đoạn (Process),
+   mỗi nhóm chỉ có các cột QMS đã đánh dấu "isQMS" trong Specs (tab Specs) —
+   không đoán/hard-code cột nào ứng với chỉ tiêu nào, vì tên cột QMS (VD
+   "%TC", "Sediment set tank 2") có thể khớp nhiều chỉ tiêu khác nhau tuỳ
+   nhà máy — Admin tự đánh dấu đúng chỉ tiêu của mình. Cột ISSUES/Abnormal
+   luôn lấy từ field có id kết thúc "_ISSUE" (đã có sẵn, đồng nhất, ở mọi
+   công đoạn). Cột ACTION lấy từ 1 field tuỳ chọn có id kết thúc "_ACTION"
+   hoặc tên đúng "Action" — nếu công đoạn chưa có field này (Specs), cột để
+   trống — thêm field đó qua tab Specs (kiểu "Ghi chú") nếu cần dùng cột này.
+   Không xuất ảnh — đúng yêu cầu "không xuất hình". */
+const EXPORT_MONTHS_EN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// "dd-mmm-yyy" theo file mẫu (numfmt thực tế trong file là d-mmm-yyyy kiểu
+// Anh-Mỹ: ngày KHÔNG có số 0 đứng đầu, tên tháng viết tắt tiếng Anh).
+function fmtDateExport(iso){
+  if(!iso) return '';
+  const [y,m,d] = iso.split('-');
+  return `${Number(d)}-${EXPORT_MONTHS_EN[Number(m)-1]}-${y}`;
+}
+function processQmsFieldsFor(sec){
+  const issueField = sec.fields.find(f=>/_ISSUE$/i.test(f.id));
+  const actionField = sec.fields.find(f=>/_ACTION$/i.test(f.id) || /^action$/i.test((f.label||'').split('\n')[0].trim()));
+  const qmsFields = sec.fields.filter(f=>f.isQMS);
+  return {issueField, actionField, qmsFields};
+}
+function qmsCellDisplay(f, v){
+  if(v===undefined || v===null || v==='') return '';
+  if(f.type==='boolean') return v===true ? boolLabels(f).t : (v===false ? boolLabels(f).f : '');
+  return v;
+}
+function processQmsSections(rows){
+  return SCHEMA.filter(s=>s.id!=='META').map(sec=>({
+    sec, rows: rows.filter(r=>r.section===sec.id).sort((a,b)=>(a.date+a.shift+a.po).localeCompare(b.date+b.shift+b.po)),
+  })).filter(g=>g.rows.length>0);
+}
+function buildProcessQmsExcelXml(rows){
+  let xml = `<?xml version="1.0"?>\n<?mso-application progid="Excel.Sheet"?>\n`;
+  xml += `<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n`;
+  xml += `<Styles><Style ss:ID="hdr"><Font ss:Bold="1"/><Interior ss:Color="#EEF1F6" ss:Pattern="Solid"/></Style></Styles>\n`;
+  xml += `<Worksheet ss:Name="Data Export"><Table>\n`;
+  const strCell = v => (v===undefined||v===null||v==='') ? '<Cell/>' : `<Cell><Data ss:Type="String">${xmlEscape(v)}</Data></Cell>`;
+  const numCell = v => (v===undefined||v===null||v==='') ? '<Cell/>' : `<Cell><Data ss:Type="Number">${Number(v)}</Data></Cell>`;
+  const hdrCell = v => `<Cell ss:StyleID="hdr"><Data ss:Type="String">${xmlEscape(v)}</Data></Cell>`;
+  processQmsSections(rows).forEach(({sec, rows:secRows})=>{
+    const {issueField, actionField, qmsFields} = processQmsFieldsFor(sec);
+    const headers = ['Date','Shift','Process','Item Code','PO','ISSUES/ Abnormal','ACTION', ...qmsFields.map(f=>f.qmsLabel || f.label.split('\n')[0])];
+    xml += '<Row>' + headers.map(hdrCell).join('') + '</Row>\n';
+    secRows.forEach(r=>{
+      let cells = strCell(fmtDateExport(r.date));
+      cells += numCell(r.shift);
+      cells += strCell(sec.id);
+      cells += strCell(r.itemCode||'');
+      cells += strCell(r.po||'');
+      cells += strCell(issueField ? (r.fields[issueField.id]||'') : '');
+      cells += strCell(actionField ? (r.fields[actionField.id]||'') : '');
+      qmsFields.forEach(f=>{
+        const v = qmsCellDisplay(f, r.fields[f.id]);
+        cells += (f.type==='number' && typeof v==='number') ? numCell(v) : strCell(v);
+      });
+      xml += `<Row>${cells}</Row>\n`;
+    });
+  });
+  xml += `</Table></Worksheet></Workbook>`;
+  return xml;
+}
+function buildProcessQmsPrintHtml(rows){
+  const groups = processQmsSections(rows);
+  let html = `<!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><title>Shiftly — Xuất dữ liệu theo mẫu</title>
+<style>
+*{box-sizing:border-box;} body{font-family:Arial,Helvetica,sans-serif;color:#0F172A;margin:0;padding:16px;font-size:11px;}
+h1{font-size:15px;margin:0 0 12px;}
+table{width:100%;border-collapse:collapse;margin:0 0 16px;}
+th,td{border:1px solid #94A3B8;padding:4px 6px;text-align:left;}
+th{background:#EEF1F6;font-weight:700;}
+.sectitle{font-weight:700;background:#0B1220;color:#fff;padding:5px 8px;margin:14px 0 6px;border-radius:4px;}
+@media print{ .sectitle,th{-webkit-print-color-adjust:exact;print-color-adjust:exact;} }
+</style></head><body>
+<h1>ILD Coffee Vietnam — Xuất dữ liệu (${rows.length} điểm kiểm tra)</h1>`;
+  if(groups.length===0) html += '<p>Không có dữ liệu phù hợp.</p>';
+  groups.forEach(({sec, rows:secRows})=>{
+    const {issueField, actionField, qmsFields} = processQmsFieldsFor(sec);
+    html += `<div class="sectitle">${escapeHtml(sec.name)} (${escapeHtml(sec.id)})</div>`;
+    const headers = ['Date','Shift','Process','Item Code','PO','ISSUES/ Abnormal','ACTION', ...qmsFields.map(f=>f.qmsLabel || f.label.split('\n')[0])];
+    html += '<table><thead><tr>' + headers.map(h=>`<th>${escapeHtml(h)}</th>`).join('') + '</tr></thead><tbody>';
+    secRows.forEach(r=>{
+      const cells = [fmtDateExport(r.date), r.shift, sec.id, r.itemCode||'', r.po||'',
+        issueField ? (r.fields[issueField.id]||'') : '', actionField ? (r.fields[actionField.id]||'') : ''];
+      qmsFields.forEach(f=>cells.push(qmsCellDisplay(f, r.fields[f.id])));
+      html += '<tr>' + cells.map(c=>`<td>${escapeHtml(c===undefined||c===null?'':String(c))}</td>`).join('') + '</tr>';
+    });
+    html += '</tbody></table>';
+  });
+  html += `<div style="text-align:right;color:#64748B;font-size:10px;">Xuất lúc: ${fmtDateTimeVN(Date.now())}</div>`;
+  html += '</body></html>';
+  return html;
+}
+
 /* ===================== BOOT ===================== */
 function renderAll(){
   applyTabConfig();
@@ -4882,6 +5121,7 @@ function renderAll(){
 (async function init(){
   DB = await idbOpen();
   await loadCloudState();
+  await loadSaveDirHandle();
   const metaTabConfig = await idbGet('meta','tabConfig');
   if(metaTabConfig && metaTabConfig.value) TAB_CONFIG = normalizeTabConfig(metaTabConfig.value);
   const metaTech = await idbGet('meta','technicians');

@@ -162,6 +162,18 @@ test('the old shared-secret model is fully removed', async () => {
   assert.equal(res.rows[0].tbl_count, 0);
 });
 
+test('checkpoints: itemCode round-trips through push/pull and defaults to \'\' when absent', async () => {
+  const db = await backend();
+  const uid = await createMember(db, { displayName: 'QA' });
+  await signInAs(db, uid);
+  const withCode = { key: 'ic1', date: '2026-09-19', shift: '1', section: 'ROA', po: 'PO1', itemCode: '1100011', recipe: '', client: '', technician: 'QA', fields: {}, fieldNotes: {}, images: [], updatedAt: '2026-09-19T01:00:00Z' };
+  const withoutCode = { key: 'ic2', date: '2026-09-19', shift: '1', section: 'ROA', po: 'PO2', recipe: '', client: '', technician: 'QA', fields: {}, fieldNotes: {}, images: [], updatedAt: '2026-09-19T01:00:00Z' };
+  await rpc(db, 'sync_put_checkpoints', { p_rows: [withCode, withoutCode] });
+  const pulled = (await rpc(db, 'sync_get_checkpoints', { p_since: 0 })).rows;
+  assert.equal(pulled.find(r => r.key === 'ic1').itemCode, '1100011');
+  assert.equal(pulled.find(r => r.key === 'ic2').itemCode, '');
+});
+
 test('checkpoints: push, pull, stale update rejected, cursor advances, delete tombstone', async () => {
   const db = await backend();
   const uid = await createMember(db, { displayName: 'QA' });
