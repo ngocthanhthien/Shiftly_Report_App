@@ -239,6 +239,7 @@ textarea.inp{resize:vertical;min-height:64px;}
 .edittable .rowbtn.add{background:var(--teal);color:#fff;}
 .edittable td.actions{white-space:nowrap;}
 .edittable td.actions .row{display:flex;gap:5px;flex-wrap:nowrap;}
+.seltoolbar{display:flex;align-items:center;gap:10px;padding:9px 12px;background:var(--teal-l);color:var(--teal-d);font-size:12.5px;font-weight:700;border-bottom:1.5px solid var(--teal);}
 .msf{position:relative;display:inline-block;}
 .msf>summary{list-style:none;cursor:pointer;min-height:30px;padding:4px 10px;border-radius:7px;border:1.3px solid var(--line2);background:#fff;font-size:11.5px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:5px;white-space:nowrap;}
 .msf>summary::-webkit-details-marker{display:none;}
@@ -2142,6 +2143,16 @@ function renderInputForm(){
       root.appendChild(metaCard);
       return;
     }
+    // Chặn mở phần chỉ tiêu phía dưới ngay từ lúc gõ PO (không đợi tới lúc
+    // bấm Lưu) nếu PO chưa đúng định dạng — cùng quy tắc với validate cứng
+    // ở nút Lưu (SHUTDOWN hoặc đúng 9 chữ số), chỉ khác là cảnh báo SỚM hơn.
+    const poNorm0 = /^shutdown$/i.test(poVal0.trim()) ? 'SHUTDOWN' : poVal0.trim();
+    if(poNorm0!=='SHUTDOWN' && !/^\d{9}$/.test(poNorm0)){
+      formCard.appendChild(el('p',{class:'sub', style:'margin:10px 0 0;color:var(--fail);'},['⚠️ Mã PO phải gồm đúng 9 chữ số, hoặc là SHUTDOWN — nhập đúng để tiếp tục nhập chỉ tiêu.']));
+      root.appendChild(formCard);
+      root.appendChild(metaCard);
+      return;
+    }
   }
 
   const poVal = poAC.getValue();
@@ -3063,17 +3074,32 @@ function multiSelectFilterEl(label, options, selectedSet, onChange){
   return details;
 }
 function buildEditableTable(opts){
-  const {columns, rows, onAdd, renderActions, emptyText, rowStyle, state, tableClass} = opts;
+  const {columns, rows, onAdd, renderActions, emptyText, rowStyle, state, tableClass, selectable, rowKey, onBulkDelete, bulkDeleteLabel} = opts;
   state.filters = state.filters || {};
   state.sort = state.sort || {key:null, dir:null};
+  if(selectable && !(state.selected instanceof Set)) state.selected = new Set();
   const actionsCol = !!renderActions;
   const resolveType = (col, row) => typeof col.type==='function' ? col.type(row) : col.type;
 
   const wrap = el('div',{class:'card', style:'padding:0;overflow:hidden;'});
+  const selBar = selectable ? el('div',{class:'seltoolbar', style:'display:none;'}) : null;
+  if(selBar) wrap.appendChild(selBar);
   const scroll = el('div',{class:'tablescroll'});
   const table = el('table',{class:'datatable edittable'+(tableClass?' '+tableClass:'')});
   const theadHdr = el('tr',{});
   const theadFilter = el('tr',{class:'filterrow'});
+  let selectAllCb = null;
+  if(selectable){
+    selectAllCb = el('input',{type:'checkbox', title:'Chọn tất cả (đang lọc)'});
+    selectAllCb.addEventListener('change', ()=>{
+      const list = sortedFiltered();
+      if(selectAllCb.checked) list.forEach(r=>state.selected.add(rowKey(r)));
+      else list.forEach(r=>state.selected.delete(rowKey(r)));
+      renderBody();
+    });
+    theadHdr.appendChild(el('th',{style:'width:34px;'},[selectAllCb]));
+    theadFilter.appendChild(el('th',{}));
+  }
   columns.forEach(col=>{
     const th = el('th',{},[col.label]);
     if(col.sortable){
@@ -3189,6 +3215,7 @@ function buildEditableTable(opts){
     tbody.innerHTML = '';
     if(onAdd){
       const addTr = el('tr',{class:'addrow'});
+      if(selectable) addTr.appendChild(el('td',{}));
       const inputs = {};
       columns.forEach(col=>{
         const td = el('td',{});
@@ -3222,23 +3249,53 @@ function buildEditableTable(opts){
     const list = sortedFiltered();
     if(list.length===0){
       const tr = el('tr',{});
-      const td = el('td',{colspan:String(columns.length + (actionsCol?1:0)), style:'text-align:center;color:var(--muted);padding:18px;white-space:normal;'},[emptyText||'Không có dữ liệu.']);
+      const td = el('td',{colspan:String(columns.length + (actionsCol?1:0) + (selectable?1:0)), style:'text-align:center;color:var(--muted);padding:18px;white-space:normal;'},[emptyText||'Không có dữ liệu.']);
       tr.appendChild(td); tbody.appendChild(tr);
-      return;
+    } else {
+      list.forEach(row=>{
+        const tr = el('tr',{});
+        if(rowStyle){ const s = rowStyle(row); if(s) tr.setAttribute('style', s); }
+        if(selectable){
+          const key = rowKey(row);
+          const cb = el('input',{type:'checkbox'});
+          cb.checked = state.selected.has(key);
+          cb.addEventListener('change', ()=>{
+            if(cb.checked) state.selected.add(key); else state.selected.delete(key);
+            renderBody();
+          });
+          tr.appendChild(el('td',{style:'text-align:center;'},[cb]));
+        }
+        columns.forEach(col=> tr.appendChild(editableCell(col, row)));
+        if(actionsCol){
+          const actTd = el('td',{class:'actions'});
+          const rowDiv = el('div',{class:'row'});
+          (renderActions(row)||[]).forEach(b=>rowDiv.appendChild(b));
+          actTd.appendChild(rowDiv);
+          tr.appendChild(actTd);
+        }
+        tbody.appendChild(tr);
+      });
     }
-    list.forEach(row=>{
-      const tr = el('tr',{});
-      if(rowStyle){ const s = rowStyle(row); if(s) tr.setAttribute('style', s); }
-      columns.forEach(col=> tr.appendChild(editableCell(col, row)));
-      if(actionsCol){
-        const actTd = el('td',{class:'actions'});
-        const rowDiv = el('div',{class:'row'});
-        (renderActions(row)||[]).forEach(b=>rowDiv.appendChild(b));
-        actTd.appendChild(rowDiv);
-        tr.appendChild(actTd);
+    if(selectable){
+      const selCount = state.selected.size;
+      selectAllCb.checked = list.length>0 && list.every(r=>state.selected.has(rowKey(r)));
+      selectAllCb.indeterminate = !selectAllCb.checked && list.some(r=>state.selected.has(rowKey(r)));
+      selBar.innerHTML = '';
+      if(selCount>0){
+        selBar.style.display = 'flex';
+        selBar.appendChild(el('span',{},[`Đã chọn ${selCount} dòng`]));
+        const delBtn = el('button',{class:'btn danger sm', type:'button', style:'width:auto;margin-left:auto;'},[bulkDeleteLabel || `🗑️ Xoá ${selCount} mục đã chọn`]);
+        delBtn.addEventListener('click', async ()=>{
+          const selectedRows = rows.filter(r=>state.selected.has(rowKey(r)));
+          if(selectedRows.length===0) return;
+          const ok = await onBulkDelete(selectedRows);
+          if(ok!==false){ state.selected.clear(); renderBody(); }
+        });
+        selBar.appendChild(delBtn);
+      } else {
+        selBar.style.display = 'none';
       }
-      tbody.appendChild(tr);
-    });
+    }
   }
   renderBody();
   return wrap;
@@ -5039,6 +5096,24 @@ function renderSpecs(){
         });
         return [upBtn, downBtn, ovBtn, delBtn];
       },
+      selectable: true,
+      rowKey: row => row.f.id,
+      // Xoá hàng loạt là hành động phá huỷ trên cấu hình dùng chung cho mọi
+      // tablet — bắt buộc mật khẩu Admin (APP_PASSWORD, giống Force sửa/xoá
+      // dữ liệu ca ở tab Dữ liệu) sau bước xác nhận thường, không chỉ 1 nút.
+      onBulkDelete: async (selectedRows) => {
+        const labels = selectedRows.map(r=>r.f.label.split('\n')[0]);
+        if(!confirm(`Xoá ${selectedRows.length} chỉ tiêu đã chọn?\n- ${labels.join('\n- ')}\n\nDữ liệu đã lưu trước đó của các chỉ tiêu này sẽ không còn hiện trong form (vẫn còn trong CSV cũ). Không thể hoàn tác.`)) return false;
+        if(!promptPasswordOK('Nhập mật khẩu Admin để xác nhận xoá nhiều chỉ tiêu:')) return false;
+        const idsToDelete = new Set(selectedRows.map(r=>r.f.id));
+        sec.fields = sec.fields.filter(x=>!idsToDelete.has(x.id));
+        if(idsToDelete.has(renderSpecs._overrideOpen[sec.id])) renderSpecs._overrideOpen[sec.id] = null;
+        renderSpecs._tableState[sec.id].selected.clear();
+        await saveSchema();
+        toast(`Đã xoá ${selectedRows.length} chỉ tiêu`);
+        rebuildSection();
+        return true;
+      },
     });
     card.appendChild(table);
     card.appendChild(overridePanelSlot);
@@ -5683,7 +5758,7 @@ function renderGuide(){
     <h4>20. Dán ảnh trực tiếp (Copy/Paste)</h4>
     <p>Ô "📋 Dán ảnh vào đây (Ctrl+V)" dưới mỗi Ghi chú bất thường — chạm vào ô rồi dán (paste) ảnh đã copy sẵn, không cần lưu file trước.</p>
     <h4>21. Tab Specs — bảng chỉnh sửa trực tiếp, Bắt buộc & ghi đè theo Recipe</h4>
-    <p>Mỗi Công đoạn là 1 bảng riêng (giống tab Danh sách Items Code), cột <b>Lựa chọn (Danh sách)</b> nằm cuối cùng — bấm tiêu đề cột để sắp xếp, gõ vào ô "Lọc" dưới mỗi cột để tìm nhanh (lọc được theo Tên, Loại, Bắt buộc, QMS, và Lựa chọn), sửa Tên/Loại/Giới hạn/Nhãn/Bắt buộc/QMS/Lựa chọn ngay trong ô (gõ xong bấm ra ngoài hoặc tick là lưu ngay, không cần nút Lưu riêng). Nút <b>"➕ Thêm chỉ tiêu"</b> ở đầu mỗi bảng mở 1 popup nhập đầy đủ thông tin chỉ tiêu mới (Tên, Loại, Giới hạn/Lựa chọn/Nhãn tuỳ Loại, Bắt buộc, QMS) trong 1 lần thay vì phải điền tiếp trong bảng. Nút ▲▼ ở cột Hành động để sắp xếp thủ công thứ tự hiển thị ở tab Nhập liệu (tắt sắp xếp cột khác trước để thấy rõ khi dùng ▲▼). Tick "Bắt buộc" để đánh dấu Mandatory (hiện dấu * và cảnh báo mạnh hơn khi lưu thiếu ở tab Nhập liệu). Với chỉ tiêu Loại Số, bấm nút "🧬 Ghi đè" ở cuối dòng để mở bảng con "Ghi đè theo Recipe" ngay bên dưới — cùng 1 chỉ tiêu nhưng LSL/LCL/UCL/USL khác nhau tuỳ Recipe đang chọn ở công đoạn đó (ô Recipe gợi ý mọi mã đang có trong Item Code Master).</p>
+    <p>Mỗi Công đoạn là 1 bảng riêng (giống tab Danh sách Items Code), cột <b>Lựa chọn (Danh sách)</b> nằm cuối cùng — bấm tiêu đề cột để sắp xếp, gõ vào ô "Lọc" dưới mỗi cột để tìm nhanh (lọc được theo Tên, Loại, Bắt buộc, QMS, và Lựa chọn), sửa Tên/Loại/Giới hạn/Nhãn/Bắt buộc/QMS/Lựa chọn ngay trong ô (gõ xong bấm ra ngoài hoặc tick là lưu ngay, không cần nút Lưu riêng). Nút <b>"➕ Thêm chỉ tiêu"</b> ở đầu mỗi bảng mở 1 popup nhập đầy đủ thông tin chỉ tiêu mới (Tên, Loại, Giới hạn/Lựa chọn/Nhãn tuỳ Loại, Bắt buộc, QMS) trong 1 lần thay vì phải điền tiếp trong bảng. Nút ▲▼ ở cột Hành động để sắp xếp thủ công thứ tự hiển thị ở tab Nhập liệu (tắt sắp xếp cột khác trước để thấy rõ khi dùng ▲▼). Tick "Bắt buộc" để đánh dấu Mandatory (hiện dấu * và cảnh báo mạnh hơn khi lưu thiếu ở tab Nhập liệu). Với chỉ tiêu Loại Số, bấm nút "🧬 Ghi đè" ở cuối dòng để mở bảng con "Ghi đè theo Recipe" ngay bên dưới — cùng 1 chỉ tiêu nhưng LSL/LCL/UCL/USL khác nhau tuỳ Recipe đang chọn ở công đoạn đó (ô Recipe gợi ý mọi mã đang có trong Item Code Master). Ô tick ở đầu mỗi dòng (và ô tick "chọn tất cả" trên tiêu đề cột) cho <b>chọn nhiều chỉ tiêu cùng lúc</b> — khi có dòng đang chọn, 1 thanh xanh hiện ra với nút <b>"🗑️ Xoá N mục đã chọn"</b> để xoá hàng loạt trong 1 lần, thay vì xoá từng dòng; xoá hàng loạt luôn hỏi xác nhận rồi bắt <b>nhập mật khẩu Admin</b> (giống mật khẩu Force sửa/xoá dữ liệu ca ở tab Dữ liệu) trước khi thực sự xoá.</p>
     <h4>22. Mỗi điểm kiểm tra = 1 Công đoạn + 1 PO riêng</h4>
     <p>Khác với trước đây (1 ca chỉ có 1 PO chung), giờ mỗi điểm kiểm tra tự chọn PO riêng của nó. Nhờ vậy 1 ca có thể có nhiều PO chạy song song ở các công đoạn khác nhau, hoặc thậm chí nhiều PO khác nhau cùng 1 công đoạn (VD: 2 mẻ Trích ly liên tiếp) — mỗi cái là 1 điểm kiểm tra riêng biệt, không đè lên nhau. Khi bắt đầu nhập, app tự gợi ý copy số liệu từ <b>lần kiểm tra gần nhất của đúng PO + Công đoạn đó</b> (không phải "ca trước" nói chung).</p>
     <h4>23. Tab Danh sách PO</h4>
@@ -5718,7 +5793,7 @@ function renderGuide(){
     <p>Để cập nhật hàng loạt sau này: bấm <b>"⬇️ Tải template mẫu"</b> để có file Excel đúng định dạng, điền thêm dòng mới vào rồi bấm <b>"📥 Nhập từ Excel"</b> — dòng trùng cả Loại + Item Code + Tên sản phẩm sẽ tự bỏ qua (không tạo trùng lặp), dòng mới sẽ được thêm vào. Bấm <b>"⬆️ Xuất Excel"</b> để tải toàn bộ danh sách hiện tại ra file. Lưu ý: cũng như các tab danh sách khác (PO/Recipe/Client), file Excel ở đây dùng đúng định dạng ".xls" mà chính app này tự xuất ra — 1 file ".xlsx" gốc khác (vd tải trực tiếp từ Excel/Google Sheets) cần dán lại dữ liệu vào đúng file template trước khi nhập vào app.</p>
     <h4>37. Quy trình nhập liệu mới (kiểm soát chặt hơn)</h4>
     <p>Tab Nhập liệu đi theo đúng thứ tự: <b>Ngày → Ca → QC → Công đoạn → Item Code → Tên sản phẩm/Recipe (tự động) → Mã PO → các chỉ tiêu công đoạn → Issue/Abnormal &amp; Action → Lưu</b>. Ca/QC/Công đoạn không còn tự chọn sẵn nữa — phải tự chọn (chưa chọn Ca thì cả tab chưa hiện gì, đúng ý "chưa có Ca thì chưa có gì để lưu"). Công đoạn khi TẠO MỚI chỉ còn 5 lựa chọn: Rang (ROA), Trích ly (EXT), Cô đặc (EVA), Sấy thăng hoa (FD), Đóng gói (F&amp;P) — các công đoạn cũ (Tạo bọt/Rework/Tổng kết ca) không còn tạo mới được nhưng dữ liệu lịch sử vẫn xem/sửa/xuất báo cáo bình thường.</p>
-    <p>Ô Item Code vừa gõ tay vừa <b>tìm/chọn từ danh sách có sẵn</b> (gõ vài số đầu sẽ hiện gợi ý các mã đã có trong Item Code Master, giống hệt cách chọn PO) — chọn xong hoặc rời khỏi ô đó (bấm sang ô khác), Tên sản phẩm và Recipe tự điền (chỉ đọc, không sửa tay) từ đúng dữ liệu tab Danh sách Items Code. Không tìm thấy mã, mã có nhiều bản ghi mâu thuẫn nhau, hoặc mã chưa có Recipe trong Item Code Master đều báo lỗi rõ ràng và <b>chặn lưu</b> cho tới khi sửa đúng (đúng 8 chữ số). Mã PO phải đúng 9 chữ số, hoặc gõ "SHUTDOWN" (không phân biệt hoa/thường, tự chuyển thành chữ hoa) — cũng chặn lưu nếu sai định dạng.</p>
+    <p>Ô Item Code vừa gõ tay vừa <b>tìm/chọn từ danh sách có sẵn</b> (gõ vài số đầu sẽ hiện gợi ý các mã đã có trong Item Code Master, giống hệt cách chọn PO) — chọn xong hoặc rời khỏi ô đó (bấm sang ô khác), Tên sản phẩm và Recipe tự điền (chỉ đọc, không sửa tay) từ đúng dữ liệu tab Danh sách Items Code. Không tìm thấy mã, mã có nhiều bản ghi mâu thuẫn nhau, hoặc mã chưa có Recipe trong Item Code Master đều báo lỗi rõ ràng và <b>chặn lưu</b> cho tới khi sửa đúng (đúng 8 chữ số). Mã PO phải đúng 9 chữ số, hoặc gõ "SHUTDOWN" (không phân biệt hoa/thường, tự chuyển thành chữ hoa) — với 1 điểm kiểm tra MỚI, app kiểm tra ngay khi gõ: sai định dạng thì hiện cảnh báo và <b>chưa mở phần chỉ tiêu phía dưới</b> (không cần đợi tới lúc bấm Lưu mới biết sai).</p>
     <p>Issue/Abnormal và Action giờ nhập theo từng CẶP dòng, bấm "+ Thêm Issue/Action" nếu cần nhiều dòng — dòng nào đã gõ Issue thì bắt buộc phải gõ Action tương ứng (và ngược lại), dòng để trống hoàn toàn thì bỏ qua, không chặn lưu. Dữ liệu vẫn tương thích ngược 100% với các báo cáo/Excel/QMS đã có (App tự ghép lại vào đúng ô "Issue/ Abnormal" quen thuộc khi lưu).</p>
   </div>`;
 }

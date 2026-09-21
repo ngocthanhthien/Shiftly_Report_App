@@ -257,8 +257,11 @@ test('Save is blocked with a clear message when QC, Item Code, or PO are invalid
     poInput.value = '12345';
     poInput.dispatchEvent(new w.Event('blur'));
     await new Promise(r => setTimeout(r, 200));
-    [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Lưu điểm kiểm tra')).click();
-    assert.match(toastText(), /9 chữ số|SHUTDOWN/);
+    // An invalid-format PO (not SHUTDOWN, not exactly 9 digits) now blocks
+    // the rest of the form — including the Save button — from opening at
+    // all, instead of only failing at Save time.
+    assert.match(doc.querySelector('#view-input').textContent, /9 chữ số|SHUTDOWN/);
+    assert.equal([...doc.querySelectorAll('#view-input button')].some(b => b.textContent.includes('Lưu điểm kiểm tra')), false, 'Save button must not render while the PO format is invalid');
 
     assert.equal(w.eval('allCheckpoints.length'), 0, 'nothing must have been saved through any of the above attempts');
     assert.equal(errors.length, 0, errors.join('\n'));
@@ -292,6 +295,29 @@ test('PO = SHUTDOWN (any case) is accepted, but Item Code is still mandatory', a
     assert.equal(w.eval('allCheckpoints.length'), 1);
     assert.equal(w.eval('allCheckpoints[0].po'), 'SHUTDOWN', 'lowercase "shutdown" must be normalized to SHUTDOWN');
     assert.equal(w.eval('allCheckpoints[0].recipe'), '452', 'Recipe must be auto-filled from the Item Code Master lookup');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('PO gate: an invalid-format PO (not SHUTDOWN, not exactly 9 digits) warns and keeps the rest of the form (chỉ tiêu grid, Save) closed on a NEW checkpoint', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    driveToNewCheckpointForm(doc, w, {po: '71260'}); // only 5 digits
+    await new Promise(r => setTimeout(r, 50));
+
+    const bodyText = () => doc.querySelector('#view-input').textContent;
+    assert.match(bodyText(), /9 chữ số|SHUTDOWN/, 'must warn inline while the PO is the wrong length');
+    assert.doesNotMatch(bodyText(), /Client \(tuỳ chọn\)/, 'the rest of the form (e.g. Client) must not render yet');
+    assert.equal([...doc.querySelectorAll('#view-input button')].some(b => b.textContent.includes('Lưu điểm kiểm tra')), false, 'Save button must not render yet');
+
+    // Completing it to exactly 9 digits opens the rest of the form.
+    const poInput = poInputOf(doc);
+    poInput.value = '712600111';
+    poInput.dispatchEvent(new w.Event('blur'));
+    await new Promise(r => setTimeout(r, 50));
+    assert.doesNotMatch(bodyText(), /9 chữ số|SHUTDOWN/);
+    assert.ok([...doc.querySelectorAll('#view-input button')].some(b => b.textContent.includes('Lưu điểm kiểm tra')), 'Save button must render once the PO is exactly 9 digits');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });

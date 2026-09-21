@@ -243,6 +243,25 @@ Recipe không còn là 1 danh mục quản lý riêng — nó đã được tự
 
 **Test cập nhật**: `tests/specs-table.test.mjs` viết lại gần như toàn bộ — thứ tự cột mới, luồng thêm qua popup (2 test mới: thêm chỉ tiêu Loại Số với LSL/USL, và Loại Danh sách với Lựa chọn), lọc theo Bắt buộc, panel Ghi đè theo Recipe dùng `ITEM_CODE_LIST` thay vì `RECIPES`. `tests/list-tables.test.mjs`, `tests/tab-config.test.mjs`, `tests/supabase.test.mjs` cập nhật theo số tab mới/bỏ Recipe. Tổng: vẫn 10 file / **76 test** (thêm 1 test mới ở `specs-table.test.mjs` — thêm chỉ tiêu Loại Danh sách qua popup — bù đúng 1 test "Danh sách Recipe" bị xoá ở `list-tables.test.mjs`), tất cả pass.
 
+### 3k. Chọn nhiều dòng + xoá hàng loạt trong bảng Specs, bắt mật khẩu Admin (2026-09-21, cùng ngày)
+
+Yêu cầu: cho chọn nhiều chỉ tiêu cùng lúc ở tab Specs rồi xoá 1 lần, và bắt nhập mật khẩu Admin (dùng lại `APP_PASSWORD` = `1234`, đúng mật khẩu Force sửa/xoá dữ liệu ca đã có sẵn ở tab Dữ liệu — KHÔNG tạo thêm mật khẩu/vai trò mới) trước khi xoá thật.
+
+- **`buildEditableTable(opts)`** (component bảng dùng chung) có thêm nhóm option mới, tất cả **opt-in** (không đổi hành vi các bảng khác — PO/Client/Items Code vẫn y hệt cũ vì không truyền các option này): `selectable:true` bật cột tick chọn đầu tiên (kèm ô tick "chọn tất cả" ở header — chỉ chọn các dòng đang lọc/hiện ra, không chọn ẩn); `rowKey:row=>...` định danh ổn định cho từng dòng (dùng `f.id`, KHÔNG dùng index vì index đổi khi sort/filter/xoá); `onBulkDelete:async selectedRows=>...` callback chứa toàn bộ logic nghiệp vụ xoá thật (component chỉ lo UI chọn/đếm/hiện thanh hành động), trả `false` để coi là "huỷ, không xoá gì" (component không tự xoá lựa chọn trong trường hợp này); `bulkDeleteLabel` tuỳ chọn đổi chữ nút.
+- Khi có ≥1 dòng được chọn, 1 thanh `.seltoolbar` (nền teal nhạt) hiện ngay trên bảng: "Đã chọn N dòng" + nút "🗑️ Xoá N mục đã chọn".
+- `renderSpecs()`: bảng Specs bật `selectable`/`rowKey:row=>row.f.id`; `onBulkDelete` làm đúng 2 bước như xoá 1 dòng đã có (`confirm()` liệt kê tên từng chỉ tiêu sẽ xoá, rồi `promptPasswordOK()` — cùng hàm dùng cho Force sửa/xoá checkpoint), chỉ khi CẢ HAI bước đều pass mới thật sự lọc bỏ các field khỏi `sec.fields`, dọn `renderSpecs._overrideOpen[sec.id]` nếu field đang mở panel Ghi đè nằm trong nhóm bị xoá, xoá sạch `state.selected`, `saveSchema()`, rồi `rebuildSection()`.
+- **Lưu ý kỹ thuật** (để tránh bug tương tự nếu mở rộng `selectable` cho bảng khác sau này): `onBulkDelete` phải tự `.clear()` đúng `Set` đang dùng (`renderSpecs._tableState[sec.id].selected`) TRƯỚC khi gọi `rebuildSection()` — nếu để component tự clear SAU khi callback trả về, bảng mới dựng lại bên trong `rebuildSection()` sẽ đọc phải `state.selected` còn sót id của các field VỪA bị xoá (không còn dòng nào khớp id đó để hiện tick, nhưng `selCount` vẫn đếm nhầm).
+
+**Test mới**: `tests/specs-table.test.mjs` thêm 2 test — (1) chọn 2 dòng → thấy thanh + nút đúng số lượng; huỷ ở bước `confirm()` thì không hỏi mật khẩu và không xoá gì; sai mật khẩu thì không xoá; đúng mật khẩu (`1234`) thì xoá đúng các dòng đã chọn và thanh chọn biến mất; (2) ô "chọn tất cả" chỉ chọn các dòng đang hiện ra sau khi lọc, không chọn dòng đang bị ẩn bởi bộ lọc. Toàn bộ `tr.children[N]`/`filterRow.children[N]` trong file này dịch thêm 1 vì cột tick chọn mới chèn vào đầu. Tổng: 10 file / **78 test**, tất cả pass.
+
+### 3l. Chặn mở phần chỉ tiêu ngay khi gõ Mã PO sai định dạng (2026-09-21, cùng ngày)
+
+Validate cứng "Mã PO phải đúng 9 chữ số, hoặc SHUTDOWN" đã có sẵn ở nút Lưu (mục 3e) — yêu cầu mới là cảnh báo **SỚM HƠN**, ngay khi đang gõ PO cho 1 điểm kiểm tra MỚI, thay vì phải điền hết cả form rồi mới biết sai lúc bấm Lưu.
+
+- [renderInputForm](index.html:2131), nhánh tạo MỚI (không phải đang Sửa): gate rỗng-PO cũ (`if(!poVal0){...return;}`) giữ nguyên, thêm ngay sau đó 1 gate thứ 2 — chuẩn hoá `poVal0` giống hệt cách chuẩn hoá ở nút Lưu (`/^shutdown$/i` → `'SHUTDOWN'`), nếu không phải `'SHUTDOWN'` và không khớp `/^\d{9}$/` thì render 1 dòng cảnh báo màu đỏ (`⚠️ Mã PO phải gồm đúng 9 chữ số, hoặc là SHUTDOWN...`) rồi `return` — y hệt cơ chế "chưa nhập PO thì chưa mở phần chỉ tiêu" đã có, chỉ thêm 1 điều kiện.
+- **Cố tình KHÔNG áp dụng gate này khi đang SỬA** (`editingCp`) — chỉ áp dụng lúc tạo mới. Lý do: dữ liệu lịch sử có thể đã lưu PO không đúng định dạng 9 chữ số từ trước khi quy tắc này tồn tại; validate cứng ở nút Lưu (mục 3e) vẫn chặn LƯU LẠI dữ liệu sai định dạng, nhưng không khoá luôn quyền MỞ RA XEM/sửa các field khác của 1 bản ghi cũ.
+- **Test cập nhật**: `tests/input-form-v2.test.mjs` — test "Save is blocked..." đoạn cuối (PO 5 chữ số) đổi từ "bấm nút Lưu rồi kiểm tra toast lỗi" sang "kiểm tra cảnh báo hiện ngay + nút Lưu không tồn tại" (vì giờ nút Lưu không còn được render nữa ở bước đó); thêm 1 test mới "PO gate: ..." xác nhận PO 5 chữ số hiện cảnh báo + ẩn phần Client/Save, còn PO đủ 9 chữ số thì mở đúng phần còn lại. Tổng: 10 file / **79 test**, tất cả pass.
+
 ---
 
 ## 4. (Lịch sử) Câu hỏi từng cần xác nhận — xem mục 3 ở trên để biết câu trả lời đã chốt

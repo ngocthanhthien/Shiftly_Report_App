@@ -5,14 +5,18 @@ import {JSDOM, VirtualConsole} from 'jsdom';
 import {IDBFactory} from 'fake-indexeddb';
 
 // Covers tab Specs as an editable spreadsheet table — sortable/filterable
-// columns, inline edit, and a "➕ Thêm chỉ tiêu" popup for adding a new chỉ
-// tiêu (2026-09-21 redesign: options/"Lựa chọn" column moved last, the old
-// inline add-row replaced by the popup, an extra "Bắt buộc" filter added,
-// and higher-contrast styling — see HANDOFF.md). Recipe overrides (a nested
-// per-Recipe sub-table, only meaningful for type "number") stay as a
-// separate expandable panel opened via the "🧬 Ghi đè" action button, not
-// inlined into the row itself. Recipe is no longer a separately managed
-// list — its autocomplete suggestions come from ITEM_CODE_LIST.
+// columns, inline edit, a "➕ Thêm chỉ tiêu" popup for adding a new chỉ
+// tiêu, and multi-select + password-gated bulk delete (2026-09-21 redesign:
+// options/"Lựa chọn" column moved last, the old inline add-row replaced by
+// the popup, an extra "Bắt buộc" filter added, higher-contrast styling, and
+// — this round — a checkbox column for selecting several chỉ tiêu at once
+// and deleting them together behind the same Admin password (APP_PASSWORD)
+// used for Force-editing/deleting checkpoint data elsewhere in the app —
+// see HANDOFF.md). Recipe overrides (a nested per-Recipe sub-table, only
+// meaningful for type "number") stay as a separate expandable panel opened
+// via the "🧬 Ghi đè" action button, not inlined into the row itself.
+// Recipe is no longer a separately managed list — its autocomplete
+// suggestions come from ITEM_CODE_LIST.
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 
 async function boot() {
@@ -41,8 +45,11 @@ function sectionCard(doc, name) {
     return h && h.textContent.includes(name);
   });
 }
+// Column 0 in every data row is now the bulk-select checkbox (see the new
+// "selectable" table below) — the label textarea starts at index 1.
 function dataRows(card) { return [...card.querySelectorAll('table.edittable tbody tr')].filter(tr => !tr.classList.contains('addrow')); }
-function rowFor(card, fieldLabel) { return dataRows(card).find(tr => tr.children[0].querySelector('textarea').value.split('\n')[0] === fieldLabel); }
+function rowFor(card, fieldLabel) { return dataRows(card).find(tr => tr.children[1].querySelector('textarea').value.split('\n')[0] === fieldLabel); }
+function rowCheckbox(tr) { return tr.children[0].querySelector('input[type=checkbox]'); }
 function addSpecBtn(card) { return [...card.querySelector('.card-h').querySelectorAll('button')].find(b => b.textContent.includes('Thêm chỉ tiêu')); }
 function openModalFor(doc, card) { addSpecBtn(card).click(); return doc.querySelector('.modal-backdrop'); }
 function modalSubmitBtn(modal) { return [...modal.querySelectorAll('button')].find(b => b.classList.contains('teal') && b.textContent.includes('Thêm chỉ tiêu')); }
@@ -86,13 +93,13 @@ test('inline edit: renaming a chỉ tiêu, and editing LSL/LCL/UCL/USL, persists
     const card = sectionCard(doc, 'Test Section');
     const tr = rowFor(card, 'Nhiet do');
 
-    const labelTa = tr.children[0].querySelector('textarea');
+    const labelTa = tr.children[1].querySelector('textarea');
     labelTa.value = 'Nhiet do Rang';
     labelTa.dispatchEvent(new w.Event('blur'));
     await new Promise(r => setTimeout(r, 30));
     assert.equal(w.eval("SCHEMA.find(s=>s.id==='TST').fields[0].label"), 'Nhiet do Rang');
 
-    const limitInputs = tr.children[2].querySelectorAll('input');
+    const limitInputs = tr.children[3].querySelectorAll('input');
     assert.equal(limitInputs.length, 4, 'LSL/LCL/UCL/USL must be 4 mini inputs for a number field');
     limitInputs[0].value = '9.5'; // LSL
     limitInputs[0].dispatchEvent(new w.Event('blur'));
@@ -115,7 +122,7 @@ test('changing Loại clears the previous type\'s config (LSL/LCL/UCL/USL) and s
     w.showTab('specs');
     let card = sectionCard(doc, 'Test Section');
     const tr = rowFor(card, 'Nhiet do');
-    const typeSel = tr.children[1].querySelector('select');
+    const typeSel = tr.children[2].querySelector('select');
     typeSel.value = 'boolean';
     typeSel.dispatchEvent(new w.Event('change'));
     await new Promise(r => setTimeout(r, 30));
@@ -126,7 +133,7 @@ test('changing Loại clears the previous type\'s config (LSL/LCL/UCL/USL) and s
 
     card = sectionCard(doc, 'Test Section'); // table rebuilt after a type change
     const tr2 = rowFor(card, 'Nhiet do');
-    assert.equal(tr2.children[2].textContent.includes('chỉ áp dụng cho Loại Số'), true);
+    assert.equal(tr2.children[3].textContent.includes('chỉ áp dụng cho Loại Số'), true);
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
@@ -140,22 +147,22 @@ test('flags (Bắt buộc/Ghi chú) and QMS checkboxes toggle and persist', asyn
     const card = sectionCard(doc, 'Test Section');
     const tr = rowFor(card, 'Kiem tra ngoai quan');
 
-    const boolInputs = tr.children[3].querySelectorAll('input');
+    const boolInputs = tr.children[4].querySelectorAll('input');
     assert.equal(boolInputs[0].value, 'OK');
     assert.equal(boolInputs[1].value, 'NG');
 
-    const flagChecks = tr.children[4].querySelectorAll('input[type=checkbox]');
+    const flagChecks = tr.children[5].querySelectorAll('input[type=checkbox]');
     flagChecks[0].checked = true; // Bắt buộc
     flagChecks[0].dispatchEvent(new w.Event('change'));
     await new Promise(r => setTimeout(r, 30));
     assert.equal(w.eval("SCHEMA.find(s=>s.id==='TST').fields[1].required"), true);
 
-    const qmsCb = tr.children[5].querySelector('input[type=checkbox]');
+    const qmsCb = tr.children[6].querySelector('input[type=checkbox]');
     qmsCb.checked = true;
     qmsCb.dispatchEvent(new w.Event('change'));
     await new Promise(r => setTimeout(r, 30));
     assert.equal(w.eval("SCHEMA.find(s=>s.id==='TST').fields[1].isQMS"), true);
-    const qmsNameInp = tr.children[5].querySelector('input[type=text]');
+    const qmsNameInp = tr.children[6].querySelector('input[type=text]');
     assert.notEqual(qmsNameInp.style.display, 'none', 'QMS column-name input must appear once QMS is checked');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
@@ -189,7 +196,7 @@ test('"➕ Thêm chỉ tiêu" popup adds a new chỉ tiêu (Loại Số with LSL
 
     card = sectionCard(doc, 'Test Section');
     let rows = dataRows(card);
-    assert.equal(rows[2].children[0].querySelector('textarea').value, 'Mau sac');
+    assert.equal(rows[2].children[1].querySelector('textarea').value, 'Mau sac');
 
     // Reorder: move "Mau sac" (index 2) up once -> becomes index 1.
     w.confirm = () => true;
@@ -282,33 +289,34 @@ test('filter by Loại (multi-select), by Bắt buộc, and text-filter by Tên 
     const card = sectionCard(doc, 'Test Section');
     const filterRow = card.querySelector('thead tr.filterrow');
 
-    const labelFilter = filterRow.children[0].querySelector('input');
+    const labelFilter = filterRow.children[1].querySelector('input');
     labelFilter.value = 'nhiet';
     labelFilter.dispatchEvent(new w.Event('input'));
     await new Promise(r => setTimeout(r, 30));
-    let labels = dataRows(card).map(tr => tr.children[0].querySelector('textarea').value);
+    let labels = dataRows(card).map(tr => tr.children[1].querySelector('textarea').value);
     assert.deepEqual(labels.sort(), ['Nhiet do Rang', 'Nhiet do Say']);
 
     labelFilter.value = '';
     labelFilter.dispatchEvent(new w.Event('input'));
-    const typeMsf = filterRow.children[1].querySelector('details.msf');
+    const typeMsf = filterRow.children[2].querySelector('details.msf');
     const boolCb = [...typeMsf.querySelectorAll('.msf-opt')].find(o => o.textContent.includes('Đạt/Lỗi')).querySelector('input[type=checkbox]');
     boolCb.checked = true;
     boolCb.dispatchEvent(new w.Event('change'));
     await new Promise(r => setTimeout(r, 30));
-    labels = dataRows(card).map(tr => tr.children[0].querySelector('textarea').value);
+    labels = dataRows(card).map(tr => tr.children[1].querySelector('textarea').value);
     assert.deepEqual(labels, ['Kiem tra mau']);
     boolCb.checked = false;
     boolCb.dispatchEvent(new w.Event('change'));
     await new Promise(r => setTimeout(r, 30));
 
-    // "Bắt buộc" filter lives on the flags column (index 4).
-    const flagsMsf = filterRow.children[4].querySelector('details.msf');
+    // "Bắt buộc" filter lives on the flags column (index 5, after the new
+    // select-checkbox column at index 0).
+    const flagsMsf = filterRow.children[5].querySelector('details.msf');
     const requiredCb = [...flagsMsf.querySelectorAll('.msf-opt')].find(o => o.textContent.includes('Bắt buộc') && !o.textContent.includes('Không')).querySelector('input[type=checkbox]');
     requiredCb.checked = true;
     requiredCb.dispatchEvent(new w.Event('change'));
     await new Promise(r => setTimeout(r, 30));
-    labels = dataRows(card).map(tr => tr.children[0].querySelector('textarea').value);
+    labels = dataRows(card).map(tr => tr.children[1].querySelector('textarea').value);
     assert.deepEqual(labels, ['Nhiet do Rang']);
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
@@ -337,8 +345,91 @@ test('"Hiển thị trong báo cáo QMS" defaults to unchecked for every chỉ t
     const doc = w.document;
     w.showTab('specs');
     const card = sectionCard(doc, 'Rang (ROA)');
-    const qmsChecks = [...card.querySelectorAll('table.edittable tbody tr:not(.addrow)')].map(tr => tr.children[5].querySelector('input[type=checkbox]'));
+    const qmsChecks = [...card.querySelectorAll('table.edittable tbody tr:not(.addrow)')].map(tr => tr.children[6].querySelector('input[type=checkbox]'));
     assert.ok(qmsChecks.every(cb => cb.checked === false), 'every QMS checkbox in the Specs table must render unchecked by default');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('bulk select + delete: checking several rows shows a "Xoá N mục đã chọn" bar; deleting requires confirm() then the Admin password (1234)', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    w.eval(`SCHEMA = [
+      {id:'TST', name:'Test Section', fields: [
+        {id:'TST_A', label:'Nhiet do', type:'number'},
+        {id:'TST_B', label:'Kiem tra mau', type:'boolean'},
+        {id:'TST_C', label:'Ap suat', type:'number'},
+      ]},
+    ];`);
+    w.showTab('specs');
+    let card = sectionCard(doc, 'Test Section');
+
+    // No selection toolbar until at least 1 row is checked.
+    assert.equal(card.querySelector('.seltoolbar').style.display, 'none');
+
+    rowCheckbox(rowFor(card, 'Nhiet do')).click();
+    rowCheckbox(rowFor(card, 'Ap suat')).click();
+    const bar = card.querySelector('.seltoolbar');
+    assert.equal(bar.style.display, 'flex');
+    assert.ok(bar.textContent.includes('2'), 'toolbar must show the selected count');
+    const bulkDelBtn = [...bar.querySelectorAll('button')].find(b => b.textContent.includes('Xoá'));
+    assert.ok(bulkDelBtn, 'expected a bulk-delete button once rows are selected');
+
+    // Cancelling the plain confirm() must not touch SCHEMA or prompt for a password.
+    let promptCalled = false;
+    w.confirm = () => false;
+    w.prompt = () => { promptCalled = true; return '1234'; };
+    bulkDelBtn.click();
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(promptCalled, false, 'must not even ask for the password if the confirm() step is cancelled');
+    assert.equal(w.eval("SCHEMA.find(s=>s.id==='TST').fields.length"), 3);
+
+    // Confirmed, but wrong password -> still nothing deleted.
+    w.confirm = () => true;
+    w.prompt = () => 'wrong';
+    bulkDelBtn.click();
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(w.eval("SCHEMA.find(s=>s.id==='TST').fields.length"), 3, 'a wrong Admin password must not delete anything');
+
+    // Confirmed + correct password (1234) -> both selected rows are deleted.
+    w.prompt = (msg) => { assert.ok(/mật khẩu/i.test(msg)); return '1234'; };
+    bulkDelBtn.click();
+    await new Promise(r => setTimeout(r, 30));
+    assert.deepEqual(evalJson(w, "SCHEMA.find(s=>s.id==='TST').fields.map(f=>f.label)"), ['Kiem tra mau']);
+
+    // Selection must be cleared after a successful bulk delete.
+    card = sectionCard(doc, 'Test Section');
+    assert.equal(card.querySelector('.seltoolbar').style.display, 'none');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('bulk select: the header "select all" checkbox only selects the currently filtered rows', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    w.eval(`SCHEMA = [
+      {id:'TST', name:'Test Section', fields: [
+        {id:'TST_A', label:'Nhiet do Rang', type:'number'},
+        {id:'TST_B', label:'Kiem tra mau', type:'boolean'},
+        {id:'TST_C', label:'Nhiet do Say', type:'number'},
+      ]},
+    ];`);
+    w.showTab('specs');
+    const card = sectionCard(doc, 'Test Section');
+    const filterRow = card.querySelector('thead tr.filterrow');
+    const labelFilter = filterRow.children[1].querySelector('input');
+    labelFilter.value = 'nhiet';
+    labelFilter.dispatchEvent(new w.Event('input'));
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal(dataRows(card).length, 2, 'filter must narrow to the 2 "nhiet" rows first');
+
+    const selectAllCb = card.querySelector('thead tr:first-child th input[type=checkbox]');
+    selectAllCb.click();
+    await new Promise(r => setTimeout(r, 30));
+    const bar = card.querySelector('.seltoolbar');
+    assert.ok(bar.textContent.includes('2'), '"select all" while filtered must only select the 2 visible rows, not all 3');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
