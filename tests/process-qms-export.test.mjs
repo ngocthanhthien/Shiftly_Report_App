@@ -212,7 +212,9 @@ test('Item Code: typed value survives a Client change before Save (same draft-sa
     secSel.value = 'ROA';
     secSel.dispatchEvent(new w.Event('change'));
 
-    const poInput = doc.querySelector('#view-input .ac-wrap input');
+    // Item Code is ALSO an autocomplete (.ac-wrap) now, positioned before PO,
+    // so ".ac-wrap input" alone is ambiguous — disambiguate by placeholder.
+    const poInput = [...doc.querySelectorAll('#view-input .ac-wrap input')].find(i => i.placeholder.includes('SHUTDOWN'));
     poInput.value = '712600003';
     poInput.dispatchEvent(new w.Event('blur'));
     await new Promise(r => setTimeout(r, 200));

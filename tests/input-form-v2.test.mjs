@@ -122,6 +122,16 @@ test('getIssueActionPairs/syncIssueActionToLegacyFields: new format round-trips,
 });
 
 // ---- Full Input Form flow ----
+// Item Code is ALSO an autocomplete (.ac-wrap) now, positioned before PO in
+// the field order, so ".ac-wrap input" alone is ambiguous — disambiguate by
+// placeholder text.
+function poInputOf(doc) {
+  return [...doc.querySelectorAll('#view-input .ac-wrap input')].find(i => i.placeholder.includes('SHUTDOWN'));
+}
+function itemCodeInputOf(doc) {
+  return [...doc.querySelectorAll('#view-input .ac-wrap input')].find(i => i.placeholder === 'VD: 11000011');
+}
+
 function driveToNewCheckpointForm(doc, w, {shift='1', process='ROA', po}={}) {
   w.showTab('input');
   const shiftSel = doc.querySelector('#hdrShift');
@@ -133,11 +143,42 @@ function driveToNewCheckpointForm(doc, w, {shift='1', process='ROA', po}={}) {
   secSel.value = process;
   secSel.dispatchEvent(new w.Event('change'));
   if (po !== undefined) {
-    const poInput = doc.querySelector('#view-input .ac-wrap input');
+    const poInput = poInputOf(doc);
     poInput.value = po;
     poInput.dispatchEvent(new w.Event('blur'));
   }
 }
+
+test('Item Code field offers a searchable dropdown of codes already in the Item Code Master', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    w.eval(`ITEM_CODE_LIST = [
+      {type:'FGs', itemCode:'11000011', name:'Test Product', recipe:'452'},
+      {type:'RW', itemCode:'22000022', name:'Other Product', recipe:'400'},
+    ];`);
+    driveToNewCheckpointForm(doc, w, {po: '712600444'});
+    await new Promise(r => setTimeout(r, 50));
+
+    const itemCodeInp = itemCodeInputOf(doc);
+    assert.ok(itemCodeInp, 'Item Code input exists');
+    // Focusing/typing must surface matching known codes as clickable suggestions,
+    // same widget/mechanism as the existing PO field.
+    itemCodeInp.dispatchEvent(new w.Event('focus'));
+    itemCodeInp.value = '11';
+    itemCodeInp.dispatchEvent(new w.Event('input'));
+    const suggestions = [...itemCodeInp.parentElement.querySelectorAll('.ac-item')].map(n => n.textContent);
+    assert.deepEqual(suggestions, ['11000011'], 'only the matching known code must be suggested, not the unrelated 22000022');
+
+    // Picking the suggestion must fill the input and trigger the lookup (Item Name/Recipe).
+    const item = itemCodeInp.parentElement.querySelector('.ac-item');
+    item.dispatchEvent(new w.MouseEvent('mousedown'));
+    await new Promise(r => setTimeout(r, 50));
+    assert.equal(itemCodeInputOf(doc).value, '11000011');
+    assert.equal(doc.querySelector('#view-input input[readonly]').value, 'Test Product');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
 
 test('Process select for a NEW checkpoint only offers ROA/EXT/EVA/FD/FP — no FOAMING/REWORK/META', async () => {
   const {dom, w, errors} = await boot();
@@ -206,7 +247,7 @@ test('Save is blocked with a clear message when QC, Item Code, or PO are invalid
     itemCodeInp().dispatchEvent(new w.Event('blur'));
     await new Promise(r => setTimeout(r, 50));
     // Clear the PO to trigger the "blank PO" message specifically.
-    const poInput = doc.querySelector('#view-input .ac-wrap input');
+    const poInput = poInputOf(doc);
     poInput.value = '';
     poInput.dispatchEvent(new w.Event('blur'));
     await new Promise(r => setTimeout(r, 200));
@@ -279,15 +320,13 @@ test('Issue/Action rows: an unused blank row is ignored, but a half-filled row b
     await new Promise(r => setTimeout(r, 50));
     assert.equal(w.eval('allCheckpoints.length'), 1, 'a fully blank Issue/Action row must not block saving');
 
-    // Re-open, add a second checkpoint attempt with a half-filled row.
-    doc.querySelector('#view-input .ac-wrap input') && (() => {})();
-    // Start a fresh add for a different PO.
+    // Re-open: start a fresh add for a different PO with a half-filled row.
     const addBtn = [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Thêm điểm kiểm tra'));
     addBtn.click();
     const secSel = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.value === 'ROA'));
     secSel.value = 'ROA';
     secSel.dispatchEvent(new w.Event('change'));
-    const poInput = doc.querySelector('#view-input .ac-wrap input');
+    const poInput = poInputOf(doc);
     poInput.value = '712600333';
     poInput.dispatchEvent(new w.Event('blur'));
     await new Promise(r => setTimeout(r, 200));

@@ -611,6 +611,13 @@ function lookupItemByCode(code){
   if(!recipe) return {status:'missing_recipe', name};
   return {status:'ok', name, recipe};
 }
+// Autocomplete suggestions for the Input Form's Item Code field — every
+// distinct code already in the Item Code Master, so the user can search/pick
+// instead of typing blind (still free-text: unknown codes are simply caught
+// by lookupItemByCode()'s hard validation at Save).
+function allKnownItemCodes(){
+  return [...new Set(ITEM_CODE_LIST.map(i=>String(i.itemCode||'').trim()).filter(Boolean))].sort();
+}
 
 // Autocomplete suggestions for Input/Trace: registered POs (Danh sách PO)
 // that are not yet closed, plus any PO already used in past shifts, so
@@ -1933,7 +1940,7 @@ function renderInputForm(){
   // được hoist) và DÙNG NGAY ở QC bên dưới dù bản thân nó (và fieldEls/
   // noteEls/draftScope nó đóng closure) chỉ thực sự khởi tạo xong sau khi đã
   // qua các gate Công đoạn/PO — an toàn vì captureDraft() luôn kiểm tra
-  // fieldsRendered trước, y hệt cơ chế đã có sẵn cho itemCodeInp/poAC.
+  // fieldsRendered trước, y hệt cơ chế đã có sẵn cho itemCodeAC/poAC.
   function captureDraft(){
     if(!fieldsRendered) return;
     const draftFields = {}, draftNotes = {};
@@ -1984,20 +1991,21 @@ function renderInputForm(){
     }
   }
 
-  // ---- Item Code (nhập tay, 8 số) -> Item Name + Recipe (TỰ ĐỘNG, chỉ đọc) ----
+  // ---- Item Code (gõ tay 8 số HOẶC tìm/chọn từ danh sách có sẵn — Item
+  // Code Master, giống hệt kiểu tìm PO) -> Item Name + Recipe (TỰ ĐỘNG, chỉ đọc) ----
   const itemCodeVal0 = editingCp ? (editingCp.itemCode||'') : (renderInputForm._newItemCode||'');
-  const itemCodeInp = el('input',{class:'inp', type:'text', inputmode:'numeric', maxlength:'8', placeholder:'VD: 11000011', value:itemCodeVal0},[]);
-  // 'blur' (not 'input') to match the PO autocomplete's own commit timing —
-  // both go through captureDraft()+re-render, same safety net as the fix
-  // for the "typing wiped on PO/Recipe/Client change" bug (see HANDOFF.md).
-  // Tra cứu Item Name/Recipe cũng tự chạy lại ngay khi re-render này xảy ra
-  // (xem `lookup` bên dưới) — không cần rerender riêng theo từng ký tự gõ.
-  itemCodeInp.addEventListener('blur', ()=>{
+  // commit() bên trong renderAutocomplete tự fire cả lúc blur LẪN lúc bấm
+  // chọn 1 gợi ý — cùng đi qua captureDraft()+re-render, same safety net as
+  // the fix for the "typing wiped on PO/Recipe/Client change" bug (see
+  // HANDOFF.md). Tra cứu Item Name/Recipe cũng tự chạy lại ngay khi re-render
+  // này xảy ra (xem `lookup` bên dưới) — không cần rerender riêng theo từng
+  // ký tự gõ.
+  const itemCodeAC = renderAutocomplete(itemCodeVal0, allKnownItemCodes(), 'VD: 11000011', (v)=>{
     captureDraft();
-    if(editingCp) editingCp.itemCode = itemCodeInp.value.trim(); else renderInputForm._newItemCode = itemCodeInp.value.trim();
+    if(editingCp) editingCp.itemCode = v.trim(); else renderInputForm._newItemCode = v.trim();
     renderInputForm();
   });
-  formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Item Code *']), itemCodeInp]));
+  formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Item Code *']), itemCodeAC.node]));
 
   const lookup = lookupItemByCode(itemCodeVal0);
   const readonlyStyle = 'background:#F1F5F9;color:var(--muted);cursor:not-allowed;';
@@ -2175,7 +2183,7 @@ function renderInputForm(){
     // ---- Validate BẮT BUỘC — sai thì KHÔNG lưu, không hỏi "vẫn lưu?" ----
     if(!qcSel.value){ toast('Vui lòng chọn QC.'); return; }
     if(!secId){ toast('Vui lòng chọn Công đoạn.'); return; }
-    const itemCodeVal = itemCodeInp.value.trim();
+    const itemCodeVal = itemCodeAC.getValue();
     if(!/^\d{8}$/.test(itemCodeVal)){ toast('Item Code phải gồm đúng 8 chữ số.'); return; }
     const lookupResult = lookupItemByCode(itemCodeVal);
     if(lookupResult.status==='not_found'){ toast('Item Code không tồn tại trong Item Code Master.'); return; }
@@ -4782,7 +4790,7 @@ function renderSpecs(){
       const qmsLabelRow = el('label',{class:'fld', style:'margin:6px 0 8px;'},[el('span',{class:'lab'},['Tên cột khi xuất báo cáo QMS']), qmsLabelInp]);
       qmsLabelRow.style.display = qmsChk.checked ? '' : 'none';
       const qmsRow = el('label',{class:'fld', style:'display:flex;align-items:center;gap:8px;margin-bottom:0;'},[
-        qmsChk, el('span',{class:'lab', style:'margin:0;'},['Xuất trong báo cáo QMS (nút "Xuất theo mẫu" ở tab Dữ liệu)']),
+        qmsChk, el('span',{class:'lab', style:'margin:0;'},['Hiển thị trong báo cáo QMS ở tab Báo cáo']),
       ]);
       qmsChk.addEventListener('change', ()=>{ qmsLabelRow.style.display = qmsChk.checked ? '' : 'none'; });
 
@@ -5565,7 +5573,7 @@ function renderGuide(){
     <p>Để cập nhật hàng loạt sau này: bấm <b>"⬇️ Tải template mẫu"</b> để có file Excel đúng định dạng, điền thêm dòng mới vào rồi bấm <b>"📥 Nhập từ Excel"</b> — dòng trùng cả Loại + Item Code + Tên sản phẩm sẽ tự bỏ qua (không tạo trùng lặp), dòng mới sẽ được thêm vào. Bấm <b>"⬆️ Xuất Excel"</b> để tải toàn bộ danh sách hiện tại ra file. Lưu ý: cũng như các tab danh sách khác (PO/Recipe/Client), file Excel ở đây dùng đúng định dạng ".xls" mà chính app này tự xuất ra — 1 file ".xlsx" gốc khác (vd tải trực tiếp từ Excel/Google Sheets) cần dán lại dữ liệu vào đúng file template trước khi nhập vào app.</p>
     <h4>37. Quy trình nhập liệu mới (kiểm soát chặt hơn)</h4>
     <p>Tab Nhập liệu đi theo đúng thứ tự: <b>Ngày → Ca → QC → Công đoạn → Item Code → Tên sản phẩm/Recipe (tự động) → Mã PO → các chỉ tiêu công đoạn → Issue/Abnormal &amp; Action → Lưu</b>. Ca/QC/Công đoạn không còn tự chọn sẵn nữa — phải tự chọn (chưa chọn Ca thì cả tab chưa hiện gì, đúng ý "chưa có Ca thì chưa có gì để lưu"). Công đoạn khi TẠO MỚI chỉ còn 5 lựa chọn: Rang (ROA), Trích ly (EXT), Cô đặc (EVA), Sấy thăng hoa (FD), Đóng gói (F&amp;P) — các công đoạn cũ (Tạo bọt/Rework/Tổng kết ca) không còn tạo mới được nhưng dữ liệu lịch sử vẫn xem/sửa/xuất báo cáo bình thường.</p>
-    <p>Nhập đúng 8 số vào Item Code rồi rời khỏi ô đó (bấm sang ô khác) — Tên sản phẩm và Recipe tự điền (chỉ đọc, không sửa tay) từ đúng dữ liệu tab Danh sách Items Code. Không tìm thấy mã, mã có nhiều bản ghi mâu thuẫn nhau, hoặc mã chưa có Recipe trong Item Code Master đều báo lỗi rõ ràng và <b>chặn lưu</b> cho tới khi sửa đúng. Mã PO phải đúng 9 chữ số, hoặc gõ "SHUTDOWN" (không phân biệt hoa/thường, tự chuyển thành chữ hoa) — cũng chặn lưu nếu sai định dạng.</p>
+    <p>Ô Item Code vừa gõ tay vừa <b>tìm/chọn từ danh sách có sẵn</b> (gõ vài số đầu sẽ hiện gợi ý các mã đã có trong Item Code Master, giống hệt cách chọn PO) — chọn xong hoặc rời khỏi ô đó (bấm sang ô khác), Tên sản phẩm và Recipe tự điền (chỉ đọc, không sửa tay) từ đúng dữ liệu tab Danh sách Items Code. Không tìm thấy mã, mã có nhiều bản ghi mâu thuẫn nhau, hoặc mã chưa có Recipe trong Item Code Master đều báo lỗi rõ ràng và <b>chặn lưu</b> cho tới khi sửa đúng (đúng 8 chữ số). Mã PO phải đúng 9 chữ số, hoặc gõ "SHUTDOWN" (không phân biệt hoa/thường, tự chuyển thành chữ hoa) — cũng chặn lưu nếu sai định dạng.</p>
     <p>Issue/Abnormal và Action giờ nhập theo từng CẶP dòng, bấm "+ Thêm Issue/Action" nếu cần nhiều dòng — dòng nào đã gõ Issue thì bắt buộc phải gõ Action tương ứng (và ngược lại), dòng để trống hoàn toàn thì bỏ qua, không chặn lưu. Dữ liệu vẫn tương thích ngược 100% với các báo cáo/Excel/QMS đã có (App tự ghép lại vào đúng ô "Issue/ Abnormal" quen thuộc khi lưu).</p>
   </div>`;
 }

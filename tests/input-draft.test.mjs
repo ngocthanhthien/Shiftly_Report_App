@@ -64,7 +64,9 @@ test('typed field values survive a QC change before Save (new checkpoint)', asyn
 
     // First PO entry: this render pass has no PO yet, so it returns before
     // ever creating the chỉ tiêu fields — exercises the early-return guard.
-    const poInput = doc.querySelector('#view-input .ac-wrap input');
+    // Item Code is ALSO an autocomplete (.ac-wrap) now, positioned before PO,
+    // so ".ac-wrap input" alone is ambiguous — disambiguate by placeholder.
+    const poInput = [...doc.querySelectorAll('#view-input .ac-wrap input')].find(i => i.placeholder.includes('SHUTDOWN'));
     assert.ok(poInput, 'PO autocomplete input exists');
     poInput.value = '712600001';
     poInput.dispatchEvent(new w.Event('blur'));
