@@ -1,6 +1,6 @@
 # HANDOFF — Shiftly Report App
 
-Tài liệu bàn giao để tiếp tục làm việc ở phiên AI/công cụ khác. Cập nhật lần cuối: 2026-09-19.
+Tài liệu bàn giao để tiếp tục làm việc ở phiên AI/công cụ khác. Cập nhật lần cuối: 2026-09-21.
 
 ---
 
@@ -23,7 +23,7 @@ Tài liệu bàn giao để tiếp tục làm việc ở phiên AI/công cụ kh
 
 **Đã ÁP DỤNG (2026-09-18, đảo ngược quyết định trước đó cùng ngày)** mô hình 2 tầng tài khoản thật từ skill `supabase-sync-auth-patterns` (`references/access-management.md`), theo yêu cầu rõ ràng của người dùng để có "ngăn truy cập, quản lý tài khoản, đồng bộ realtime" giống hệt project song song [CloseCAPGMP](https://github.com/ngocthanhthien/CloseCAPGMP) (`C:\Users\BinhDang\Documents\GitHub\CloseCAPGMP`) — xem `HANDOFF_WEB.md`/`README.md` của project đó để đối chiếu chi tiết pattern gốc (bảng `gmp_members`, Edge Function `admin-users`, username→email nội bộ). Đánh đổi được người dùng xác nhận rõ: cần cài Supabase CLI 1 lần để deploy Edge Function (trước đó Shiftly cố tình giữ "không cần CLI, chỉ dán SQL"); đổi lại có tài khoản riêng từng người + Admin tự quản lý được, không còn 1 mật khẩu chung.
 
-**App chính**: [index.html](index.html) (~4700+ dòng sau khi thêm access control, single file, HTML+CSS+JS inline, tiếng Việt). 13 tab: Nhập liệu, Dữ liệu, Truy xuất, Danh sách PO/Recipe/Client, Data Log, Báo cáo, Thống kê, Specs, Xuất nhập dữ liệu, Cài đặt, Hướng dẫn.
+**App chính**: [index.html](index.html) (~5300+ dòng, single file, HTML+CSS+JS inline, tiếng Việt). 14 tab: Nhập liệu, Dữ liệu, Truy xuất, Danh sách PO/Recipe/Client, **Danh sách Items Code** (mới 2026-09-21, xem mục 3c), Data Log, Báo cáo, Thống kê, Specs, Xuất nhập dữ liệu, Cài đặt, Hướng dẫn.
 
 **Data model cốt lõi:**
 - `SCHEMA` (khai báo `DEFAULT_SCHEMA`/`SCHEMA` gần đầu script) — mảng section: `ROA, EXT, EVA, FOAMING, FD, FP, REWORK, META`. Mỗi section có `fields[]` (type: number/boolean/text/textarea/select; có `hardMin/hardMax`, `recipeOverrides` theo Recipe, `trueLabel/falseLabel` cho boolean).
@@ -46,7 +46,7 @@ Tài liệu bàn giao để tiếp tục làm việc ở phiên AI/công cụ kh
 
 Ghi chú bảo mật: mật khẩu app hardcode `const APP_PASSWORD = '1234'` ở [index.html:496](index.html:496) — dùng cho `promptPasswordOK()` (gate 1 số thao tác nhạy cảm trong app, VD xoá dữ liệu, sửa PO đã đóng), KHÁC HẲN với đăng nhập Supabase Auth ở trên — 2 lớp độc lập, đừng nhầm lẫn khi sửa 1 trong 2.
 
-**Test**: `npm ci && npm test` — chạy schema.sql THẬT qua Postgres nhúng (`@electric-sql/pglite`, không phải giả lập, có thêm stand-in `auth.users`/`auth.uid()` CHỈ trong test harness để mô phỏng Supabase Auth thật) + boot toàn bộ app qua jsdom rồi đăng nhập + đồng bộ thật qua đúng luồng RPC, kể cả case tài khoản bị vô hiệu hóa giữa phiên bị đá về màn hình đăng nhập, vai trò supervisor bị chặn ghi, và tính năng xuất Process/QMS (Item Code, cờ isQMS, định dạng ngày, không lộ ảnh). 38 test / 4 file, tất cả đang pass: `tests/supabase.test.mjs`, `tests/input-draft.test.mjs`, `tests/tab-config.test.mjs`, `tests/process-qms-export.test.mjs`. **Chưa/không thể test được**: Edge Function `admin-users` (chạy trên Deno, không có runtime Deno trong môi trường test này) — chỉ được review code thủ công, chưa chạy tự động; nếu sửa file này, test bằng tay qua Supabase Dashboard → Edge Functions → Invoke, hoặc deploy thật rồi thử qua UI "👥 Quản lý tài khoản".
+**Test**: `npm ci && npm test` — chạy schema.sql THẬT qua Postgres nhúng (`@electric-sql/pglite`, không phải giả lập, có thêm stand-in `auth.users`/`auth.uid()` CHỈ trong test harness để mô phỏng Supabase Auth thật) + boot toàn bộ app qua jsdom rồi đăng nhập + đồng bộ thật qua đúng luồng RPC, kể cả case tài khoản bị vô hiệu hóa giữa phiên bị đá về màn hình đăng nhập, vai trò supervisor bị chặn ghi, và tính năng xuất Process/QMS (Item Code, cờ isQMS, định dạng ngày, không lộ ảnh). 44 test / 5 file, tất cả đang pass: `tests/supabase.test.mjs`, `tests/input-draft.test.mjs`, `tests/tab-config.test.mjs`, `tests/process-qms-export.test.mjs`, `tests/item-code-list.test.mjs` (mới, mục 3c). **Chưa/không thể test được**: Edge Function `admin-users` (chạy trên Deno, không có runtime Deno trong môi trường test này) — chỉ được review code thủ công, chưa chạy tự động; nếu sửa file này, test bằng tay qua Supabase Dashboard → Edge Functions → Invoke, hoặc deploy thật rồi thử qua UI "👥 Quản lý tài khoản".
 
 ---
 
@@ -119,6 +119,20 @@ Người dùng cung cấp 1 file mẫu thứ 2 (`Template Data export.xlsx`, cù
 
 ---
 
+### 3c. Tab mới "Danh sách Items Code" (2026-09-21)
+
+Người dùng đính kèm file thật `Items Code.xlsx` (524 dòng, sheet `CodeLink`), yêu cầu thêm 1 tab quản lý bảng liên đới **Item Code ↔ Tên sản phẩm ↔ Recipe**, có xuất template/nhập Excel/xuất Excel.
+
+- **Data model**: mảng phẳng `{type:'FGs'|'RW', itemCode, name, recipe}` — `type` phân biệt 2 dải mã (FGs = thành phẩm, RW = hàng tái chế/Rework) theo đúng cách nhà máy quản lý. **Không dedupe theo `itemCode`** — dữ liệu thật có nhiều mã RW trùng lặp ứng với tên sản phẩm khác nhau; sửa/xoá thao tác theo INDEX trong mảng (giống hệt cách `renderClientList` đã làm), không theo khoá tự nhiên.
+- **Phát hiện quan trọng — không import trực tiếp được file gốc của người dùng**: toàn bộ cơ chế Excel import/export CÓ SẴN của app (`buildTableExcelXml`/`parseTableExcelXml`, dùng chung cho cả PO/Client/Items Code) chỉ đọc/ghi định dạng **SpreadsheetML 2003 (XML text, đuôi `.xls`)** mà chính app tự xuất ra — KHÔNG đọc được file `.xlsx` nhị phân/ZIP thật (như file người dùng gửi). Đây là giới hạn có từ trước, không phải lỗi mới, nhưng ảnh hưởng trực tiếp tới tính năng này.
+- **Cách xử lý đã chọn**: dùng Python/openpyxl (ngoài app) trích xuất sẵn toàn bộ 524 dòng thật, nhúng thẳng vào `index.html` thành hằng số `DEFAULT_ITEM_CODE_LIST` — mọi thiết bị mới đều có sẵn dữ liệu thật ngay từ đầu, KHÔNG cần người dùng tự import lại. `ITEM_CODE_LIST` khởi tạo từ hằng số này, chỉ bị ghi đè nếu IndexedDB đã có bản lưu khác (đã tự sửa qua UI hoặc đồng bộ về từ máy khác). Việc thêm/sửa/xoá về sau vẫn đi qua đúng UI thêm/sửa/xoá của tab, và Excel export/import về sau vẫn dùng đúng định dạng `.xls` nội bộ của app (đã ghi rõ trong help text của tab + mục 36 tab Hướng dẫn) — **KHÔNG** dùng để nhập lại 1 file `.xlsx` gốc khác từ Excel/Google Sheets mà chưa dán qua template trước.
+- **Đồng bộ**: `ITEM_CODE_LIST` đồng bộ qua đúng cơ chế `meta` sync có sẵn (`saveItemCodeList()` → `queueMetaSync('itemCodeList', ...)`; `applyRemoteMeta()` xử lý key `itemCodeList` giống các danh mục khác).
+- **Vị trí trong code**: khai báo `DEFAULT_ITEM_CODE_LIST`/`ITEM_CODE_LIST`/`saveItemCodeList()` ngay sau `clientByName()`; `renderItemCodeList()` ngay sau `renderClientList()`, theo đúng pattern UI (form thêm/sửa, card Excel, ô tìm kiếm + lọc theo Loại).
+- **Test**: `tests/item-code-list.test.mjs` (6 test, mới) — pre-seed ≥500 dòng cả 2 loại; thêm/sửa/xoá qua form; tìm kiếm + lọc theo Loại; round-trip Excel export→import (không tạo trùng khi import lại đúng file).
+- **Guide tab**: đã thêm mục 36 trong `index.html` giải thích tab này + lưu ý định dạng `.xls`.
+
+---
+
 ## 4. (Lịch sử) Câu hỏi từng cần xác nhận — xem mục 3 ở trên để biết câu trả lời đã chốt
 
 1. ~~Ý nghĩa "Item Code"~~ → field mới, nhập tay (xem mục 3).
@@ -145,6 +159,7 @@ Người dùng cung cấp 1 file mẫu thứ 2 (`Template Data export.xlsx`, cù
   - `sync_delete_checkpoints(p_deletes jsonb)` — trước đây nhận `(p_keys text[], p_updated_at text)` và client GỌI TỪNG KEY MỘT trong vòng lặp (N+1 round-trip khi xoá nhiều ca cùng lúc), dù hàm SQL vốn hỗ trợ mảng. Đổi chữ ký sang `jsonb` — mảng `[{key, updatedAt}, ...]`, mỗi key giữ đúng `updatedAt` riêng (không dùng chung 1 giá trị cho cả batch, tránh sai last-write-wins) — client giờ gộp 1 lệnh gọi duy nhất cho mọi key cần xoá trong `flushOutbox()`.
   - Test: `tests/supabase.test.mjs` có thêm test cho cursor `sync_get_meta` và batch-delete độc lập last-write-wins theo từng key trong cùng 1 lệnh gọi.
   - **Không đổi** (không phải quick win, cần kiến trúc lớn hơn): pull-side chưa tối ưu ảnh trùng lặp giữa các thiết bị — chỉ mới tối ưu chiều push (bỏ ảnh không đổi) ở audit trước.
+- [x] **Tab "Danh sách Items Code"** (2026-09-21) — bảng liên đới Item Code ↔ Tên sản phẩm ↔ Recipe, pre-seed 524 dòng dữ liệu thật, xuất template/nhập/xuất Excel — xong, có test (chi tiết mục 3c ở trên).
 - [ ] Người dùng cần: (a) chạy lại `supabase/schema.sql` mới nhất (thêm `item_code`, `members.role` cho phép `supervisor`, `is_writer_member()`, tối ưu `sync_put_checkpoints` bỏ-qua-ảnh-không-đổi, `prune_logs_older_than`) trên project Supabase thật; (b) tự rà lại danh sách chỉ tiêu đã được TỰ ĐỘNG tích "isQMS" (xem `QMS_DEFAULT_SEED` trong index.html) — bỏ chọn cái nào không đúng; (c) nếu chưa làm ở phiên trước: bật Email auth, tạo Admin đầu tiên bằng SQL, deploy lại Edge Function `admin-users` bằng Supabase CLI (đã sửa để nhận thêm role `supervisor`).
 - [ ] Chưa test Edge Function `admin-users` với 1 project Supabase thật (không có runtime Deno trong sandbox) — người dùng cần tự thử luồng tạo/vô hiệu hóa tài khoản qua UI "👥 Quản lý tài khoản" sau khi deploy, và báo lại nếu có lỗi.
 - [ ] **Quyết định nghiệp vụ còn treo (KHÔNG tự làm)**: thời hạn lưu `logs` (Data Log) — hàm `prune_logs_older_than(days)` đã có trong schema.sql nhưng KHÔNG tự chạy (không grant, không pg_cron) vì đây có thể là dữ liệu cần cho audit FSSC/khách hàng — chỉ Admin tự chạy thủ công trong SQL Editor khi đã chốt được thời hạn, xem comment ngay phía trên hàm đó trong schema.sql.
