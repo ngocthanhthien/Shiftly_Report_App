@@ -31,12 +31,13 @@ async function boot() {
   return {dom, w, errors};
 }
 
-test('fmtDateExport: d-mmm-yyyy (English month, no leading zero on the day)', async () => {
+test('fmtDateExport: dd/mm/yyyy, same as fmtDateVN everywhere else in the app', async () => {
   const {dom, w} = await boot();
   try {
-    assert.equal(w.fmtDateExport('2026-01-05'), '5-Jan-2026');
-    assert.equal(w.fmtDateExport('2026-09-19'), '19-Sep-2026');
-    assert.equal(w.fmtDateExport('2026-12-31'), '31-Dec-2026');
+    assert.equal(w.fmtDateExport('2026-01-05'), '05/01/2026');
+    assert.equal(w.fmtDateExport('2026-09-19'), '19/09/2026');
+    assert.equal(w.fmtDateExport('2026-12-31'), '31/12/2026');
+    assert.equal(w.fmtDateExport('2026-03-07'), w.fmtDateVN('2026-03-07'), 'fmtDateExport must behave identically to fmtDateVN, not a separate implementation');
   } finally { dom.window.close(); }
 });
 
@@ -57,7 +58,7 @@ test('buildProcessQmsExcelXml: groups by Process, only marked isQMS columns, Ite
     const xml = w.eval('buildProcessQmsExcelXml(allCheckpoints)');
     assert.ok(xml.includes('>Color<'), 'qmsLabel "Color" must appear as a column header');
     assert.ok(xml.includes('>1100011<'), 'Item Code value must appear');
-    assert.ok(xml.includes('>19-Sep-2026<'), 'date must be formatted d-mmm-yyyy');
+    assert.ok(xml.includes('>19/09/2026<'), 'date must be formatted dd/mm/yyyy');
     assert.ok(xml.includes('>Máy rung bất thường<'), 'the _ISSUE field must feed the ISSUES/ Abnormal column');
     assert.ok(!xml.includes('base64'), 'attached images must never appear in the export');
     // A field NOT marked isQMS (e.g. the roasting time) must not get its own column.
@@ -95,7 +96,7 @@ test('buildProcessQmsPrintHtml: same grouping/columns as the Excel builder, rend
 
     const out = w.eval('buildProcessQmsPrintHtml(allCheckpoints)');
     assert.ok(out.includes('<table>'), 'must render an actual HTML table');
-    assert.ok(out.includes('5-Jan-2026'));
+    assert.ok(out.includes('05/01/2026'));
     assert.ok(out.includes('>5<') || out.includes('>5</td>'), 'the QMS numeric value must appear');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
@@ -143,9 +144,9 @@ test('Báo cáo tab: warns (and can be cancelled) when exporting the template wi
     w.showTab('report');
     await new Promise(r => setTimeout(r, 80));
     w.eval('window.exportFileToPreferredLocation = async (file) => { window.__capturedFile = file; };');
-    // seedQmsDefaults() (run once at boot) pre-checks isQMS for the fields
-    // that clearly match the template (see QMS_DEFAULT_SEED) — clear all of
-    // them here to exercise the "nothing configured yet" warning in isolation.
+    // Defensively clear isQMS/qmsLabel on every field (none are set by
+    // default any more — see HANDOFF.md, isQMS auto-seeding was removed) to
+    // exercise the "nothing configured yet" warning in isolation regardless.
     w.eval(`SCHEMA.forEach(s=>s.fields.forEach(f=>{ delete f.isQMS; delete f.qmsLabel; }));`);
 
     let confirmCalls = 0;

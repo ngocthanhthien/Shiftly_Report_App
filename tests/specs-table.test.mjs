@@ -270,3 +270,18 @@ test('historical/default SCHEMA (real ROA/FOAMING/REWORK sections) still renders
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
+
+test('"Hiển thị trong báo cáo QMS" defaults to unchecked for every chỉ tiêu on a fresh device (isQMS auto-seeding removed)', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const anyQms = w.eval('SCHEMA.some(s=>s.fields.some(f=>f.isQMS))');
+    assert.equal(anyQms, false, 'no field should come pre-checked for QMS export on a brand-new device');
+
+    const doc = w.document;
+    w.showTab('specs');
+    const card = sectionCard(doc, 'Rang (ROA)');
+    const qmsChecks = [...card.querySelectorAll('table.edittable tbody tr:not(.addrow)')].map(tr => tr.children[6].querySelector('input[type=checkbox]'));
+    assert.ok(qmsChecks.every(cb => cb.checked === false), 'every QMS checkbox in the Specs table must render unchecked by default');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});

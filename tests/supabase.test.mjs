@@ -440,11 +440,10 @@ test('full app boots, requires login once cloud sync is configured, then syncs a
       await flushOutbox();
       return cp.key;
     })()`);
-    // seedQmsDefaults() (run once at boot) also queues a 'meta' outbox item
-    // for the Specs schema change — give any such background flush
-    // (scheduleFlush()'s own 800ms timer, or verifyAndEnter()'s fire-and-
-    // forget flushOutbox() right after login) a moment to land, then sweep
-    // once more explicitly, before asserting the outbox is fully drained.
+    // Give any background flush (scheduleFlush()'s own 800ms timer, or
+    // verifyAndEnter()'s fire-and-forget flushOutbox() right after login) a
+    // moment to land, then sweep once more explicitly, before asserting the
+    // outbox is fully drained.
     await new Promise(r => setTimeout(r, 900));
     await w.eval('(async () => { await flushOutbox(); })()');
 
