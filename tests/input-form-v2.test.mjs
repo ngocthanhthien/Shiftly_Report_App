@@ -1,0 +1,349 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {JSDOM, VirtualConsole} from 'jsdom';
+import {IDBFactory} from 'fake-indexeddb';
+
+// Covers the 11-requirement Input Form rework (Date/Shift/QC/Process/Item
+// Code/Item Name/Recipe/PO/Checkpoint/Issue-Action/Save — see HANDOFF.md):
+// getProductionDate() cutoff, blank-by-default Shift/QC/Process with hard
+// validation, strict Item Code (8-digit + Item Code Master lookup) and PO
+// (9-digit or SHUTDOWN) validation, paired Issue/Action rows, and backward
+// compatibility with historical FOAMING/REWORK checkpoints and their legacy
+// single "<Section>_ISSUE"/"_ACTION" fields.
+const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+
+async function boot() {
+  const errors = [];
+  const vc = new VirtualConsole();
+  vc.on('jsdomError', e => errors.push(e.message));
+  const dom = new JSDOM(html, {
+    url: 'https://shiftly-report-app.example.workers.dev',
+    runScripts: 'dangerously',
+    pretendToBeVisual: true,
+    virtualConsole: vc,
+    beforeParse(w) {
+      w.indexedDB = new IDBFactory();
+      w.fetch = async () => { throw new Error('network disabled in test'); };
+    },
+  });
+  const w = dom.window;
+  for (let i = 0; i < 100 && !w.eval('typeof DB !== "undefined" && DB !== null'); i++) await new Promise(r => setTimeout(r, 10));
+  await new Promise(r => setTimeout(r, 50));
+  return {dom, w, errors};
+}
+
+function withFixedClock(w, y, m, d, hh, mm) {
+  w.eval(`
+    window.__RealDate = Date;
+    Date = class extends window.__RealDate {
+      constructor(...args) {
+        if (args.length === 0) super(${y}, ${m}, ${d}, ${hh}, ${mm});
+        else super(...args);
+      }
+    };
+  `);
+}
+function restoreClock(w) {
+  w.eval('Date = window.__RealDate; delete window.__RealDate;');
+}
+// w.eval(...) returns objects constructed in the jsdom window's own realm —
+// deepEqual (strict) treats those as unequal to a same-shaped Node-realm
+// object even when every field matches, so round-trip through JSON first.
+function evalJson(w, expr) { return JSON.parse(w.eval(`JSON.stringify(${expr})`)); }
+
+// ---- getProductionDate() cutoff (Requirement #1) ----
+test('getProductionDate(): 05:59 -> ngày hôm trước; 06:00/14:00/23:59 -> ngày hôm nay', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    withFixedClock(w, 2026, 8, 21, 5, 59); // month 8 = September (0-indexed)
+    assert.equal(w.eval('getProductionDate()'), '2026-09-20');
+    restoreClock(w);
+
+    withFixedClock(w, 2026, 8, 21, 6, 0);
+    assert.equal(w.eval('getProductionDate()'), '2026-09-21');
+    restoreClock(w);
+
+    withFixedClock(w, 2026, 8, 21, 14, 0);
+    assert.equal(w.eval('getProductionDate()'), '2026-09-21');
+    restoreClock(w);
+
+    withFixedClock(w, 2026, 8, 21, 23, 59);
+    assert.equal(w.eval('getProductionDate()'), '2026-09-21');
+    restoreClock(w);
+
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+// ---- lookupItemByCode() (Requirements #8/#9) ----
+test('lookupItemByCode: not_found, ok, ambiguous (conflicting duplicates), missing_recipe', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    w.eval(`ITEM_CODE_LIST = [
+      {type:'FGs', itemCode:'11000011', name:'Freeze Dried Instant Coffee Prima 02', recipe:'452'},
+      {type:'FGs', itemCode:'11000011', name:'Freeze Dried Instant Coffee Prima 02', recipe:'452'},
+      {type:'FGs', itemCode:'22000022', name:'Product A', recipe:'400'},
+      {type:'RW', itemCode:'22000022', name:'Product B (Rework)', recipe:'400C'},
+      {type:'FGs', itemCode:'33000033', name:'No Recipe Yet', recipe:''},
+    ];`);
+    assert.deepEqual(evalJson(w, "lookupItemByCode('99999999')"), {status:'not_found'});
+    assert.deepEqual(evalJson(w, "lookupItemByCode('')"), {status:'not_found'});
+    // Exact duplicate rows (same name+recipe) must NOT be treated as ambiguous.
+    assert.deepEqual(evalJson(w, "lookupItemByCode('11000011')"), {status:'ok', name:'Freeze Dried Instant Coffee Prima 02', recipe:'452'});
+    // Same Item Code, genuinely different name/recipe -> ambiguous, must block.
+    const ambiguous = evalJson(w, "lookupItemByCode('22000022')");
+    assert.equal(ambiguous.status, 'ambiguous');
+    // Recipe blank in the master -> distinct failure mode.
+    assert.equal(w.eval("lookupItemByCode('33000033').status"), 'missing_recipe');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+// ---- Issue/Action legacy adapter (Requirement #10/#14) ----
+test('getIssueActionPairs/syncIssueActionToLegacyFields: new format round-trips, legacy single-field checkpoints still read correctly', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const secRoa = w.eval("sectionById('ROA')");
+    // New-format checkpoint (has the pairs array already).
+    w.eval(`window.__newCp = {fields: {[ISSUE_PAIRS_KEY]: [{issue:'Nhiệt độ cao', action:'Dừng và kiểm tra'}]}};`);
+    assert.deepEqual(evalJson(w, `getIssueActionPairs(window.__newCp, sectionById('ROA'))`), [{issue:'Nhiệt độ cao', action:'Dừng và kiểm tra'}]);
+
+    // Legacy checkpoint: only ROA_ISSUE populated (no ROA_ACTION field exists by default).
+    w.eval(`window.__legacyCp = {fields: {ROA_ISSUE:'Máy rung bất thường'}};`);
+    assert.deepEqual(evalJson(w, `getIssueActionPairs(window.__legacyCp, sectionById('ROA'))`), [{issue:'Máy rung bất thường', action:''}]);
+
+    // Saving multiple pairs must join them back into the legacy ROA_ISSUE field for old export code.
+    const cpToSync = w.eval(`({fields: {[ISSUE_PAIRS_KEY]: [{issue:'A', action:'X'},{issue:'B', action:'Y'}]}})`);
+    const synced = w.eval(`(function(){ const cp=${JSON.stringify(cpToSync)}; syncIssueActionToLegacyFields(cp, sectionById('ROA')); return cp.fields; })()`);
+    assert.equal(synced.ROA_ISSUE, '1. A\n2. B');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+// ---- Full Input Form flow ----
+function driveToNewCheckpointForm(doc, w, {shift='1', process='ROA', po}={}) {
+  w.showTab('input');
+  const shiftSel = doc.querySelector('#hdrShift');
+  shiftSel.value = shift;
+  shiftSel.dispatchEvent(new w.Event('change'));
+  const addBtn = [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Thêm điểm kiểm tra'));
+  addBtn.click();
+  const secSel = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.value === process));
+  secSel.value = process;
+  secSel.dispatchEvent(new w.Event('change'));
+  if (po !== undefined) {
+    const poInput = doc.querySelector('#view-input .ac-wrap input');
+    poInput.value = po;
+    poInput.dispatchEvent(new w.Event('blur'));
+  }
+}
+
+test('Process select for a NEW checkpoint only offers ROA/EXT/EVA/FD/FP — no FOAMING/REWORK/META', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    w.showTab('input');
+    const shiftSel = doc.querySelector('#hdrShift');
+    shiftSel.value = '1';
+    shiftSel.dispatchEvent(new w.Event('change'));
+    const addBtn = [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Thêm điểm kiểm tra'));
+    addBtn.click();
+    const secSel = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.value === 'ROA'));
+    const values = [...secSel.options].map(o => o.value).filter(Boolean);
+    assert.deepEqual(values, ['ROA', 'EXT', 'EVA', 'FD', 'FP']);
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('Save is blocked with a clear message when QC, Item Code, or PO are invalid — nothing is persisted', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    w.eval(`ITEM_CODE_LIST = [{type:'FGs', itemCode:'11000011', name:'Test Product', recipe:'452'}];`);
+    driveToNewCheckpointForm(doc, w, {po: '712600111'});
+    await new Promise(r => setTimeout(r, 50));
+
+    const findBtn = () => [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Lưu điểm kiểm tra'));
+    const toastText = () => doc.querySelector('#toast').textContent;
+    const itemCodeInp = () => doc.querySelector('#view-input input[placeholder="VD: 11000011"]');
+
+    // QC blank -> blocked.
+    findBtn().click();
+    assert.match(toastText(), /QC/);
+    assert.equal(w.eval('allCheckpoints.length'), 0, 'must not save with QC blank');
+
+    // Pick QC, leave Item Code blank -> blocked on Item Code.
+    const qcSelect = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.textContent.includes('Chọn QC')));
+    qcSelect.value = [...qcSelect.options].find(o => o.value).value;
+    qcSelect.dispatchEvent(new w.Event('change'));
+    [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Lưu điểm kiểm tra')).click();
+    assert.match(toastText(), /Item Code.*8 chữ số/);
+
+    // Item Code with 7 digits -> still blocked (wrong length).
+    itemCodeInp().value = '1234567';
+    itemCodeInp().dispatchEvent(new w.Event('blur'));
+    await new Promise(r => setTimeout(r, 50));
+    findBtn().click();
+    assert.match(toastText(), /8 chữ số/);
+
+    // Item Code with letters -> blocked.
+    itemCodeInp().value = 'ABCDEFGH';
+    itemCodeInp().dispatchEvent(new w.Event('blur'));
+    await new Promise(r => setTimeout(r, 50));
+    findBtn().click();
+    assert.match(toastText(), /8 chữ số/);
+
+    // Valid 8-digit format but NOT in Item Code Master -> blocked.
+    itemCodeInp().value = '99999999';
+    itemCodeInp().dispatchEvent(new w.Event('blur'));
+    await new Promise(r => setTimeout(r, 50));
+    findBtn().click();
+    assert.match(toastText(), /không tồn tại|Master/i);
+
+    // Valid + found -> Item Code no longer blocks; now PO becomes the failure.
+    itemCodeInp().value = '11000011';
+    itemCodeInp().dispatchEvent(new w.Event('blur'));
+    await new Promise(r => setTimeout(r, 50));
+    // Clear the PO to trigger the "blank PO" message specifically.
+    const poInput = doc.querySelector('#view-input .ac-wrap input');
+    poInput.value = '';
+    poInput.dispatchEvent(new w.Event('blur'));
+    await new Promise(r => setTimeout(r, 200));
+    // Blank PO on a NEW checkpoint re-shows the "nhập PO" gate instead of a Save button.
+    assert.ok(doc.querySelector('#view-input').textContent.includes('Nhập/chọn mã PO'));
+
+    poInput.value = '12345';
+    poInput.dispatchEvent(new w.Event('blur'));
+    await new Promise(r => setTimeout(r, 200));
+    [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Lưu điểm kiểm tra')).click();
+    assert.match(toastText(), /9 chữ số|SHUTDOWN/);
+
+    assert.equal(w.eval('allCheckpoints.length'), 0, 'nothing must have been saved through any of the above attempts');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('PO = SHUTDOWN (any case) is accepted, but Item Code is still mandatory', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    w.confirm = () => true; // the chỉ tiêu grid is left blank on purpose here — accept the existing "còn thiếu chỉ tiêu, vẫn lưu?" soft confirms
+    w.eval(`ITEM_CODE_LIST = [{type:'FGs', itemCode:'11000011', name:'Test Product', recipe:'452'}];`);
+    driveToNewCheckpointForm(doc, w, {po: 'shutdown'});
+    await new Promise(r => setTimeout(r, 50));
+
+    const qcSelect = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.textContent.includes('Chọn QC')));
+    qcSelect.value = [...qcSelect.options].find(o => o.value).value;
+    qcSelect.dispatchEvent(new w.Event('change'));
+
+    // Item Code still blank -> SHUTDOWN alone must not be enough to save.
+    [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Lưu điểm kiểm tra')).click();
+    assert.equal(w.eval('allCheckpoints.length'), 0, 'PO=SHUTDOWN does not exempt Item Code from being required');
+
+    const itemCodeInp = doc.querySelector('#view-input input[placeholder="VD: 11000011"]');
+    itemCodeInp.value = '11000011';
+    itemCodeInp.dispatchEvent(new w.Event('blur'));
+    await new Promise(r => setTimeout(r, 50));
+
+    [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Lưu điểm kiểm tra')).click();
+    await new Promise(r => setTimeout(r, 50));
+    assert.equal(w.eval('allCheckpoints.length'), 1);
+    assert.equal(w.eval('allCheckpoints[0].po'), 'SHUTDOWN', 'lowercase "shutdown" must be normalized to SHUTDOWN');
+    assert.equal(w.eval('allCheckpoints[0].recipe'), '452', 'Recipe must be auto-filled from the Item Code Master lookup');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('Issue/Action rows: an unused blank row is ignored, but a half-filled row blocks Save with a row-numbered message', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    w.confirm = () => true; // the chỉ tiêu grid is left blank on purpose here — accept the existing "còn thiếu chỉ tiêu, vẫn lưu?" soft confirms
+    w.eval(`ITEM_CODE_LIST = [{type:'FGs', itemCode:'11000011', name:'Test Product', recipe:'452'}];`);
+    driveToNewCheckpointForm(doc, w, {po: '712600222'});
+    await new Promise(r => setTimeout(r, 50));
+    const qcSelect = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.textContent.includes('Chọn QC')));
+    qcSelect.value = [...qcSelect.options].find(o => o.value).value;
+    qcSelect.dispatchEvent(new w.Event('change'));
+    const itemCodeInp = doc.querySelector('#view-input input[placeholder="VD: 11000011"]');
+    itemCodeInp.value = '11000011';
+    itemCodeInp.dispatchEvent(new w.Event('blur'));
+    await new Promise(r => setTimeout(r, 50));
+
+    const saveBtn = () => [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Lưu điểm kiểm tra'));
+    const toastText = () => doc.querySelector('#toast').textContent;
+
+    // Leaving the single default row blank entirely must be allowed (unused row).
+    saveBtn().click();
+    await new Promise(r => setTimeout(r, 50));
+    assert.equal(w.eval('allCheckpoints.length'), 1, 'a fully blank Issue/Action row must not block saving');
+
+    // Re-open, add a second checkpoint attempt with a half-filled row.
+    doc.querySelector('#view-input .ac-wrap input') && (() => {})();
+    // Start a fresh add for a different PO.
+    const addBtn = [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Thêm điểm kiểm tra'));
+    addBtn.click();
+    const secSel = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.value === 'ROA'));
+    secSel.value = 'ROA';
+    secSel.dispatchEvent(new w.Event('change'));
+    const poInput = doc.querySelector('#view-input .ac-wrap input');
+    poInput.value = '712600333';
+    poInput.dispatchEvent(new w.Event('blur'));
+    await new Promise(r => setTimeout(r, 200));
+    const qcSelect2 = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.textContent.includes('Chọn QC')));
+    qcSelect2.value = [...qcSelect2.options].find(o => o.value).value;
+    qcSelect2.dispatchEvent(new w.Event('change'));
+    const itemCodeInp2 = doc.querySelector('#view-input input[placeholder="VD: 11000011"]');
+    itemCodeInp2.value = '11000011';
+    itemCodeInp2.dispatchEvent(new w.Event('blur'));
+    await new Promise(r => setTimeout(r, 50));
+
+    const issueTextareas = [...doc.querySelectorAll('#view-input textarea[placeholder="Issue/ Abnormal"]')];
+    issueTextareas[0].value = 'Nhiệt độ cao bất thường';
+    // Action left blank on purpose.
+    [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Lưu điểm kiểm tra')).click();
+    assert.match(toastText(), /dòng #1.*Action/i);
+    assert.equal(w.eval('allCheckpoints.length'), 1, 'the half-filled row must block this second save attempt');
+
+    // Fill the Action too -> now it must save, and the pair must be stored.
+    const actionTextareas = [...doc.querySelectorAll('#view-input textarea[placeholder="Action"]')];
+    actionTextareas[0].value = 'Dừng máy và kiểm tra cảm biến';
+    [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Lưu điểm kiểm tra')).click();
+    await new Promise(r => setTimeout(r, 50));
+    assert.equal(w.eval('allCheckpoints.length'), 2);
+    const savedCp = w.eval("allCheckpoints.find(c=>c.po==='712600333')");
+    assert.deepEqual(savedCp.fields[w.eval('ISSUE_PAIRS_KEY')], [{issue:'Nhiệt độ cao bất thường', action:'Dừng máy và kiểm tra cảm biến'}]);
+    assert.equal(savedCp.fields.ROA_ISSUE, 'Nhiệt độ cao bất thường', 'must sync back into the legacy ROA_ISSUE field for old export/report code');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('Editing a historical FOAMING checkpoint (legacy single Issue field, no cp.issues) still works: Process shown read-only, Issue pre-filled from the legacy field', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    const cp = w.eval(`(function(){
+      const cp = blankCheckpoint('2026-01-05','2','FOAMING','712600555','Trân');
+      cp.fields['FOAMING_ISSUE'] = 'Bọt không ổn định (dữ liệu lịch sử)';
+      return cp;
+    })()`);
+    await w.idbPut('shifts', cp);
+    await w.eval('refreshCache()');
+
+    w.renderInputForm._shift = '2';
+    w.renderInputForm._editKey = cp.key;
+    w.renderInputForm._addOpen = false;
+    w.showTab('input');
+    w.renderInputForm();
+
+    const root = doc.querySelector('#view-input');
+    assert.ok(root.textContent.includes('Tạo bọt (Foaming)'), 'FOAMING historical section name must still display correctly');
+    // Process must be shown as read-only text, not a restricted dropdown.
+    assert.equal([...root.querySelectorAll('select')].some(s => [...s.options].some(o => o.value === 'FOAMING')), false);
+
+    const issueTextarea = root.querySelector('textarea[placeholder="Issue/ Abnormal"]');
+    assert.equal(issueTextarea.value, 'Bọt không ổn định (dữ liệu lịch sử)', 'legacy FOAMING_ISSUE text must be loaded into the new paired-row editor');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});

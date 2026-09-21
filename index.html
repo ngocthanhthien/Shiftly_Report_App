@@ -362,6 +362,12 @@ let SCHEMA = JSON.parse(JSON.stringify(DEFAULT_SCHEMA));
 const RECIPE_OPTIONS = ["300", "302", "302C", "302D", "305", "332", "350", "352", "352C", "352C CT", "352D", "352DC", "352I", "355", "355C", "400", "400C", "400CI (85/15)", "400C_LD", "400D", "402", "402D", "402DC", "402RA", "402_Arabica", "405", "405_Arabica", "450", "450 (70%C)", "450C", "450CI", "450I", "450S", "450S (70%C)", "450SC", "450_LD", "452", "452 Angola\n100% Goods", "452C", "452CI (85/15)", "452I", "452RA (80/20)", "455", "500", "500C", "500D", "500DC", "500I", "502", "502C", "502D", "502DC", "505", "505C", "550", "552", "555", "L352", "L355", "L400", "L400D", "L450", "L452", "L500", "L502", "NA"];
 const DEFECT_OPTIONS = ["2 Color", "Out Color", "Out Moisture", "Out Density", "Out Sediment", "Lump oil", "Dust"];
 function stageIds(){ return SCHEMA.map(s => s.id); }
+// Công đoạn cho phép chọn khi tạo MỚI 1 điểm kiểm tra (tab Nhập liệu). CHỦ
+// Ý tách riêng khỏi SCHEMA/stageIds(): FOAMING/REWORK/META vẫn còn đầy đủ
+// định nghĩa + dữ liệu lịch sử trong SCHEMA (đọc/sửa/xuất báo cáo bình
+// thường), chỉ KHÔNG còn hiện ra làm lựa chọn khi bắt đầu 1 điểm kiểm tra
+// mới nữa.
+const INPUT_PROCESS_OPTIONS = ['ROA','EXT','EVA','FD','FP'];
 
 /* Recompute CSV headers + header->field map from the CURRENT (possibly
    user-edited) SCHEMA. Mirrors the same dedup logic used to build the
@@ -434,6 +440,17 @@ function boolDisp(f, value){
 }
 function todayStr(){
   const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+// Ngày sản xuất mặc định gợi ý khi mở tab Nhập liệu lần đầu (chưa tự chọn
+// ngày nào) — ca đêm tràn qua nửa đêm nên giờ từ 00:00 đến trước 06:00 vẫn
+// tính là "hôm qua". Chỉ là gợi ý ban đầu: người dùng đổi tay ở ô Ngày lúc
+// nào cũng được, và renderInputForm._date (một khi đã có) luôn được ưu tiên
+// hơn giá trị hàm này trả về ở mọi lần render lại sau đó.
+function getProductionDate(){
+  const d = new Date();
+  if(d.getHours() < 6) d.setDate(d.getDate()-1);
   const pad = n => String(n).padStart(2,'0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
@@ -572,6 +589,27 @@ let ITEM_CODE_LIST = DEFAULT_ITEM_CODE_LIST.slice();
 async function saveItemCodeList(){
   await idbPut('meta', {k:'itemCodeList', value: ITEM_CODE_LIST});
   await queueMetaSync('itemCodeList', ITEM_CODE_LIST);
+}
+// Item Code -> {Tên sản phẩm, Recipe} lookup for the Input Form (tab Nhập
+// liệu) — reuses the SAME Item Code Master as tab "Danh sách Items Code",
+// no separate database. Dữ liệu thật cho phép trùng Item Code với TÊN/RECIPE
+// khác nhau (xem renderItemCodeList) — nếu người dùng chưa dọn sạch những
+// bản ghi trùng "xung đột" đó, KHÔNG được tự ý chọn đại 1 bản ghi (dễ gán
+// nhầm Recipe cho 1 lô hàng khác) — trả về status 'ambiguous' để chặn lưu.
+function lookupItemByCode(code){
+  const norm = String(code||'').trim();
+  if(!norm) return {status:'not_found'};
+  const matches = ITEM_CODE_LIST.filter(i=>String(i.itemCode||'').trim()===norm);
+  if(matches.length===0) return {status:'not_found'};
+  const distinct = [];
+  matches.forEach(m=>{
+    const name=(m.name||'').trim(), recipe=(m.recipe||'').trim();
+    if(!distinct.some(d=>d.name===name && d.recipe===recipe)) distinct.push({name, recipe});
+  });
+  if(distinct.length>1) return {status:'ambiguous', matches:distinct};
+  const {name, recipe} = distinct[0];
+  if(!recipe) return {status:'missing_recipe', name};
+  return {status:'ok', name, recipe};
 }
 
 // Autocomplete suggestions for Input/Trace: registered POs (Danh sách PO)
@@ -1767,24 +1805,39 @@ function renderInputForm(){
     root.appendChild(el('div',{class:'sub', style:'margin:0 0 10px;'},[cloudStatus==='offline' ? '📶 Đang offline — dữ liệu lưu trong máy, sẽ tự đồng bộ khi có mạng.' : `⚠️ Đồng bộ gặp lỗi${lastCloudError?': '+lastCloudError:''} — dữ liệu vẫn an toàn trong máy, kiểm tra lại Supabase URL/Anon Key hoặc đăng nhập lại ở tab Cài đặt.`]));
   }
 
-  const dateVal = renderInputForm._date || todayStr();
-  const shiftVal = renderInputForm._shift || '1';
+  // Ngày: gợi ý mặc định qua getProductionDate() (ca đêm tràn qua nửa đêm
+  // vẫn tính ngày hôm trước tới trước 6h sáng) — nhưng MỘT KHI người dùng đã
+  // tự chọn ngày (renderInputForm._date), giá trị đó luôn được ưu tiên và
+  // không bao giờ bị hàm này ghi đè lại ở các lần render sau.
+  const dateVal = renderInputForm._date || getProductionDate();
+  // Ca: KHÔNG tự chọn sẵn Ca 1 nữa — để trống bắt người dùng tự chọn (xem
+  // gate "chưa chọn Ca" ngay dưới đây).
+  const shiftVal = renderInputForm._shift || '';
 
   const hdr = el('div',{class:'card'},[
     el('div',{class:'card-h'},['Ca làm việc', el('div',{class:'rule'})]),
     el('div',{class:'grid g2'},[
       el('label',{class:'fld'},[el('span',{class:'lab'},['Ngày']), el('input',{class:'inp', type:'date', id:'hdrDate', value:dateVal})]),
-      el('label',{class:'fld'},[el('span',{class:'lab'},['Ca']), (()=>{
+      el('label',{class:'fld'},[el('span',{class:'lab'},['Ca *']), (()=>{
         const s = el('select',{class:'inp', id:'hdrShift'},[]);
+        s.appendChild(el('option',{value:''},['— Chọn Ca —']));
         ['1','2','3'].forEach(v=>{ const o=el('option',{value:v},[`Ca ${v}`]); if(v===shiftVal) o.setAttribute('selected','selected'); s.appendChild(o); });
         return s;
       })()]),
     ]),
   ]);
   root.appendChild(hdr);
-  function resetUiState(){ renderInputForm._addOpen=false; renderInputForm._editKey=null; renderInputForm._newSection=null; renderInputForm._newPO=null; renderInputForm._newRecipe=null; renderInputForm._newClient=null; renderInputForm._draft=null; }
+  function resetUiState(){ renderInputForm._addOpen=false; renderInputForm._editKey=null; renderInputForm._newSection=null; renderInputForm._newPO=null; renderInputForm._newItemCode=null; renderInputForm._newQc=null; renderInputForm._newClient=null; renderInputForm._draft=null; }
   qs('#hdrDate', hdr).addEventListener('change', e=>{ renderInputForm._date = e.target.value; resetUiState(); renderInputForm(); });
   qs('#hdrShift', hdr).addEventListener('change', e=>{ renderInputForm._shift = e.target.value; resetUiState(); renderInputForm(); });
+
+  // Ca bắt buộc phải chọn trước khi làm bất cứ điều gì khác (Bàn giao ca,
+  // danh sách điểm kiểm tra, thêm/sửa) — đây chính là validation "Ca = trống
+  // -> cảnh báo -> không cho lưu" (không có Ca thì không có gì để lưu).
+  if(!shiftVal){
+    root.appendChild(el('div',{class:'sub', style:'margin:0;'},['Vui lòng chọn Ca để bắt đầu nhập liệu.']));
+    return;
+  }
 
   // ---- Banner: bàn giao ca liền trước (Handover/Info của META checkpoint gần nhất) ----
   const prevMeta = getPrevMetaCheckpoint(dateVal, shiftVal);
@@ -1874,40 +1927,103 @@ function renderInputForm(){
   closeBtn.addEventListener('click', ()=>{ resetUiState(); renderInputForm(); });
   formCard.appendChild(closeBtn);
 
-  let secId;
-  let poAC;
-  const itemCodeVal0 = editingCp ? (editingCp.itemCode||'') : (renderInputForm._newItemCode||'');
-  const itemCodeInp = el('input',{class:'inp', type:'text', placeholder:'VD: 1100011', value:itemCodeVal0},[]);
-  // 'blur' (not 'input') to match the PO autocomplete's own commit timing —
-  // both go through captureDraft()+re-render, same safety net as the fix
-  // for the "typing wiped on PO/Recipe/Client change" bug (see HANDOFF.md).
-  itemCodeInp.addEventListener('blur', ()=>{
+  // Thứ tự nhập liệu MỚI (theo yêu cầu): QC => Công đoạn => Item Code =>
+  // Item Name/Recipe (tự động) => PO => Checkpoint (chỉ tiêu) => Issue/
+  // Action => Lưu. `captureDraft` được khai báo (function declaration, nên
+  // được hoist) và DÙNG NGAY ở QC bên dưới dù bản thân nó (và fieldEls/
+  // noteEls/draftScope nó đóng closure) chỉ thực sự khởi tạo xong sau khi đã
+  // qua các gate Công đoạn/PO — an toàn vì captureDraft() luôn kiểm tra
+  // fieldsRendered trước, y hệt cơ chế đã có sẵn cho itemCodeInp/poAC.
+  function captureDraft(){
+    if(!fieldsRendered) return;
+    const draftFields = {}, draftNotes = {};
+    Object.keys(fieldEls).forEach(fid=>{ draftFields[fid] = fieldEls[fid].getValue(); });
+    Object.keys(noteEls).forEach(fid=>{ draftNotes[fid] = noteEls[fid].value; });
+    const draftIssuePairs = issueRowEls.map(r=>({issue:r.issueInp.value, action:r.actionInp.value}));
+    renderInputForm._draft = { scope: draftScope, fields: draftFields, fieldNotes: draftNotes, issuePairs: draftIssuePairs };
+  }
+
+  // ---- QC (bắt buộc, KHÔNG tự chọn sẵn) ----
+  const qcVal0 = editingCp ? (editingCp.technician||'') : (renderInputForm._newQc||'');
+  const qcSel = el('select',{class:'inp'},[]);
+  qcSel.appendChild(el('option',{value:''},['— Chọn QC —']));
+  TECHNICIANS.forEach(t=>{ const o=el('option',{value:t},[t]); if(t===qcVal0) o.setAttribute('selected','selected'); qcSel.appendChild(o); });
+  formCard.appendChild(el('label',{class:'fld'},[el('span',{class:'lab'},['Tên QC *']), qcSel]));
+  qcSel.addEventListener('change', ()=>{
     captureDraft();
-    if(editingCp) editingCp.itemCode = itemCodeInp.value; else renderInputForm._newItemCode = itemCodeInp.value;
+    if(editingCp) editingCp.technician = qcSel.value; else renderInputForm._newQc = qcSel.value;
     renderInputForm();
   });
+
+  // ---- Công đoạn (Process) — chỉ ROA/EXT/EVA/FD/FP khi tạo MỚI (mục 5).
+  // Đang sửa 1 điểm kiểm tra cũ thì Công đoạn giữ nguyên (không đổi được),
+  // kể cả với FOAMING/REWORK/META lịch sử — vẫn hiển thị/sửa/xuất bình
+  // thường, chỉ không còn chọn được khi TẠO MỚI nữa. ----
+  let secId;
   if(editingCp){
     secId = editingCp.section;
     formCard.appendChild(el('div',{class:'kv', style:'border:none;'},[el('span',{class:'k'},['Công đoạn']), el('span',{class:'v'},[sectionById(secId).name])]));
-    poAC = renderAutocomplete(editingCp.po, allPOsEverUsed(), 'Chọn hoặc nhập mã PO');
-    formCard.appendChild(el('div',{class:'grid g2', style:'margin-top:8px;'},[
-      el('label',{class:'fld'},[el('span',{class:'lab'},['Mã PO']), poAC.node]),
-      el('label',{class:'fld'},[el('span',{class:'lab'},['Item Code']), itemCodeInp]),
-    ]));
   } else {
-    secId = renderInputForm._newSection || SCHEMA.find(s=>s.id!=='META').id;
-    const poVal0 = renderInputForm._newPO || '';
+    secId = renderInputForm._newSection || '';
     const secSel = el('select',{class:'inp'},[]);
-    SCHEMA.filter(s=>s.id!=='META').forEach(s=>{ const o=el('option',{value:s.id},[s.name]); if(s.id===secId) o.setAttribute('selected','selected'); secSel.appendChild(o); });
-    poAC = renderAutocomplete(poVal0, allKnownPOs(), 'Chọn hoặc nhập mã PO', (v)=>{ captureDraft(); renderInputForm._newPO=v; renderInputForm(); });
-    formCard.appendChild(el('div',{class:'grid g3'},[
-      el('label',{class:'fld'},[el('span',{class:'lab'},['Công đoạn']), secSel]),
-      el('label',{class:'fld'},[el('span',{class:'lab'},['Mã PO']), poAC.node]),
-      el('label',{class:'fld'},[el('span',{class:'lab'},['Item Code']), itemCodeInp]),
-    ]));
-    secSel.addEventListener('change', ()=>{ renderInputForm._newSection=secSel.value; renderInputForm(); });
+    secSel.appendChild(el('option',{value:''},['— Chọn Công đoạn —']));
+    INPUT_PROCESS_OPTIONS.forEach(id=>{
+      const s = sectionById(id);
+      if(!s) return; // an toàn nếu section này lỡ bị xoá khỏi SCHEMA
+      const o = el('option',{value:id},[s.name]);
+      if(id===secId) o.setAttribute('selected','selected');
+      secSel.appendChild(o);
+    });
+    formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Công đoạn *']), secSel]));
+    secSel.addEventListener('change', ()=>{ captureDraft(); renderInputForm._newSection=secSel.value; renderInputForm(); });
+    if(!secId){
+      formCard.appendChild(el('p',{class:'sub', style:'margin:10px 0 0;'},['Chọn Công đoạn để tiếp tục.']));
+      root.appendChild(formCard);
+      root.appendChild(metaCard);
+      return;
+    }
+  }
+
+  // ---- Item Code (nhập tay, 8 số) -> Item Name + Recipe (TỰ ĐỘNG, chỉ đọc) ----
+  const itemCodeVal0 = editingCp ? (editingCp.itemCode||'') : (renderInputForm._newItemCode||'');
+  const itemCodeInp = el('input',{class:'inp', type:'text', inputmode:'numeric', maxlength:'8', placeholder:'VD: 11000011', value:itemCodeVal0},[]);
+  // 'blur' (not 'input') to match the PO autocomplete's own commit timing —
+  // both go through captureDraft()+re-render, same safety net as the fix
+  // for the "typing wiped on PO/Recipe/Client change" bug (see HANDOFF.md).
+  // Tra cứu Item Name/Recipe cũng tự chạy lại ngay khi re-render này xảy ra
+  // (xem `lookup` bên dưới) — không cần rerender riêng theo từng ký tự gõ.
+  itemCodeInp.addEventListener('blur', ()=>{
+    captureDraft();
+    if(editingCp) editingCp.itemCode = itemCodeInp.value.trim(); else renderInputForm._newItemCode = itemCodeInp.value.trim();
+    renderInputForm();
+  });
+  formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Item Code *']), itemCodeInp]));
+
+  const lookup = lookupItemByCode(itemCodeVal0);
+  const readonlyStyle = 'background:#F1F5F9;color:var(--muted);cursor:not-allowed;';
+  const itemNameDisp = el('input',{class:'inp', type:'text', readonly:'readonly', style:readonlyStyle, value: (lookup.status==='ok'||lookup.status==='missing_recipe') ? lookup.name : ''},[]);
+  const recipeDisp = el('input',{class:'inp', type:'text', readonly:'readonly', style:readonlyStyle, value: lookup.status==='ok' ? lookup.recipe : ''},[]);
+  formCard.appendChild(el('div',{class:'grid g2', style:'margin-top:10px;'},[
+    el('label',{class:'fld'},[el('span',{class:'lab'},['Item Name (tự động)']), itemNameDisp]),
+    el('label',{class:'fld'},[el('span',{class:'lab'},['Recipe (tự động)']), recipeDisp]),
+  ]));
+  if(itemCodeVal0){
+    if(lookup.status==='not_found') formCard.appendChild(el('p',{class:'sub', style:'margin:6px 0 0;color:var(--fail);'},['⚠️ Không tìm thấy Item Code này trong Item Code Master (tab Danh sách Items Code).']));
+    else if(lookup.status==='ambiguous') formCard.appendChild(el('p',{class:'sub', style:'margin:6px 0 0;color:var(--fail);'},['⚠️ Item Code này có nhiều bản ghi khác nhau (Tên/Recipe không khớp nhau) trong Item Code Master — cần làm sạch dữ liệu trước khi lưu.']));
+    else if(lookup.status==='missing_recipe') formCard.appendChild(el('p',{class:'sub', style:'margin:6px 0 0;color:var(--fail);'},['⚠️ Item Code Master chưa có Recipe cho mã này.']));
+  }
+
+  // ---- PO ----
+  let poAC;
+  if(editingCp){
+    poAC = renderAutocomplete(editingCp.po, allPOsEverUsed(), 'VD: 712600111 hoặc SHUTDOWN');
+    formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Mã PO *']), poAC.node]));
+  } else {
+    const poVal0 = renderInputForm._newPO || '';
+    poAC = renderAutocomplete(poVal0, allKnownPOs(), 'VD: 712600111 hoặc SHUTDOWN', (v)=>{ captureDraft(); renderInputForm._newPO=v; renderInputForm(); });
+    formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Mã PO *']), poAC.node]));
     if(!poVal0){
-      formCard.appendChild(el('p',{class:'sub', style:'margin:10px 0 0;'},['Chọn công đoạn và nhập/chọn mã PO để tiếp tục nhập chỉ tiêu.']));
+      formCard.appendChild(el('p',{class:'sub', style:'margin:10px 0 0;'},['Nhập/chọn mã PO để tiếp tục nhập chỉ tiêu.']));
       root.appendChild(formCard);
       root.appendChild(metaCard);
       return;
@@ -1918,49 +2034,31 @@ function renderInputForm(){
   const cp = editingCp || getOrInitCheckpoint(dateVal, shiftVal, secId, poVal);
   const sec = sectionById(secId);
   const prevCp = getPrevCheckpoint(secId, poVal, cp.key);
+  const recipeAuto = lookup.status==='ok' ? lookup.recipe : '';
+  const {issueId: legacyIssueId, actionId: legacyActionId} = findIssueActionFieldIds(sec);
 
-  // Changing PO/Recipe/Client re-renders this whole form (see the change
-  // handlers below), and for a NEW checkpoint `cp` is a fresh blank object
-  // every render (nothing persisted yet) — so without this, any values
-  // already typed into the field inputs would be silently wiped the moment
-  // the user touched PO/Recipe/Client. `_draft` carries those live values
-  // across such a re-render; `draftScope` ties it to "this same section"
-  // (add flow) or "this same checkpoint" (edit flow) so it can never leak
-  // into an unrelated form.
+  // Changing Process/PO/QC/Item Code re-renders this whole form (see the
+  // change handlers above/below), and for a NEW checkpoint `cp` is a fresh
+  // blank object every render (nothing persisted yet) — so without this,
+  // any values already typed into the field inputs would be silently wiped
+  // the moment the user touched one of those controls. `_draft` carries
+  // those live values (kể cả các cặp Issue/Action) across such a re-render;
+  // `draftScope` ties it to "this same section" (add flow) or "this same
+  // checkpoint" (edit flow) so it can never leak into an unrelated form.
   const draftScope = editingCp ? ('edit:'+editingCp.key) : ('new:'+secId);
   if(renderInputForm._draft && renderInputForm._draft.scope===draftScope){
     Object.assign(cp.fields, renderInputForm._draft.fields);
     cp.fieldNotes = cp.fieldNotes || {};
     Object.assign(cp.fieldNotes, renderInputForm._draft.fieldNotes);
   }
-  function captureDraft(){
-    if(!fieldsRendered) return;
-    const draftFields = {}, draftNotes = {};
-    Object.keys(fieldEls).forEach(fid=>{ draftFields[fid] = fieldEls[fid].getValue(); });
-    Object.keys(noteEls).forEach(fid=>{ draftNotes[fid] = noteEls[fid].value; });
-    renderInputForm._draft = { scope: draftScope, fields: draftFields, fieldNotes: draftNotes };
-  }
 
-  // Thứ tự nhập liệu (theo yêu cầu người dùng): Công đoạn => Nhập PO (đã
-  // chọn ở trên) => Chọn Recipe (+ Client) => Chọn Technician (QC) — Recipe/
-  // Client đứng TRƯỚC QC, khác thứ tự cũ (QC trước Recipe/Client).
-  const recipeVal0 = editingCp ? (cp.recipe||'') : (renderInputForm._newRecipe||'');
+  // ---- Client (tuỳ chọn — không nằm trong 11 yêu cầu mới nhưng vẫn là
+  // tính năng hiện có, giữ nguyên không xoá) ----
   const clientVal0 = editingCp ? (cp.client||'') : (renderInputForm._newClient||'');
-  const recipeSel = el('select',{class:'inp'},[]);
-  recipeSel.appendChild(el('option',{value:''},['— Không chọn Recipe —']));
-  RECIPES.forEach(r=>{ const o=el('option',{value:r},[r]); if(r===recipeVal0) o.setAttribute('selected','selected'); recipeSel.appendChild(o); });
   const clientSel = el('select',{class:'inp'},[]);
   clientSel.appendChild(el('option',{value:''},['— Không chọn Client —']));
   CLIENT_LIST.forEach(c=>{ const o=el('option',{value:c.name},[c.name]); if(c.name===clientVal0) o.setAttribute('selected','selected'); clientSel.appendChild(o); });
-  formCard.appendChild(el('div',{class:'grid g2', style:'margin-top:10px;'},[
-    el('label',{class:'fld'},[el('span',{class:'lab'},['Recipe (tuỳ chọn)']), recipeSel]),
-    el('label',{class:'fld'},[el('span',{class:'lab'},['Client (tuỳ chọn)']), clientSel]),
-  ]));
-  recipeSel.addEventListener('change', ()=>{
-    captureDraft();
-    if(editingCp) cp.recipe = recipeSel.value; else renderInputForm._newRecipe = recipeSel.value;
-    renderInputForm();
-  });
+  formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Client (tuỳ chọn)']), clientSel]));
   clientSel.addEventListener('change', ()=>{
     captureDraft();
     if(editingCp) cp.client = clientSel.value; else renderInputForm._newClient = clientSel.value;
@@ -1980,17 +2078,16 @@ function renderInputForm(){
     }
   })();
 
-  const qcSel = el('select',{class:'inp'},[]);
-  qcSel.appendChild(el('option',{value:''},['— Chọn QC —']));
-  TECHNICIANS.forEach(t=>{ const o=el('option',{value:t},[t]); if(t===cp.technician) o.setAttribute('selected','selected'); qcSel.appendChild(o); });
-  formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Tên QC']), qcSel]));
-
+  // ---- Checkpoint: lưới chỉ tiêu (giữ nguyên logic cũ) — loại field
+  // "<Section>_ISSUE"/"..._ACTION" ra khỏi lưới thường vì đã có UI riêng
+  // (Issue/Abnormal + Action theo cặp, ngay dưới đây). ----
   const copiedFieldIds = new Set();
   const fieldEls = {};
   const noteEls = {};
   fieldsRendered = true;
+  const inputFields = sec.fields.filter(f=>f.id!==legacyIssueId && f.id!==legacyActionId);
   const chunks = [];
-  sec.fields.forEach(f=>{
+  inputFields.forEach(f=>{
     const grp = groupOf(f);
     const last = chunks[chunks.length-1];
     if(last && last.group===grp) last.fields.push(f);
@@ -2016,8 +2113,7 @@ function renderInputForm(){
     chunk.fields.forEach(f=>{
       const val = cp.fields[f.id];
       const prevVal = prevCp ? prevCp.fields[f.id] : undefined;
-      const recipeVal = recipeVal0;
-      const wrap = renderField(f, val, prevVal, (fid)=>copiedFieldIds.add(fid), recipeVal);
+      const wrap = renderField(f, val, prevVal, (fid)=>copiedFieldIds.add(fid), recipeAuto);
       fieldEls[f.id] = wrap;
       if(f.type==='textarea') wrap.node.classList.add('full');
       if(f.allowNote && f.type!=='textarea'){
@@ -2028,15 +2124,74 @@ function renderInputForm(){
       } else {
         grid.appendChild(wrap.node);
       }
-      if(f.id.endsWith('_ISSUE')){
-        grid.appendChild(renderImageAttach(cp));
-      }
     });
   });
 
-  const saveBtn = el('button',{class:'btn teal'},['💾 Lưu điểm kiểm tra']);
+  // ---- Issue/Abnormal + Action (theo cặp) ----
+  let issuePairs = (renderInputForm._draft && renderInputForm._draft.scope===draftScope && renderInputForm._draft.issuePairs)
+    ? renderInputForm._draft.issuePairs.map(p=>({issue:p.issue||'', action:p.action||''}))
+    : getIssueActionPairs(cp, sec);
+  if(issuePairs.length===0) issuePairs = [{issue:'', action:''}];
+
+  formCard.appendChild(el('div',{class:'grouphdr'},['Issue / Abnormal & Action']));
+  const issueRowsWrap = el('div',{},[]);
+  formCard.appendChild(issueRowsWrap);
+  const issueRowEls = [];
+  function renderIssueRows(){
+    issueRowsWrap.innerHTML = '';
+    issueRowEls.length = 0;
+    issuePairs.forEach((pair, idx)=>{
+      const issueInp = el('textarea',{class:'inp', rows:'2', placeholder:'Issue/ Abnormal'},[]);
+      issueInp.value = pair.issue||'';
+      const actionInp = el('textarea',{class:'inp', rows:'2', placeholder:'Action'},[]);
+      actionInp.value = pair.action||'';
+      const rmBtn = el('button',{class:'btn ghost sm', type:'button'},['🗑️']);
+      rmBtn.addEventListener('click', ()=>{
+        captureDraft();
+        renderInputForm._draft.issuePairs.splice(idx,1);
+        renderInputForm();
+      });
+      const row = el('div',{class:'fieldrow full', style:'align-items:flex-start;'},[
+        el('div',{style:'flex:1;min-width:0;'},[issueInp]),
+        el('div',{style:'flex:1;min-width:0;'},[actionInp]),
+        issuePairs.length>1 ? rmBtn : null,
+      ]);
+      issueRowsWrap.appendChild(row);
+      issueRowEls.push({issueInp, actionInp});
+    });
+  }
+  renderIssueRows();
+  const addIssueBtn = el('button',{class:'btn ghost sm', type:'button', style:'margin-top:6px;'},['+ Thêm Issue/Action']);
+  addIssueBtn.addEventListener('click', ()=>{
+    captureDraft();
+    renderInputForm._draft.issuePairs.push({issue:'', action:''});
+    renderInputForm();
+  });
+  formCard.appendChild(addIssueBtn);
+  formCard.appendChild(renderImageAttach(cp));
+
+  const saveBtn = el('button',{class:'btn teal', style:'margin-top:14px;'},['💾 Lưu điểm kiểm tra']);
   saveBtn.addEventListener('click', async ()=>{
-    const poVal = poAC.getValue();
+    // ---- Validate BẮT BUỘC — sai thì KHÔNG lưu, không hỏi "vẫn lưu?" ----
+    if(!qcSel.value){ toast('Vui lòng chọn QC.'); return; }
+    if(!secId){ toast('Vui lòng chọn Công đoạn.'); return; }
+    const itemCodeVal = itemCodeInp.value.trim();
+    if(!/^\d{8}$/.test(itemCodeVal)){ toast('Item Code phải gồm đúng 8 chữ số.'); return; }
+    const lookupResult = lookupItemByCode(itemCodeVal);
+    if(lookupResult.status==='not_found'){ toast('Item Code không tồn tại trong Item Code Master.'); return; }
+    if(lookupResult.status==='ambiguous'){ toast('Item Code này có nhiều bản ghi khác nhau trong Item Code Master — cần làm sạch dữ liệu trước khi lưu.'); return; }
+    if(lookupResult.status==='missing_recipe'){ toast('Item Code Master chưa có Recipe cho mã này.'); return; }
+    const poRaw = poAC.getValue().trim();
+    const poVal = /^shutdown$/i.test(poRaw) ? 'SHUTDOWN' : poRaw;
+    if(!poVal){ toast('Vui lòng nhập mã PO.'); return; }
+    if(poVal!=='SHUTDOWN' && !/^\d{9}$/.test(poVal)){ toast('Mã PO phải gồm đúng 9 chữ số, hoặc là SHUTDOWN.'); return; }
+    for(let i=0;i<issueRowEls.length;i++){
+      const issueTxt = issueRowEls[i].issueInp.value.trim();
+      const actionTxt = issueRowEls[i].actionInp.value.trim();
+      if(issueTxt && !actionTxt){ toast(`Issue/Action dòng #${i+1}: cần nhập Action.`); return; }
+      if(!issueTxt && actionTxt){ toast(`Issue/Action dòng #${i+1}: cần nhập Issue/Abnormal.`); return; }
+    }
+
     const oldKey = cp.key;
     const newKeyCandidate = checkpointKey(dateVal, shiftVal, secId, poVal);
     if(editingCp && newKeyCandidate !== oldKey){
@@ -2050,22 +2205,22 @@ function renderInputForm(){
       const ok = confirm(`Bạn đã sao chép ${copiedFieldIds.size} giá trị từ lần kiểm tra trước (cùng PO ${poVal}, ${sec.name}). Xác nhận lưu?`);
       if(!ok) return;
     }
-    const emptyRequired = sec.fields.filter(f=> f.required && (v=>v===null||v===undefined||v==='')(fieldEls[f.id].getValue()));
+    const emptyRequired = inputFields.filter(f=> f.required && (v=>v===null||v===undefined||v==='')(fieldEls[f.id].getValue()));
     if(emptyRequired.length>0){
       const ok1 = confirm(`⚠️ BẮT BUỘC nhưng còn thiếu: ${emptyRequired.map(f=>f.label.split('\n')[0]).join(', ')}. Vẫn lưu?`);
       if(!ok1) return;
     }
-    const emptyCount = sec.fields.filter(f=>{
+    const emptyCount = inputFields.filter(f=>{
       const v = fieldEls[f.id].getValue();
       return v===null || v===undefined || v==='';
     }).length;
     if(emptyCount>0){
-      const ok2 = confirm(`Còn ${emptyCount}/${sec.fields.length} chỉ tiêu chưa nhập trong ${sec.name}. Vẫn lưu?`);
+      const ok2 = confirm(`Còn ${emptyCount}/${inputFields.length} chỉ tiêu chưa nhập trong ${sec.name}. Vẫn lưu?`);
       if(!ok2) return;
     }
     const changes = [];
     cp.fieldNotes = cp.fieldNotes || {};
-    for(const f of sec.fields){
+    for(const f of inputFields){
       const newVal = fieldEls[f.id].getValue();
       const oldVal = cp.fields[f.id];
       const oldNorm = oldVal===undefined?null:oldVal, newNorm = newVal===undefined?null:newVal;
@@ -2075,10 +2230,12 @@ function renderInputForm(){
       cp.fields[f.id] = newVal;
       if(noteEls[f.id]) cp.fieldNotes[f.id] = noteEls[f.id].value || '';
     }
+    cp.fields[ISSUE_PAIRS_KEY] = issueRowEls.map(r=>({issue:r.issueInp.value.trim(), action:r.actionInp.value.trim()})).filter(p=>p.issue||p.action);
+    syncIssueActionToLegacyFields(cp, sec);
     cp.technician = qcSel.value;
-    cp.recipe = recipeSel.value;
+    cp.itemCode = itemCodeVal;
+    cp.recipe = lookupResult.recipe;
     cp.client = clientSel.value;
-    cp.itemCode = itemCodeInp.value;
     cp.date = dateVal; cp.shift = shiftVal; cp.section = secId; cp.po = poVal;
     cp.key = newKeyCandidate;
     cp.updatedAt = new Date().toISOString();
@@ -2235,6 +2392,43 @@ function renderImageAttach(cp){
   wrap.appendChild(cameraInp);
   return wrap;
 }
+/* ===================== ISSUE / ACTION (paired rows) =====================
+   Input Form (tab Nhập liệu) nhập Issue/Abnormal + Action theo CẶP, nhiều
+   dòng — lưu ở cp.fields[ISSUE_PAIRS_KEY] (mảng {issue,action}), NẰM TRONG
+   `fields` (jsonb) đã có sẵn nên đi qua IndexedDB + Supabase sync KHÔNG cần
+   đổi schema.sql/cột mới nào (một field top-level mới trên checkpoint, như
+   cp.issues, sẽ KHÔNG được đồng bộ — sync_get/put_checkpoints chỉ đọc đúng
+   các cột đã khai báo). Để KHÔNG phá vỡ mọi hàm xuất báo cáo/Excel/QMS/Data
+   Log đã có từ trước (đọc field id kết thúc "_ISSUE", và tuỳ chọn "_ACTION"
+   — xem buildProcessQmsExcelXml), lúc lưu sẽ tự ghép các cặp lại và ghi
+   NGƯỢC vào đúng 2 field đó (syncIssueActionToLegacyFields) — mọi nơi khác
+   trong app tiếp tục đọc y như cũ, không cần sửa gì thêm. Checkpoint lịch sử
+   (trước khi có tính năng này) không có ISSUE_PAIRS_KEY — getIssueActionPairs()
+   tự đọc lại đúng 1 cặp từ 2 field cũ đó làm dữ liệu ban đầu. */
+const ISSUE_PAIRS_KEY = '__issueActionPairs__';
+function findIssueActionFieldIds(sec){
+  const issueField = sec.fields.find(f=>/_ISSUE$/i.test(f.id));
+  const actionField = sec.fields.find(f=>/_ACTION$/i.test(f.id) || /^action$/i.test((f.label||'').split('\n')[0].trim()));
+  return { issueId: issueField?issueField.id:null, actionId: actionField?actionField.id:null };
+}
+function getIssueActionPairs(cp, sec){
+  const stored = cp.fields && cp.fields[ISSUE_PAIRS_KEY];
+  if(Array.isArray(stored)) return stored.map(p=>({issue:p.issue||'', action:p.action||''}));
+  const {issueId, actionId} = findIssueActionFieldIds(sec);
+  const issueTxt = issueId ? String(cp.fields[issueId]||'').trim() : '';
+  const actionTxt = actionId ? String(cp.fields[actionId]||'').trim() : '';
+  if(!issueTxt && !actionTxt) return [];
+  return [{issue:issueTxt, action:actionTxt}];
+}
+function syncIssueActionToLegacyFields(cp, sec){
+  const pairs = (cp.fields[ISSUE_PAIRS_KEY]||[]).filter(p=>(p.issue||'').trim() || (p.action||'').trim());
+  const {issueId, actionId} = findIssueActionFieldIds(sec);
+  const issueTxt = pairs.map((p,i)=> pairs.length>1 ? `${i+1}. ${(p.issue||'').trim()}` : (p.issue||'').trim()).join('\n');
+  const actionTxt = pairs.map((p,i)=> pairs.length>1 ? `${i+1}. ${(p.action||'').trim()}` : (p.action||'').trim()).join('\n');
+  if(issueId) cp.fields[issueId] = issueTxt;
+  if(actionId) cp.fields[actionId] = actionTxt;
+}
+
 function groupOf(f){
   if(f.id.endsWith('_RECIPE')) return 'Recipe';
   if(f.id.includes('_CLEAN_')) return 'Vệ sinh (Cleaning)';
@@ -5360,7 +5554,7 @@ function renderGuide(){
     <h4>32. Ảnh chụp từ nhiều máy hiển thị lẫn nhau</h4>
     <p>Ảnh đính kèm chụp trên 1 máy đi kèm luôn trong dữ liệu của điểm kiểm tra đó (không tách riêng) — nên ngay khi 1 máy khác đồng bộ nhận được điểm kiểm tra, ảnh cũng đã có sẵn, xem được ngay kể cả trong Báo cáo (PNG/PDF/HTML đầy đủ) mà không cần tải thêm bước nào. Ảnh vừa chụp nhưng máy chưa kịp đồng bộ (đang chờ mạng) sẽ chỉ hiện được trên đúng máy đã chụp cho tới khi đồng bộ xong.</p>
     <h4>33. Item Code</h4>
-    <p>Mỗi điểm kiểm tra giờ có thêm ô <b>Item Code</b> (cạnh Mã PO khi thêm/sửa) — nhập tay, không có danh sách gợi ý sẵn (khác PO). Hiện ở bảng Dữ liệu, trang Chi tiết, danh sách điểm kiểm tra trong Nhập liệu, và các file CSV/Excel xuất ra (cột "ItemCode", ngay sau cột PO) — kể cả file sao lưu/phục hồi JSON.</p>
+    <p>Mỗi điểm kiểm tra có ô <b>Item Code</b> — nhập tay đúng 8 chữ số, KHÔNG có danh sách gợi ý sẵn (khác PO). App tự tra trong Item Code Master (tab Danh sách Items Code) để điền sẵn Tên sản phẩm + Recipe (xem mục 37). Hiện ở bảng Dữ liệu, trang Chi tiết, danh sách điểm kiểm tra trong Nhập liệu, và các file CSV/Excel xuất ra (cột "ItemCode", ngay sau cột PO) — kể cả file sao lưu/phục hồi JSON.</p>
     <h4>34. Xuất theo mẫu Process/QMS (Excel/PDF)</h4>
     <p>Ở tab <b>Báo cáo</b>, chế độ "📋 Theo ca": chọn đúng <b>Ngày + Ca</b> ở ô trên cùng (giống hệt khi xem báo cáo ảnh bình thường), rồi chọn thêm <b>Công đoạn</b> ở ô ngay bên dưới (mặc định "Tất cả công đoạn trong ca đó", hoặc chọn đúng 1 công đoạn cụ thể nếu chỉ cần xuất riêng công đoạn đó) → mở "Định dạng khác..." → chọn <b>"📊 Xuất Excel theo mẫu (Process/QMS)"</b> hoặc <b>"📄 Xuất PDF theo mẫu (Process/QMS)"</b>. Luôn xuất đúng phạm vi Ngày/Ca/Công đoạn đã chọn — không có lựa chọn "xuất toàn bộ dữ liệu" ở tính năng này. Ở chế độ "🔎 Theo PO", 2 mục này xuất đúng các điểm kiểm tra khớp PO đang tìm (không cần chọn thêm Công đoạn).</p>
     <p>File xuất ra đúng bố cục mẫu: mỗi Công đoạn 1 khối riêng (Date, Shift, Process, Item Code, PO, ISSUES/Abnormal, ACTION + các cột chỉ tiêu QMS của công đoạn đó), ngày theo định dạng <code>d-mmm-yyyy</code> (VD: 19-Sep-2026), <b>không kèm ảnh đính kèm</b>. Cột ISSUES/Abnormal tự lấy từ ô "Issue/ Abnormal" sẵn có của từng công đoạn. Cột ACTION chỉ có dữ liệu nếu công đoạn đó có 1 chỉ tiêu tên "Action" (thêm qua tab Specs, kiểu "Ghi chú", nếu cần). <b>Các cột QMS phải tự đánh dấu trước</b> ở tab Specs → sửa từng chỉ tiêu → tick "Xuất trong báo cáo QMS" (có thể đặt tên cột ngắn gọn riêng, VD chỉ tiêu "Color: 45 ± 2" đặt tên cột là "Color") — app không tự đoán chỉ tiêu nào là QMS vì tên gọi khác nhau tuỳ nhà máy.</p>
@@ -5369,6 +5563,10 @@ function renderGuide(){
     <h4>36. Tab Danh sách Items Code</h4>
     <p>Quản lý bảng liên đới <b>Item Code ↔ Tên sản phẩm ↔ Recipe</b> — mỗi dòng gồm Loại (<b>FGs</b>: thành phẩm, hoặc <b>RW</b>: hàng tái chế/Rework — 2 dải mã riêng theo đúng cách nhà máy quản lý), Item Code, Tên sản phẩm, Recipe. Tab này đã có sẵn 524 dòng dữ liệu thật của nhà máy ngay từ đầu — không cần nhập hay import lại. Có thể thêm/sửa/xoá từng dòng trực tiếp, và tìm kiếm theo mã/tên/Recipe hoặc lọc riêng theo Loại (FGs/RW).</p>
     <p>Để cập nhật hàng loạt sau này: bấm <b>"⬇️ Tải template mẫu"</b> để có file Excel đúng định dạng, điền thêm dòng mới vào rồi bấm <b>"📥 Nhập từ Excel"</b> — dòng trùng cả Loại + Item Code + Tên sản phẩm sẽ tự bỏ qua (không tạo trùng lặp), dòng mới sẽ được thêm vào. Bấm <b>"⬆️ Xuất Excel"</b> để tải toàn bộ danh sách hiện tại ra file. Lưu ý: cũng như các tab danh sách khác (PO/Recipe/Client), file Excel ở đây dùng đúng định dạng ".xls" mà chính app này tự xuất ra — 1 file ".xlsx" gốc khác (vd tải trực tiếp từ Excel/Google Sheets) cần dán lại dữ liệu vào đúng file template trước khi nhập vào app.</p>
+    <h4>37. Quy trình nhập liệu mới (kiểm soát chặt hơn)</h4>
+    <p>Tab Nhập liệu đi theo đúng thứ tự: <b>Ngày → Ca → QC → Công đoạn → Item Code → Tên sản phẩm/Recipe (tự động) → Mã PO → các chỉ tiêu công đoạn → Issue/Abnormal &amp; Action → Lưu</b>. Ca/QC/Công đoạn không còn tự chọn sẵn nữa — phải tự chọn (chưa chọn Ca thì cả tab chưa hiện gì, đúng ý "chưa có Ca thì chưa có gì để lưu"). Công đoạn khi TẠO MỚI chỉ còn 5 lựa chọn: Rang (ROA), Trích ly (EXT), Cô đặc (EVA), Sấy thăng hoa (FD), Đóng gói (F&amp;P) — các công đoạn cũ (Tạo bọt/Rework/Tổng kết ca) không còn tạo mới được nhưng dữ liệu lịch sử vẫn xem/sửa/xuất báo cáo bình thường.</p>
+    <p>Nhập đúng 8 số vào Item Code rồi rời khỏi ô đó (bấm sang ô khác) — Tên sản phẩm và Recipe tự điền (chỉ đọc, không sửa tay) từ đúng dữ liệu tab Danh sách Items Code. Không tìm thấy mã, mã có nhiều bản ghi mâu thuẫn nhau, hoặc mã chưa có Recipe trong Item Code Master đều báo lỗi rõ ràng và <b>chặn lưu</b> cho tới khi sửa đúng. Mã PO phải đúng 9 chữ số, hoặc gõ "SHUTDOWN" (không phân biệt hoa/thường, tự chuyển thành chữ hoa) — cũng chặn lưu nếu sai định dạng.</p>
+    <p>Issue/Abnormal và Action giờ nhập theo từng CẶP dòng, bấm "+ Thêm Issue/Action" nếu cần nhiều dòng — dòng nào đã gõ Issue thì bắt buộc phải gõ Action tương ứng (và ngược lại), dòng để trống hoàn toàn thì bỏ qua, không chặn lưu. Dữ liệu vẫn tương thích ngược 100% với các báo cáo/Excel/QMS đã có (App tự ghép lại vào đúng ô "Issue/ Abnormal" quen thuộc khi lưu).</p>
   </div>`;
 }
 

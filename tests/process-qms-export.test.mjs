@@ -196,34 +196,42 @@ test('stripLocalMarkers: omits `images` only when unchanged since the last sync;
   } finally { dom.window.close(); }
 });
 
-test('Item Code: typed value survives a PO change before Save (same draft-safety net as chỉ tiêu fields)', async () => {
+test('Item Code: typed value survives a Client change before Save (same draft-safety net as chỉ tiêu fields)', async () => {
   const {dom, w, errors} = await boot();
   try {
     const doc = w.document;
     w.showTab('input');
+    const shiftSel = doc.querySelector('#hdrShift');
+    shiftSel.value = '1';
+    shiftSel.dispatchEvent(new w.Event('change'));
+
     const addBtn = [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Thêm điểm kiểm tra'));
     addBtn.click();
 
+    const secSel = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.value === 'ROA'));
+    secSel.value = 'ROA';
+    secSel.dispatchEvent(new w.Event('change'));
+
     const poInput = doc.querySelector('#view-input .ac-wrap input');
-    poInput.value = 'PO-IC-1';
+    poInput.value = '712600003';
     poInput.dispatchEvent(new w.Event('blur'));
     await new Promise(r => setTimeout(r, 200));
 
-    const itemCodeInp = [...doc.querySelectorAll('#view-input input[placeholder="VD: 1100011"]')][0];
+    const itemCodeInp = [...doc.querySelectorAll('#view-input input[placeholder="VD: 11000011"]')][0];
     assert.ok(itemCodeInp, 'Item Code input exists once a section+PO are chosen');
-    itemCodeInp.value = '1100099';
+    itemCodeInp.value = '11000099';
     itemCodeInp.dispatchEvent(new w.Event('blur'));
     await new Promise(r => setTimeout(r, 50));
 
-    // Changing Recipe re-renders the whole form — the exact trigger class
-    // that used to wipe unsaved chỉ tiêu values (see HANDOFF.md #3).
-    const recipeSelect = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.textContent.includes('Recipe')));
-    const realOption = [...recipeSelect.options].find(o => o.value && o.value !== '');
-    recipeSelect.value = realOption.value;
-    recipeSelect.dispatchEvent(new w.Event('change'));
+    // Changing Client re-renders the whole form — the exact trigger class
+    // that used to wipe unsaved chỉ tiêu values (see HANDOFF.md #3). Recipe
+    // is no longer a manual select (auto-looked-up from Item Code now), so
+    // it can no longer serve as this test's re-render trigger.
+    const clientSelect = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.textContent.includes('Client')));
+    clientSelect.dispatchEvent(new w.Event('change'));
 
-    const itemCodeAfter = [...doc.querySelectorAll('#view-input input[placeholder="VD: 1100011"]')][0];
-    assert.equal(itemCodeAfter.value, '1100099', 'Item Code must survive the Recipe-change re-render');
+    const itemCodeAfter = [...doc.querySelectorAll('#view-input input[placeholder="VD: 11000011"]')][0];
+    assert.equal(itemCodeAfter.value, '11000099', 'Item Code must survive the Client-change re-render');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
