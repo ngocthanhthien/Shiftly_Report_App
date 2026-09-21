@@ -254,6 +254,28 @@ textarea.inp{resize:vertical;min-height:64px;}
 .datatable th:first-child,.datatable td:first-child{width:36px;text-align:center;}
 .tablescroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
 
+/* Specs tab table — same .edittable base, higher-contrast header + zebra
+   rows so a dense config table (7+ columns) stays readable/professional. */
+table.specs-table thead tr:first-child th{background:var(--ink);color:#fff;}
+table.specs-table thead tr:first-child th.sortable:hover{color:var(--teal-l);}
+table.specs-table thead tr:first-child .sortarrow{color:rgba(255,255,255,.55);}
+table.specs-table thead tr:first-child th.sorted .sortarrow{color:var(--teal-l);opacity:1;}
+table.specs-table thead tr.filterrow th{background:#F1F5F9;}
+table.specs-table tbody tr:nth-child(even) td{background:#F8FAFC;}
+table.specs-table tbody tr:hover td{background:var(--teal-l);}
+table.specs-table tbody tr.addrow:hover td{background:var(--teal-l);}
+table.specs-table td{vertical-align:top;}
+
+/* Generic modal/popup — used by the Specs tab's "Thêm chỉ tiêu" dialog.
+   No prior modal pattern existed in this app; kept intentionally generic
+   (class names not Specs-specific) so it can be reused elsewhere later. */
+.modal-backdrop{position:fixed;inset:0;background:rgba(11,18,32,.6);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto;}
+.modal-card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);max-width:480px;width:100%;padding:18px;margin:auto 0;}
+.modal-card .card-h{margin-bottom:14px;}
+.modal-card .modal-close{flex:none;background:transparent;width:auto;min-height:0;padding:2px 4px;font-size:16px;color:var(--muted);}
+.modal-foot{display:flex;gap:8px;margin-top:16px;}
+.modal-foot .btn{width:auto;flex:1;}
+
 .grouphdr{font-size:12.5px;font-weight:800;color:var(--coffee);text-transform:uppercase;letter-spacing:.4px;margin:16px 0 8px;padding-top:10px;border-top:1px dashed var(--line);}
 .grouphdr:first-child{margin-top:0;padding-top:0;border-top:none;}
 
@@ -320,7 +342,6 @@ svg.chart{width:100%;height:auto;display:block;}
     <button class="tab" data-tab="input" aria-selected="true" title="Nhập liệu"><span class="ic">✍️</span><span class="lbl">Nhập liệu</span></button>
     <button class="tab" data-tab="table" aria-selected="false" title="Dữ liệu"><span class="ic">📋</span><span class="lbl">Dữ liệu</span></button>
     <button class="tab" data-tab="polist" aria-selected="false" title="Danh sách PO"><span class="ic">📃</span><span class="lbl">Danh sách PO</span></button>
-    <button class="tab" data-tab="recipelist" aria-selected="false" title="Danh sách Recipe"><span class="ic">🧪</span><span class="lbl">Danh sách Recipe</span></button>
     <button class="tab" data-tab="clientlist" aria-selected="false" title="Danh sách Client"><span class="ic">🏷️</span><span class="lbl">Danh sách Client</span></button>
     <button class="tab" data-tab="itemcodelist" aria-selected="false" title="Danh sách Items Code"><span class="ic">🔖</span><span class="lbl">Danh sách Items Code</span></button>
     <button class="tab" data-tab="datalog" aria-selected="false" title="Data Log"><span class="ic">🕓</span><span class="lbl">Data Log</span></button>
@@ -335,7 +356,6 @@ svg.chart{width:100%;height:auto;display:block;}
     <div class="view active" id="view-input"></div>
     <div class="view" id="view-table"></div>
     <div class="view" id="view-polist"></div>
-    <div class="view" id="view-recipelist"></div>
     <div class="view" id="view-clientlist"></div>
     <div class="view" id="view-itemcodelist"></div>
     <div class="view" id="view-datalog"></div>
@@ -359,7 +379,6 @@ svg.chart{width:100%;height:auto;display:block;}
 /* ===================== DATA SCHEMA ===================== */
 const DEFAULT_SCHEMA = [{"id": "ROA", "name": "Rang (ROA)", "fields": [{"id": "ROA_R5C", "label": "Temp. Roasting (℃):", "type": "number"}, {"id": "ROA_R5E", "label": "Moisture: 4.0 - 5.0%", "type": "boolean"}, {"id": "ROA_R6C", "label": "Roasting time (s):", "type": "number"}, {"id": "ROA_R6E", "label": "Color: 45 ± 2", "type": "number", "hardMin": 43.0, "hardMax": 47.0}, {"id": "ROA_R7C", "label": "Quenching (L): 87 - 89L", "type": "number", "hardMin": 87.0, "hardMax": 89.0}, {"id": "ROA_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "EXT", "name": "Trích ly (EXT)", "fields": [{"id": "EXT_R10C", "label": "Cylcle time (mins): 17 - 22", "type": "number", "hardMin": 17.0, "hardMax": 22.0}, {"id": "EXT_R10E", "label": "TC VG2: 9.98 - 11.23%", "type": "number", "hardMin": 9.98, "hardMax": 11.23}, {"id": "EXT_R11C", "label": "Dewatering (L): Max 300", "type": "number", "hardMax": 300.0}, {"id": "EXT_R11E", "label": "TC Conilon: 10.4 - 11.70%", "type": "number", "hardMin": 10.4, "hardMax": 11.7}, {"id": "EXT_R12C", "label": "Temp. PE (℃): 130 - 131", "type": "number", "hardMin": 130.0, "hardMax": 131.0}, {"id": "EXT_R12E", "label": "TC Decaf: 9.04 - 10.40%", "type": "number", "hardMin": 9.04, "hardMax": 10.4}, {"id": "EXT_R13C", "label": "Press. Flash PE (bara): 600 - 1000", "type": "number", "hardMin": 600.0, "hardMax": 1000.0}, {"id": "EXT_R13E", "label": "Cupping (B26600)", "type": "boolean"}, {"id": "EXT_R14C", "label": "Temp. SE (℃): 190 - 191", "type": "number", "hardMin": 190.0, "hardMax": 191.0}, {"id": "EXT_R15C", "label": "Press. Flash SE (bara): 500 - 1000", "type": "number", "hardMin": 500.0, "hardMax": 1000.0}, {"id": "EXT_R16C", "label": "DOF: 5.5 - 5.7", "type": "number", "hardMin": 5.5, "hardMax": 5.7}, {"id": "EXT_R17C", "label": "Coarse/ Fine (kg)", "type": "number"}, {"id": "EXT_CLEAN_18", "label": "Flushing", "type": "boolean"}, {"id": "EXT_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "EVA", "name": "Cô đặc (EVA)", "fields": [{"id": "EVA_R21C", "label": "Clarifier CIP (hour): 8 - 12", "type": "boolean"}, {"id": "EVA_R21E", "label": "Outlet thick clarifier max Grade 1", "type": "boolean"}, {"id": "EVA_R22C", "label": "MainEvap CIP (hour): 24 - 32", "type": "boolean"}, {"id": "EVA_R22E", "label": "Sediment (S2) max Grade 1.5", "type": "boolean"}, {"id": "EVA_R23C", "label": "Flow.Clarifier (L/h): 4500 - 5000", "type": "number", "hardMin": 4500.0, "hardMax": 5000.0}, {"id": "EVA_R23E", "label": "4.8 < pH < 5.3", "type": "number", "hardMin": 4.8, "hardMax": 5.3}, {"id": "EVA_R24C", "label": "Temp. Set tank 1 (℃): 50 - 65", "type": "number", "hardMin": 50.0, "hardMax": 65.0}, {"id": "EVA_R24E", "label": "Cupping (set tank 3)", "type": "boolean"}, {"id": "EVA_R25C", "label": "Temp. Set tank 2 (℃): 15 - 18", "type": "number", "hardMin": 15.0, "hardMax": 18.0}, {"id": "EVA_R25E", "label": "TS: 47-48.5% (Normal Density)\nTS: 46 - 47% (Low Density)", "type": "number", "hardMin": 47.0, "hardMax": 48.5}, {"id": "EVA_R26C", "label": "Temp. Set tank 3 (℃): 18 - 20", "type": "number", "hardMin": 18.0, "hardMax": 20.0}, {"id": "EVA_CLEAN_27", "label": "Flushing/ CIP", "type": "boolean"}, {"id": "EVA_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FOAMING", "name": "Tạo bọt (Foaming)", "fields": [{"id": "FOAMING_R30C", "label": "TS before FMT (47.5 - 48,5% )", "type": "number", "hardMin": 47.5, "hardMax": 48.5}, {"id": "FOAMING_R30E", "label": "TS FMT ( 47.5 - 48,5% )", "type": "number", "hardMin": 47.5, "hardMax": 48.5}, {"id": "FOAMING_R31C", "label": "Temp. Pre-freezer (℃):-4.5 => -5.0", "type": "number", "hardMin": -5.0, "hardMax": -4.5}, {"id": "FOAMING_R32C", "label": "Temp. after cooler (℃): 1.0 - 2.0", "type": "number", "hardMin": 1.0, "hardMax": 2.0}, {"id": "FOAMING_R33C", "label": "Foaming Flow (kg/h): Max 2150", "type": "number", "hardMax": 2150.0}, {"id": "FOAMING_R34C", "label": "Density after foaming: 720-750g/L", "type": "number", "hardMin": 720.0, "hardMax": 750.0}, {"id": "FOAMING_R35C", "label": "Mixer pump valve (%): 9 - 14", "type": "number", "hardMin": 9.0, "hardMax": 14.0}, {"id": "FOAMING_R36C", "label": "Color foaming of belt (ACN):", "type": "number"}, {"id": "FOAMING_R37C", "label": "Back Pressure during Circulation (bar): 3.0 - 4.0", "type": "number", "hardMin": 3.0, "hardMax": 4.0}, {"id": "FOAMING_CLEAN_38", "label": "Flushing/ CIP", "type": "boolean"}, {"id": "FOAMING_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FD", "name": "Sấy thăng hoa (FD)", "fields": [{"id": "FD_R41C", "label": "Speed of belt (meters/mins): 2.4 - 3.2", "type": "number", "hardMin": 2.4, "hardMax": 3.2}, {"id": "FD_R42C", "label": "Temp. belt (℃): -16 => -18", "type": "number", "hardMin": -18.0, "hardMax": -16.0}, {"id": "FD_R43C", "label": "Temp. Ante room 4 (℃): Max 5", "type": "number", "hardMax": 5.0}, {"id": "FD_R44C", "label": "Time cycle tray (s): 26.8 - 27.0", "type": "number", "hardMin": 26.8, "hardMax": 27.0}, {"id": "FD_R45C", "label": "Filling tray (kg): 11.9 - 12.1", "type": "number", "hardMin": 11.9, "hardMax": 12.1}, {"id": "FD_R46C", "label": "Vaccum in conrad (mbar): 0.3 - 0.5", "type": "number", "hardMin": 0.3, "hardMax": 0.5}, {"id": "FD_R47C", "label": "Temp. zone   9 (℃): 120 - 138", "type": "number", "hardMin": 120.0, "hardMax": 138.0}, {"id": "FD_R48C", "label": "Temp. zone 10 (℃):   90 - 100", "type": "number", "hardMin": 90.0, "hardMax": 100.0}, {"id": "FD_R49C", "label": "Temp. zone 11 (℃):   65 -   75", "type": "number", "hardMin": 65.0, "hardMax": 75.0}, {"id": "FD_R50C", "label": "Temp. FGs at Discharge ( ℃): 42", "type": "number"}, {"id": "FD_R51C", "label": "Temprature at Discharge Room ( ℃): 23±3", "type": "number", "hardMin": 20.0, "hardMax": 26.0}, {"id": "FD_R52C", "label": "Humidity at Discharge Room (%RH): ≤ 55", "type": "number", "hardMax": 55.0}, {"id": "FD_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FP", "name": "Đóng gói (F&P)", "fields": [{"id": "FP_R55C", "label": "Oil Flow (g/h):  \n- 338 ≤  Normal ≤ 400 \n- 994 ≤  Low Density ≤ 1330", "type": "boolean"}, {"id": "FP_R56E", "label": "Không phát hiện 2 màu", "type": "boolean"}, {"id": "FP_R57E", "label": "Không phát hiện lump \n(sủi/ dầu/ melt)", "type": "boolean"}, {"id": "FP_R58C", "label": "Filling time: \nBox: 1m08s-1m12s\nBigbag: 19-20mins", "type": "text"}, {"id": "FP_R58E", "label": "Không phát hiện bụi bề mặt", "type": "boolean"}, {"id": "FP_R59E", "label": "Không phát hiện bụi sau shaking", "type": "boolean"}, {"id": "FP_R60E", "label": "Không phát hiện hạt lớn bất thường", "type": "boolean"}, {"id": "FP_R61C", "label": "Temprature at F&P ( ℃): 23±3\nHumidity at F&P (%RH): ≤ 55\nPressure at F&P (Pa): 6.0 - 7.0", "type": "boolean"}, {"id": "FP_R62E", "label": "Không phát hiện lủng bao Liner PE", "type": "boolean"}, {"id": "FP_R63E", "label": "Không phát hiện lủng thùng carton", "type": "boolean"}, {"id": "FP_R64C", "label": "Sealing: \nTemp: 190 - 195 ℃\nSpeed: 645-652 Hz", "type": "boolean"}, {"id": "FP_R64E", "label": "Không phát hiện lủng bao bigbag", "type": "boolean"}, {"id": "FP_R65E", "label": "Không phát hiện FB sau khi lồng bao", "type": "boolean"}, {"id": "FP_R66E", "label": "Artwork as standard", "type": "boolean"}, {"id": "FP_NETWEIGHT", "label": "Netweight (kg)/box: 25.00 - 25.04", "type": "boolean"}, {"id": "FP_DENSITY", "label": "Density: 220-240g/L", "type": "boolean"}, {"id": "FP_MOISTURE", "label": "Moisture: Max 3.00%", "type": "boolean"}, {"id": "FP_PH", "label": "pH: 4.80 - 5.10", "type": "boolean"}, {"id": "FP_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "REWORK", "name": "Tái chế (Rework)", "fields": [{"id": "RW_DRYMIX", "label": "Dry Mix (kg)", "type": "number"}, {"id": "RW_WETMIX", "label": "Wet Mix (kg)", "type": "number"}, {"id": "RW_PCT", "label": "% RW", "type": "number"}, {"id": "RW_DEFECT", "label": "Defect", "type": "select", "options": ["2 Color", "Out Color", "Out Moisture", "Out Density", "Out Sediment", "Lump oil", "Dust"]}, {"id": "RW_TEMP90", "label": "Temperature ≥ 90°C", "type": "boolean"}, {"id": "RW_KIEMLOCVAI", "label": "Kiểm lọc vải", "type": "boolean"}, {"id": "RW_FLOWRATE", "label": "Flowrate: 3000-3500 L/h", "type": "boolean"}, {"id": "RW_TYLERW", "label": "Tỷ lệ RW: Theo Matrix RW", "type": "boolean"}, {"id": "REWORK_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "META", "name": "Tổng kết ca", "fields": [{"id": "INFO_ISSUE", "label": "Information/ Issue", "type": "textarea"}, {"id": "HANDOVER", "label": "Handover", "type": "textarea"}]}];
 let SCHEMA = JSON.parse(JSON.stringify(DEFAULT_SCHEMA));
-const RECIPE_OPTIONS = ["300", "302", "302C", "302D", "305", "332", "350", "352", "352C", "352C CT", "352D", "352DC", "352I", "355", "355C", "400", "400C", "400CI (85/15)", "400C_LD", "400D", "402", "402D", "402DC", "402RA", "402_Arabica", "405", "405_Arabica", "450", "450 (70%C)", "450C", "450CI", "450I", "450S", "450S (70%C)", "450SC", "450_LD", "452", "452 Angola\n100% Goods", "452C", "452CI (85/15)", "452I", "452RA (80/20)", "455", "500", "500C", "500D", "500DC", "500I", "502", "502C", "502D", "502DC", "505", "505C", "550", "552", "555", "L352", "L355", "L400", "L400D", "L450", "L452", "L500", "L502", "NA"];
 const DEFECT_OPTIONS = ["2 Color", "Out Color", "Out Moisture", "Out Density", "Out Sediment", "Lump oil", "Dust"];
 function stageIds(){ return SCHEMA.map(s => s.id); }
 // Công đoạn cho phép chọn khi tạo MỚI 1 điểm kiểm tra (tab Nhập liệu). CHỦ
@@ -390,11 +409,6 @@ function computeHeaderMap(){
 }
 const DEFAULT_TECHNICIANS = ["Định","Trân","Trang","Huy","Hiền"];
 let TECHNICIANS = DEFAULT_TECHNICIANS.slice();
-let RECIPES = RECIPE_OPTIONS.slice();
-async function saveRecipes(){
-  await idbPut('meta', {k:'recipes', value: RECIPES});
-  await queueMetaSync('recipes', RECIPES);
-}
 
 async function saveSchema(){
   await idbPut('meta', {k:'schema', value: SCHEMA});
@@ -403,6 +417,14 @@ async function saveSchema(){
 }
 function newFieldId(sectionId){
   return sectionId + '_CUSTOM_' + Date.now().toString(36) + Math.floor(Math.random()*1000);
+}
+// Shared between the Specs tab's table columns and its "Thêm chỉ tiêu"
+// popup — kept at module scope so both can reference the same list/labels.
+const SPEC_TYPE_TAGS = {number:'Số',boolean:'Đạt/Lỗi',text:'Chữ',select:'Danh sách',textarea:'Ghi chú'};
+const SPEC_TYPE_OPTIONS = Object.keys(SPEC_TYPE_TAGS).map(t=>({value:t, label:SPEC_TYPE_TAGS[t]}));
+function clearSpecTypeSpecificProps(f){
+  delete f.hardMin; delete f.tMin; delete f.tMax; delete f.hardMax;
+  delete f.options; delete f.recipeOverrides; delete f.trueLabel; delete f.falseLabel;
 }
 
 /* ===================== UTIL ===================== */
@@ -480,6 +502,25 @@ function toast(msg, ms){
   t.classList.add('show');
   clearTimeout(toast._h);
   toast._h = setTimeout(()=>t.classList.remove('show'), ms||2200);
+}
+// Generic modal/popup — a backdrop + centered card, closable via the ✕
+// button, backdrop click, or Escape. `titleText` + `bodyNode` build the
+// card; `close()` is handed to the caller so it can dismiss itself (e.g.
+// after a successful submit).
+function openModal(titleText, bodyNode){
+  const backdrop = el('div',{class:'modal-backdrop'});
+  const card = el('div',{class:'modal-card'},[
+    el('div',{class:'card-h'},[titleText, el('div',{class:'rule'}), el('button',{class:'modal-close', type:'button', title:'Đóng'},['✕'])]),
+  ]);
+  card.appendChild(bodyNode);
+  backdrop.appendChild(card);
+  document.body.appendChild(backdrop);
+  function close(){ backdrop.remove(); document.removeEventListener('keydown', onKey); }
+  function onKey(e){ if(e.key==='Escape') close(); }
+  qs('.modal-close', card).addEventListener('click', close);
+  backdrop.addEventListener('mousedown', (e)=>{ if(e.target===backdrop) close(); });
+  document.addEventListener('keydown', onKey);
+  return {close};
 }
 function fieldById(id){
   for(const s of SCHEMA) for(const f of s.fields) if(f.id===id) return {field:f, section:s};
@@ -565,7 +606,7 @@ async function getAllLogs(){
 
 
 /* Master PO list — a flat, manually-managed list of registered PO codes
-   (Tab "Danh sách PO"), similar in spirit to TECHNICIANS/RECIPES. */
+   (Tab "Danh sách PO"), similar in spirit to TECHNICIANS. */
 let PO_LIST = [];
 async function savePOList(){
   await idbPut('meta', {k:'poList', value: PO_LIST});
@@ -617,6 +658,13 @@ function lookupItemByCode(code){
 // by lookupItemByCode()'s hard validation at Save).
 function allKnownItemCodes(){
   return [...new Set(ITEM_CODE_LIST.map(i=>String(i.itemCode||'').trim()).filter(Boolean))].sort();
+}
+
+// Recipe không còn là 1 danh sách quản lý riêng — mọi mã Recipe hợp lệ đến
+// từ Item Code Master (cùng nguồn với lookupItemByCode()). Dùng để gợi ý
+// trong ô "Ghi đè theo Recipe" (Specs tab).
+function allKnownRecipes(){
+  return [...new Set(ITEM_CODE_LIST.map(i=>String(i.recipe||'').trim()).filter(Boolean))].sort();
 }
 
 // Autocomplete suggestions for Input/Trace: registered POs (Danh sách PO)
@@ -1260,7 +1308,6 @@ function imgSrc(im){
 function applyRemoteMeta(key, value){
   if(key==='schema' && Array.isArray(value) && value.length){ SCHEMA = value; idbPut('meta', {k:'schema', value: SCHEMA}); if(!stageIds().includes(currentStage)) currentStage = stageIds()[0]; }
   else if(key==='poList' && Array.isArray(value)){ PO_LIST = value; idbPut('meta', {k:'poList', value: PO_LIST}); }
-  else if(key==='recipes' && Array.isArray(value) && value.length){ RECIPES = value; idbPut('meta', {k:'recipes', value: RECIPES}); }
   else if(key==='clientList' && Array.isArray(value)){ CLIENT_LIST = value; idbPut('meta', {k:'clientList', value: CLIENT_LIST}); }
   else if(key==='itemCodeList' && Array.isArray(value)){ ITEM_CODE_LIST = value; idbPut('meta', {k:'itemCodeList', value: ITEM_CODE_LIST}); }
   else if(key==='technicians' && Array.isArray(value) && value.length){ TECHNICIANS = value; idbPut('meta', {k:'technicians', value: TECHNICIANS}); }
@@ -1773,7 +1820,6 @@ function showTab(name){
   qsa('.view').forEach(v => v.classList.toggle('active', v.id === 'view-'+name));
   if(name==='table') renderTable();
   if(name==='polist') renderPOList();
-  if(name==='recipelist') renderRecipeList();
   if(name==='clientlist') renderClientList();
   if(name==='itemcodelist') renderItemCodeList();
   if(name==='datalog') renderDataLog();
@@ -1796,10 +1842,10 @@ qsa('.tab').forEach(t => t.addEventListener('click', ()=>showTab(t.dataset.tab))
    Admin-configurable: reorder the tab bar, and hide individual tabs for the
    'user' and/or 'supervisor' role (Admin always sees every tab, regardless
    of this config — Admin can't lock themselves out). Stored as a single
-   meta key ('tabConfig'), synced like PO_LIST/RECIPES/etc. — see
+   meta key ('tabConfig'), synced like PO_LIST/CLIENT_LIST/etc. — see
    applyRemoteMeta() and the "🗂️ Sắp xếp & Ẩn/hiện Tab" card in Cài đặt. */
-const TAB_ORDER_DEFAULT = ['input','table','polist','recipelist','clientlist','itemcodelist','datalog','report','stats','specs','share','settings','guide'];
-const TAB_LABELS = {input:'Nhập liệu', table:'Dữ liệu', polist:'Danh sách PO', recipelist:'Danh sách Recipe', clientlist:'Danh sách Client', itemcodelist:'Danh sách Items Code', datalog:'Data Log', report:'Báo cáo', stats:'Thống kê', specs:'Specs', share:'Xuất nhập dữ liệu', settings:'Cài đặt', guide:'Hướng dẫn'};
+const TAB_ORDER_DEFAULT = ['input','table','polist','clientlist','itemcodelist','datalog','report','stats','specs','share','settings','guide'];
+const TAB_LABELS = {input:'Nhập liệu', table:'Dữ liệu', polist:'Danh sách PO', clientlist:'Danh sách Client', itemcodelist:'Danh sách Items Code', datalog:'Data Log', report:'Báo cáo', stats:'Thống kê', specs:'Specs', share:'Xuất nhập dữ liệu', settings:'Cài đặt', guide:'Hướng dẫn'};
 // Mặc định: Nhân viên (user) thấy đủ mọi tab như trước (không đổi hành vi
 // cũ); Giám sát/Quản lý (supervisor) mặc định ẩn tab Nhập liệu vì vai trò
 // này chỉ để xem — Admin chỉnh thêm được trong Cài đặt.
@@ -3017,7 +3063,7 @@ function multiSelectFilterEl(label, options, selectedSet, onChange){
   return details;
 }
 function buildEditableTable(opts){
-  const {columns, rows, onAdd, renderActions, emptyText, rowStyle, state} = opts;
+  const {columns, rows, onAdd, renderActions, emptyText, rowStyle, state, tableClass} = opts;
   state.filters = state.filters || {};
   state.sort = state.sort || {key:null, dir:null};
   const actionsCol = !!renderActions;
@@ -3025,7 +3071,7 @@ function buildEditableTable(opts){
 
   const wrap = el('div',{class:'card', style:'padding:0;overflow:hidden;'});
   const scroll = el('div',{class:'tablescroll'});
-  const table = el('table',{class:'datatable edittable'});
+  const table = el('table',{class:'datatable edittable'+(tableClass?' '+tableClass:'')});
   const theadHdr = el('tr',{});
   const theadFilter = el('tr',{class:'filterrow'});
   columns.forEach(col=>{
@@ -3332,81 +3378,6 @@ function renderPOList(){
   root.appendChild(table);
 }
 
-/* ===================== DANH SÁCH RECIPE TAB ===================== */
-function recipeOverrideDetails(rc){
-  const overrides = [];
-  SCHEMA.forEach(sec=>{
-    sec.fields.forEach(f=>{
-      if(f.recipeOverrides && f.recipeOverrides[rc]){
-        const ov = f.recipeOverrides[rc];
-        const parts = [];
-        if(ov.hardMin!=null) parts.push(`LSL ${ov.hardMin}`);
-        if(ov.tMin!=null) parts.push(`LCL ${ov.tMin}`);
-        if(ov.tMax!=null) parts.push(`UCL ${ov.tMax}`);
-        if(ov.hardMax!=null) parts.push(`USL ${ov.hardMax}`);
-        overrides.push(`${sec.name} — ${f.label.split('\n')[0]}: ${parts.join(', ')||'—'}`);
-      }
-    });
-  });
-  return overrides;
-}
-function renderRecipeList(){
-  const root = qs('#view-recipelist');
-  root.innerHTML = '';
-  root.appendChild(el('div',{class:'section-title'},['Danh sách Recipe']));
-  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},['Recipe được chọn khi nhập điểm kiểm tra — quyết định bộ giới hạn LSL/LCL/UCL/USL riêng nào áp dụng cho các chỉ tiêu (cấu hình ghi đè cụ thể theo Recipe ở tab Specs, trong từng chỉ tiêu).']));
-
-  renderRecipeList._table = renderRecipeList._table || {filters:{}, sort:{key:null,dir:null}};
-  const table = buildEditableTable({
-    state: renderRecipeList._table,
-    rows: RECIPES.map((value,idx)=>({value, idx})),
-    emptyText: 'Chưa có Recipe nào — thêm ở dòng trên cùng.',
-    columns: [
-      {
-        key:'value', label:'Mã Recipe', sortable:true, filter:'text', type:'text',
-        get: row=>row.value, addPlaceholder:'VD: 405',
-        set: async (row, val) => {
-          if(!val) return false;
-          if(RECIPES.some((v,i)=>v===val && i!==row.idx)){ toast('Recipe này đã tồn tại'); return false; }
-          RECIPES[row.idx] = val; row.value = val;
-          await saveRecipes();
-        },
-      },
-      {
-        key:'overrides', label:'Số chỉ tiêu ghi đè', sortable:true,
-        filter:{type:'multi', options:[{value:'has',label:'Có ghi đè'},{value:'none',label:'Chưa ghi đè'}]},
-        filterVal: row => recipeOverrideDetails(row.value).length ? 'has' : 'none',
-        sortVal: row => recipeOverrideDetails(row.value).length,
-        render: row => String(recipeOverrideDetails(row.value).length),
-      },
-      {
-        key:'detail', label:'Chi tiết ghi đè',
-        render: row => { const list = recipeOverrideDetails(row.value); return list.length ? list.join('; ') : '—'; },
-      },
-    ],
-    onAdd: async (values) => {
-      const value = (values.value||'').trim();
-      if(!value){ toast('Cần nhập mã Recipe'); return false; }
-      if(RECIPES.includes(value)){ toast('Recipe này đã tồn tại'); return false; }
-      RECIPES.push(value);
-      await saveRecipes();
-      toast('Đã thêm Recipe');
-      renderRecipeList();
-    },
-    renderActions: row => {
-      const delBtn = el('button',{class:'rowbtn del'},['🗑️']);
-      delBtn.addEventListener('click', async ()=>{
-        if(confirm(`Xoá Recipe "${row.value}"?`)){
-          RECIPES.splice(row.idx,1);
-          await saveRecipes();
-          renderRecipeList();
-        }
-      });
-      return [delBtn];
-    },
-  });
-  root.appendChild(table);
-}
 
 /* ===================== DANH SÁCH CLIENT TAB ===================== */
 const CLIENT_HIGHLIGHTS = [
@@ -4726,26 +4697,123 @@ function buildRecipeOverrideEditor(f){
       overrideList.appendChild(el('div',{class:'sub', style:'margin:0 0 6px;'},['Chưa có ghi đè nào.']));
     }
     overrideRows.forEach((row,idx)=>{
-      const rSel = el('select',{class:'inp'},[]);
-      RECIPES.forEach(rc=>{ const o=el('option',{value:rc},[rc]); if(row.recipe===rc) o.setAttribute('selected','selected'); rSel.appendChild(o); });
-      rSel.addEventListener('change', async ()=>{ row.recipe = rSel.value; await persist(); });
+      const rAC = renderAutocomplete(row.recipe, allKnownRecipes(), 'VD: 405', async (v)=>{ row.recipe = v; await persist(); });
       const mkNum = (key)=>{ const inp = el('input',{class:'inp num', type:'text', inputmode:'decimal', placeholder:'—'},[]); if(row[key]!=null) inp.value=row[key]; inp.addEventListener('change', async ()=>{ row[key]=toNum(inp.value); await persist(); }); return inp; };
       const rmBtn = el('button',{class:'btn danger sm', type:'button'},['🗑']);
       rmBtn.addEventListener('click', async ()=>{ overrideRows.splice(idx,1); renderOverrides(); await persist(); });
       overrideList.appendChild(el('div',{class:'overriderow'},[
-        rSel, mkNum('hardMin'), mkNum('tMin'), mkNum('tMax'), mkNum('hardMax'), rmBtn,
+        rAC.node, mkNum('hardMin'), mkNum('tMin'), mkNum('tMax'), mkNum('hardMax'), rmBtn,
       ]));
     });
   }
   renderOverrides();
   const addOverrideBtn = el('button',{class:'btn ghost sm', type:'button', style:'margin-top:6px;'},['➕ Thêm ghi đè theo Recipe']);
-  addOverrideBtn.addEventListener('click', async ()=>{ overrideRows.push({recipe:RECIPES[0]||'', hardMin:null,tMin:null,tMax:null,hardMax:null}); renderOverrides(); await persist(); });
+  addOverrideBtn.addEventListener('click', async ()=>{ overrideRows.push({recipe:allKnownRecipes()[0]||'', hardMin:null,tMin:null,tMax:null,hardMax:null}); renderOverrides(); await persist(); });
   wrap.appendChild(el('div',{class:'overriderow overriderow-hdr'},[
     el('span',{},['Recipe']), el('span',{},['LSL']), el('span',{},['LCL']), el('span',{},['UCL']), el('span',{},['USL']), el('span',{},['']),
   ]));
   wrap.appendChild(overrideList);
   wrap.appendChild(addOverrideBtn);
   return wrap;
+}
+// "Thêm chỉ tiêu" popup for the Specs tab — replaces the old inline add-row.
+// Captures the full type-conditional field config up front (Giới hạn/Lựa
+// chọn/Nhãn Đạt-Lỗi/Bắt buộc/QMS) instead of just Tên+Loại, so a new chỉ
+// tiêu rarely needs a second trip through the table's inline-edit cells.
+function openAddSpecModal(sec, onAdded){
+  const body = el('div',{});
+  const labelInp = el('textarea',{class:'inp', rows:'2', placeholder:'Tên chỉ tiêu (dòng 1) — có thể thêm dòng mô tả bên dưới'});
+  body.appendChild(el('label',{class:'fld'},[el('span',{class:'lab'},['Tên chỉ tiêu *']), labelInp]));
+
+  const typeSel = el('select',{class:'inp'},[]);
+  SPEC_TYPE_OPTIONS.forEach(o=>typeSel.appendChild(el('option',{value:o.value},[o.label])));
+  typeSel.value = 'number';
+  body.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Loại *']), typeSel]));
+
+  const mkNumInp = (ph) => el('input',{class:'inp num', type:'text', inputmode:'decimal', placeholder:ph, style:'padding:9px 8px;font-size:13px;min-height:40px;'});
+  const hardMinInp = mkNumInp('LSL'), tMinInp = mkNumInp('LCL'), tMaxInp = mkNumInp('UCL'), hardMaxInp = mkNumInp('USL');
+  const numberBox = el('div',{style:'margin-top:10px;', 'data-box':'number'},[
+    el('span',{class:'lab'},['Giới hạn: LSL / LCL / UCL / USL']),
+    el('div',{style:'display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:5px;'},[hardMinInp, tMinInp, tMaxInp, hardMaxInp]),
+  ]);
+  body.appendChild(numberBox);
+
+  const trueLabelInp = el('input',{class:'inp', type:'text', placeholder:'Đạt'});
+  const falseLabelInp = el('input',{class:'inp', type:'text', placeholder:'Lỗi'});
+  const boolBox = el('div',{style:'margin-top:10px;', 'data-box':'boolean'},[
+    el('span',{class:'lab'},['Nhãn Đạt / Lỗi']),
+    el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:5px;'},[trueLabelInp, falseLabelInp]),
+  ]);
+  body.appendChild(boolBox);
+
+  const requiredCb = el('input',{type:'checkbox'});
+  const allowNoteCb = el('input',{type:'checkbox'});
+  const allowNegativeCb = el('input',{type:'checkbox'});
+  const negLabel = el('label',{style:'display:flex;align-items:center;gap:6px;'},[allowNegativeCb, '± Số âm']);
+  const flagsRow = el('div',{style:'display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;font-size:13.5px;'},[
+    el('label',{style:'display:flex;align-items:center;gap:6px;'},[requiredCb, 'Bắt buộc']),
+    el('label',{style:'display:flex;align-items:center;gap:6px;'},[allowNoteCb, 'Cho phép ghi chú']),
+    negLabel,
+  ]);
+  body.appendChild(flagsRow);
+
+  const qmsCb = el('input',{type:'checkbox'});
+  const qmsLabelInp = el('input',{class:'inp', type:'text', placeholder:'Tên cột khi xuất (để trống = dùng tên chỉ tiêu)', style:'margin-top:8px;display:none;'});
+  const qmsBox = el('div',{style:'margin-top:10px;'},[
+    el('label',{style:'display:flex;align-items:center;gap:6px;font-size:13.5px;'},[qmsCb, 'Hiển thị trong báo cáo QMS ở tab Báo cáo']),
+    qmsLabelInp,
+  ]);
+  qmsCb.addEventListener('change', ()=>{ qmsLabelInp.style.display = qmsCb.checked ? '' : 'none'; });
+  body.appendChild(qmsBox);
+
+  const optionsInp = el('textarea',{class:'inp', rows:'3', placeholder:'Mỗi dòng 1 lựa chọn'});
+  const optionsBox = el('div',{style:'margin-top:10px;', 'data-box':'select'},[
+    el('span',{class:'lab'},['Lựa chọn (Danh sách) — mỗi dòng 1 lựa chọn']),
+    el('div',{style:'margin-top:5px;'},[optionsInp]),
+  ]);
+  body.appendChild(optionsBox);
+
+  function syncVisibility(){
+    const t = typeSel.value;
+    numberBox.style.display = t==='number' ? '' : 'none';
+    negLabel.style.display = t==='number' ? '' : 'none';
+    boolBox.style.display = t==='boolean' ? '' : 'none';
+    optionsBox.style.display = t==='select' ? '' : 'none';
+  }
+  typeSel.addEventListener('change', syncVisibility);
+  syncVisibility();
+
+  const foot = el('div',{class:'modal-foot'},[]);
+  const cancelBtn = el('button',{class:'btn ghost', type:'button'},['Huỷ']);
+  const submitBtn = el('button',{class:'btn teal', type:'button'},['➕ Thêm chỉ tiêu']);
+  foot.appendChild(cancelBtn); foot.appendChild(submitBtn);
+  body.appendChild(foot);
+
+  const modal = openModal('Thêm chỉ tiêu — '+sec.name, body);
+  cancelBtn.addEventListener('click', ()=>modal.close());
+
+  submitBtn.addEventListener('click', async ()=>{
+    const label = labelInp.value.trim();
+    if(!label){ toast('Cần nhập tên chỉ tiêu'); return; }
+    const type = typeSel.value;
+    const f = {id: newFieldId(sec.id), label, type, required: requiredCb.checked, allowNote: allowNoteCb.checked, isQMS: qmsCb.checked};
+    if(qmsCb.checked && qmsLabelInp.value.trim()) f.qmsLabel = qmsLabelInp.value.trim();
+    if(type==='number'){
+      if(allowNegativeCb.checked) f.allowNegative = true;
+      const hardMin=toNum(hardMinInp.value), tMin=toNum(tMinInp.value), tMax=toNum(tMaxInp.value), hardMax=toNum(hardMaxInp.value);
+      if(hardMin!=null) f.hardMin=hardMin; if(tMin!=null) f.tMin=tMin; if(tMax!=null) f.tMax=tMax; if(hardMax!=null) f.hardMax=hardMax;
+    } else if(type==='boolean'){
+      if(trueLabelInp.value.trim()) f.trueLabel = trueLabelInp.value.trim();
+      if(falseLabelInp.value.trim()) f.falseLabel = falseLabelInp.value.trim();
+    } else if(type==='select'){
+      f.options = optionsInp.value.split('\n').map(s=>s.trim()).filter(Boolean);
+    }
+    sec.fields.push(f);
+    await saveSchema();
+    toast('Đã thêm chỉ tiêu');
+    modal.close();
+    onAdded();
+  });
 }
 function renderSpecs(){
   const root = qs('#view-specs');
@@ -4795,12 +4863,6 @@ function renderSpecs(){
     }catch(err){ console.error(err); toast('File JSON không hợp lệ'); }
   });
 
-  const SPEC_TYPE_TAGS = {number:'Số',boolean:'Đạt/Lỗi',text:'Chữ',select:'Danh sách',textarea:'Ghi chú'};
-  const SPEC_TYPE_OPTIONS = Object.keys(SPEC_TYPE_TAGS).map(t=>({value:t, label:SPEC_TYPE_TAGS[t]}));
-  function clearSpecTypeSpecificProps(f){
-    delete f.hardMin; delete f.tMin; delete f.tMax; delete f.hardMax;
-    delete f.options; delete f.recipeOverrides; delete f.trueLabel; delete f.falseLabel;
-  }
   function specMiniNumInput(value, onCommit){
     const inp = el('input',{class:'inp num', type:'text', inputmode:'decimal', placeholder:'—', style:'min-width:0;padding:5px 6px;font-size:11.5px;min-height:30px;'});
     if(value!=null) inp.value = value;
@@ -4818,8 +4880,9 @@ function renderSpecs(){
   renderSpecs._overrideOpen = renderSpecs._overrideOpen || {};
 
   SCHEMA.forEach(sec=>{
+    const addBtn = el('button',{class:'btn teal sm', type:'button', style:'width:auto;'},['➕ Thêm chỉ tiêu']);
     const card = el('div',{class:'card'},[
-      el('div',{class:'card-h'},[sec.name+` (${sec.fields.length})`, el('div',{class:'rule'})]),
+      el('div',{class:'card-h'},[sec.name+` (${sec.fields.length})`, el('div',{class:'rule'}), addBtn]),
     ]);
     root.appendChild(card);
 
@@ -4835,15 +4898,17 @@ function renderSpecs(){
     }
 
     function rebuildSection(){ renderSpecs(); }
+    addBtn.addEventListener('click', ()=>openAddSpecModal(sec, rebuildSection));
 
     const table = buildEditableTable({
       state: renderSpecs._tableState[sec.id],
+      tableClass: 'specs-table',
       rows: sec.fields.map((f,idx)=>({f, idx})),
-      emptyText: 'Chưa có chỉ tiêu nào trong công đoạn này — thêm ở dòng trên cùng.',
+      emptyText: 'Chưa có chỉ tiêu nào trong công đoạn này — bấm "➕ Thêm chỉ tiêu" ở trên.',
       columns: [
         {
           key:'label', label:'Tên chỉ tiêu', sortable:true, filter:'text', type:'textarea', rows:'2',
-          get: row=>row.f.label, addPlaceholder:'Tên chỉ tiêu (dòng 1) — có thể thêm dòng mô tả bên dưới',
+          get: row=>row.f.label,
           sortVal: row=>row.f.label.split('\n')[0],
           filterVal: row=>row.f.label,
           set: async (row, val) => {
@@ -4871,7 +4936,7 @@ function renderSpecs(){
           render: row => {
             const f = row.f;
             if(f.type!=='number') return el('span',{class:'sub', style:'margin:0;'},['— (chỉ áp dụng cho Loại Số)']);
-            const wrap = el('div',{style:'display:grid;grid-template-columns:repeat(4,1fr);gap:4px;min-width:200px;'});
+            const wrap = el('div',{style:'display:grid;grid-template-columns:repeat(4,1fr);gap:4px;min-width:190px;'});
             wrap.appendChild(specMiniNumInput(f.hardMin, async v=>{ if(v==null) delete f.hardMin; else f.hardMin=v; await saveSchema(); }));
             wrap.appendChild(specMiniNumInput(f.tMin, async v=>{ if(v==null) delete f.tMin; else f.tMin=v; await saveSchema(); }));
             wrap.appendChild(specMiniNumInput(f.tMax, async v=>{ if(v==null) delete f.tMax; else f.tMax=v; await saveSchema(); }));
@@ -4884,26 +4949,20 @@ function renderSpecs(){
           render: row => {
             const f = row.f;
             if(f.type!=='boolean') return el('span',{class:'sub', style:'margin:0;'},['—']);
-            const wrap = el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:4px;min-width:140px;'});
+            const wrap = el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:4px;min-width:130px;'});
             wrap.appendChild(specMiniTextInput(f.trueLabel, 'Đạt', async v=>{ if(v) f.trueLabel=v; else delete f.trueLabel; await saveSchema(); }));
             wrap.appendChild(specMiniTextInput(f.falseLabel, 'Lỗi', async v=>{ if(v) f.falseLabel=v; else delete f.falseLabel; await saveSchema(); }));
             return wrap;
           },
         },
         {
-          key:'options', label:'Lựa chọn (Danh sách) — mỗi dòng 1 lựa chọn', type:'textarea', rows:'2',
-          get: row=> row.f.type==='select' ? (row.f.options||[]).join('\n') : '',
-          set: async (row, val) => {
-            if(row.f.type!=='select') return false;
-            row.f.options = val.split('\n').map(s=>s.trim()).filter(Boolean);
-            await saveSchema();
-          },
-        },
-        {
-          key:'flags', label:'Bắt buộc / Ghi chú / ±Âm',
+          key:'flags', label:'Bắt buộc / Ghi chú / ±Âm', sortable:true,
+          filter:{type:'multi', options:[{value:'yes',label:'Bắt buộc'},{value:'no',label:'Không bắt buộc'}]},
+          filterVal: row=> row.f.required ? 'yes' : 'no',
+          sortVal: row=> row.f.required?1:0,
           render: row => {
             const f = row.f;
-            const wrap = el('div',{style:'display:flex;flex-direction:column;gap:4px;font-size:11.5px;min-width:120px;'});
+            const wrap = el('div',{style:'display:flex;flex-direction:column;gap:4px;font-size:11.5px;min-width:115px;'});
             const mk = (checked, labelTxt, onCommit) => {
               const cb = el('input',{type:'checkbox'}); cb.checked = !!checked;
               cb.addEventListener('change', async ()=>{ onCommit(cb.checked); await saveSchema(); });
@@ -4932,16 +4991,18 @@ function renderSpecs(){
             return wrap;
           },
         },
+        {
+          key:'options', label:'Lựa chọn (Danh sách) — mỗi dòng 1 lựa chọn', type:'textarea', rows:'2',
+          filter:'text',
+          filterVal: row=> row.f.type==='select' ? (row.f.options||[]).join(' ') : '',
+          get: row=> row.f.type==='select' ? (row.f.options||[]).join('\n') : '',
+          set: async (row, val) => {
+            if(row.f.type!=='select') return false;
+            row.f.options = val.split('\n').map(s=>s.trim()).filter(Boolean);
+            await saveSchema();
+          },
+        },
       ],
-      onAdd: async (values) => {
-        const label = String(values.label||'').trim();
-        if(!label){ toast('Cần nhập tên chỉ tiêu'); return false; }
-        const type = values.type || 'number';
-        sec.fields.push({id: newFieldId(sec.id), label, type, required:false, allowNote:false, isQMS:false});
-        await saveSchema();
-        toast('Đã thêm chỉ tiêu');
-        rebuildSection();
-      },
       renderActions: row => {
         const f = row.f, idx = row.idx;
         const upBtn = el('button',{class:'rowbtn'},['▲']);
@@ -5622,17 +5683,17 @@ function renderGuide(){
     <h4>20. Dán ảnh trực tiếp (Copy/Paste)</h4>
     <p>Ô "📋 Dán ảnh vào đây (Ctrl+V)" dưới mỗi Ghi chú bất thường — chạm vào ô rồi dán (paste) ảnh đã copy sẵn, không cần lưu file trước.</p>
     <h4>21. Tab Specs — bảng chỉnh sửa trực tiếp, Bắt buộc & ghi đè theo Recipe</h4>
-    <p>Mỗi Công đoạn là 1 bảng riêng (giống tab Danh sách Items Code) — bấm tiêu đề cột để sắp xếp, gõ vào ô "Lọc" dưới mỗi cột để tìm nhanh, sửa Tên/Loại/Giới hạn/Lựa chọn/Nhãn/Bắt buộc/QMS ngay trong ô (gõ xong bấm ra ngoài hoặc tick là lưu ngay, không cần nút Lưu riêng). Hàng đầu tiên của bảng dùng để thêm chỉ tiêu mới. Nút ▲▼ ở cột Hành động để sắp xếp thủ công thứ tự hiển thị ở tab Nhập liệu (tắt sắp xếp cột khác trước để thấy rõ khi dùng ▲▼). Tick "Bắt buộc" để đánh dấu Mandatory (hiện dấu * và cảnh báo mạnh hơn khi lưu thiếu ở tab Nhập liệu). Với chỉ tiêu Loại Số, bấm nút "🧬 Ghi đè" ở cuối dòng để mở bảng con "Ghi đè theo Recipe" ngay bên dưới — cùng 1 chỉ tiêu nhưng LSL/LCL/UCL/USL khác nhau tuỳ Recipe đang chọn ở công đoạn đó.</p>
+    <p>Mỗi Công đoạn là 1 bảng riêng (giống tab Danh sách Items Code), cột <b>Lựa chọn (Danh sách)</b> nằm cuối cùng — bấm tiêu đề cột để sắp xếp, gõ vào ô "Lọc" dưới mỗi cột để tìm nhanh (lọc được theo Tên, Loại, Bắt buộc, QMS, và Lựa chọn), sửa Tên/Loại/Giới hạn/Nhãn/Bắt buộc/QMS/Lựa chọn ngay trong ô (gõ xong bấm ra ngoài hoặc tick là lưu ngay, không cần nút Lưu riêng). Nút <b>"➕ Thêm chỉ tiêu"</b> ở đầu mỗi bảng mở 1 popup nhập đầy đủ thông tin chỉ tiêu mới (Tên, Loại, Giới hạn/Lựa chọn/Nhãn tuỳ Loại, Bắt buộc, QMS) trong 1 lần thay vì phải điền tiếp trong bảng. Nút ▲▼ ở cột Hành động để sắp xếp thủ công thứ tự hiển thị ở tab Nhập liệu (tắt sắp xếp cột khác trước để thấy rõ khi dùng ▲▼). Tick "Bắt buộc" để đánh dấu Mandatory (hiện dấu * và cảnh báo mạnh hơn khi lưu thiếu ở tab Nhập liệu). Với chỉ tiêu Loại Số, bấm nút "🧬 Ghi đè" ở cuối dòng để mở bảng con "Ghi đè theo Recipe" ngay bên dưới — cùng 1 chỉ tiêu nhưng LSL/LCL/UCL/USL khác nhau tuỳ Recipe đang chọn ở công đoạn đó (ô Recipe gợi ý mọi mã đang có trong Item Code Master).</p>
     <h4>22. Mỗi điểm kiểm tra = 1 Công đoạn + 1 PO riêng</h4>
     <p>Khác với trước đây (1 ca chỉ có 1 PO chung), giờ mỗi điểm kiểm tra tự chọn PO riêng của nó. Nhờ vậy 1 ca có thể có nhiều PO chạy song song ở các công đoạn khác nhau, hoặc thậm chí nhiều PO khác nhau cùng 1 công đoạn (VD: 2 mẻ Trích ly liên tiếp) — mỗi cái là 1 điểm kiểm tra riêng biệt, không đè lên nhau. Khi bắt đầu nhập, app tự gợi ý copy số liệu từ <b>lần kiểm tra gần nhất của đúng PO + Công đoạn đó</b> (không phải "ca trước" nói chung).</p>
     <h4>23. Tab Danh sách PO</h4>
     <p>Nhập trước các mã PO sẽ dùng (mỗi mã 1 dòng) — các PO này (trừ PO đã đóng) sẽ hiện thành gợi ý chọn nhanh ở tab Nhập liệu và tab Truy xuất. Không bắt buộc phải khai báo trước — vẫn gõ tay được mã PO mới bất kỳ lúc nào. Tab này cũng cho xuất/nhập danh sách bằng Excel, kèm file template mẫu để điền sẵn. Phía dưới là mục <b>"Tiến độ &amp; Xác thực đóng PO"</b>: gộp tất cả điểm kiểm tra đã dùng cùng 1 PO để xem số điểm kiểm tra, mức điền dữ liệu trung bình, <b>danh sách công đoạn thực tế đã có dữ liệu</b> (không phải tỉ lệ x/8 cố định), QC tham gia. Bấm <b>"✅ Verify — Xác thực đóng PO"</b> khi hoàn thành — PO đã đóng sẽ không còn hiện trong danh sách chọn ở Nhập liệu (vẫn xem lại được, và có thể "🔓 Mở lại").</p>
-    <h4>24. Tab Danh sách Recipe</h4>
-    <p>Quản lý danh sách Recipe — mỗi mã 1 dòng, chọn khi nhập điểm kiểm tra. Tab này còn hiện tổng quan Recipe nào đang ghi đè Specs của chỉ tiêu nào (chỉnh giá trị cụ thể ở tab Specs, trong từng chỉ tiêu → "Ghi đè theo Recipe").</p>
+    <h4>24. Recipe được truy xuất tự động từ Item Code</h4>
+    <p>Không còn tab/danh sách Recipe quản lý riêng — Recipe của mỗi điểm kiểm tra được app tự động lấy theo đúng Item Code đã chọn (từ tab "Danh sách Items Code"), hiển thị ngay dưới ô Item Code ở tab Nhập liệu, không tự gõ/chọn tay được. Ở tab Specs, nút "🧬 Ghi đè" của 1 chỉ tiêu Loại Số vẫn cho khai báo LSL/LCL/UCL/USL riêng theo từng mã Recipe — ô nhập Recipe ở đó gợi ý sẵn mọi mã Recipe đang có trong Item Code Master.</p>
     <h4>25. Tab Danh sách Client</h4>
     <p>Quản lý danh sách khách hàng/Client — tên, ghi chú riêng, và highlight màu (🔴 quan trọng/rủi ro, 🟠 cần chú ý, 🟢 VIP/ưu tiên). Khi chọn Client cho 1 điểm kiểm tra ở tab Nhập liệu, nếu Client đó có ghi chú, app tự hiện banner nổi bật ngay trong form để QC không bỏ sót.</p>
-    <h4>26. Recipe & Client là thuộc tính của từng điểm kiểm tra</h4>
-    <p>Recipe và Client giờ chọn trực tiếp khi tạo/sửa điểm kiểm tra (cùng chỗ với PO, QC) — không còn là 1 chỉ tiêu riêng trong danh sách Specs của từng công đoạn.</p>
+    <h4>26. Client là thuộc tính của từng điểm kiểm tra</h4>
+    <p>Client chọn trực tiếp khi tạo/sửa điểm kiểm tra (cùng chỗ với PO, QC) — không còn là 1 chỉ tiêu riêng trong danh sách Specs của từng công đoạn.</p>
     <h4>27. Sửa dữ liệu: cho phép đổi mã PO</h4>
     <p>Khi bấm "✎ Sửa" 1 điểm kiểm tra đã có (từ tab Dữ liệu), ô Mã PO giờ sửa được trực tiếp (Công đoạn vẫn giữ nguyên, không đổi được). Nếu đổi sang mã PO đã có sẵn 1 điểm kiểm tra khác trùng Công đoạn/Ca/Ngày, app sẽ hỏi xác nhận trước khi ghi đè.</p>
     <h4>28. Tab Data Log</h4>
@@ -5916,8 +5977,6 @@ function renderAll(){
   if(metaTabConfig && metaTabConfig.value) TAB_CONFIG = normalizeTabConfig(metaTabConfig.value);
   const metaTech = await idbGet('meta','technicians');
   if(metaTech && Array.isArray(metaTech.value) && metaTech.value.length) TECHNICIANS = metaTech.value;
-  const metaRecipes = await idbGet('meta','recipes');
-  if(metaRecipes && Array.isArray(metaRecipes.value) && metaRecipes.value.length) RECIPES = metaRecipes.value;
   const metaSchema = await idbGet('meta','schema');
   if(metaSchema && Array.isArray(metaSchema.value) && metaSchema.value.length) SCHEMA = metaSchema.value;
   else await idbPut('meta', {k:'schema', value: SCHEMA});

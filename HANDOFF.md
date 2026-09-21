@@ -23,7 +23,7 @@ Tài liệu bàn giao để tiếp tục làm việc ở phiên AI/công cụ kh
 
 **Đã ÁP DỤNG (2026-09-18, đảo ngược quyết định trước đó cùng ngày)** mô hình 2 tầng tài khoản thật từ skill `supabase-sync-auth-patterns` (`references/access-management.md`), theo yêu cầu rõ ràng của người dùng để có "ngăn truy cập, quản lý tài khoản, đồng bộ realtime" giống hệt project song song [CloseCAPGMP](https://github.com/ngocthanhthien/CloseCAPGMP) (`C:\Users\BinhDang\Documents\GitHub\CloseCAPGMP`) — xem `HANDOFF_WEB.md`/`README.md` của project đó để đối chiếu chi tiết pattern gốc (bảng `gmp_members`, Edge Function `admin-users`, username→email nội bộ). Đánh đổi được người dùng xác nhận rõ: cần cài Supabase CLI 1 lần để deploy Edge Function (trước đó Shiftly cố tình giữ "không cần CLI, chỉ dán SQL"); đổi lại có tài khoản riêng từng người + Admin tự quản lý được, không còn 1 mật khẩu chung.
 
-**App chính**: [index.html](index.html) (~5400+ dòng, single file, HTML+CSS+JS inline, tiếng Việt). 13 tab: Nhập liệu, Dữ liệu (đã gộp Truy xuất — xem mục 3d), Danh sách PO/Recipe/Client, **Danh sách Items Code** (mới 2026-09-21, xem mục 3c), Data Log, Báo cáo, Thống kê, Specs, Xuất nhập dữ liệu, Cài đặt, Hướng dẫn.
+**App chính**: [index.html](index.html) (~5400+ dòng, single file, HTML+CSS+JS inline, tiếng Việt). 12 tab: Nhập liệu, Dữ liệu (đã gộp Truy xuất — xem mục 3d), Danh sách PO/Client, **Danh sách Items Code** (mới 2026-09-21, xem mục 3c), Data Log, Báo cáo, Thống kê, Specs, Xuất nhập dữ liệu, Cài đặt, Hướng dẫn. Recipe không còn tab riêng — tự động truy xuất từ Item Code (xem mục 3j).
 
 **Data model cốt lõi:**
 - `SCHEMA` (khai báo `DEFAULT_SCHEMA`/`SCHEMA` gần đầu script) — mảng section: `ROA, EXT, EVA, FOAMING, FD, FP, REWORK, META`. Mỗi section có `fields[]` (type: number/boolean/text/textarea/select; có `hardMin/hardMax`, `recipeOverrides` theo Recipe, `trueLabel/falseLabel` cho boolean).
@@ -222,6 +222,26 @@ Người dùng yêu cầu audit toàn diện rồi khắc phục hết. Đã tì
 - `tests/egress-optimizations.test.mjs` (**mới**, 4 test): debounce meta gộp đúng nhiều lần sửa liên tiếp thành 1 lần đẩy; sanity-check debounce KHÔNG bị vô hiệu hoá (sửa cách xa nhau vẫn tách thành 2 lần đẩy riêng); `baseSyncDelay()` nới đúng theo `realtimeConnected` + theo tab đang xem; `stopRealtime()` reset lại cờ.
 
 **Việc CHƯA làm (cân nhắc thêm nếu cần)**: Vấn đề #4 trong báo cáo audit (giới hạn `sync_get_checkpoints` theo SỐ DÒNG chứ không theo DUNG LƯỢNG) không còn đáng lo sau khi bỏ hẳn `images` khỏi hàm này (mỗi dòng còn lại rất nhẹ) — không cần sửa thêm. Đề xuất dài hạn (chuyển ảnh sang Supabase Storage, lazy-load ảnh theo yêu cầu thay vì đồng bộ sẵn, tách Item Code Master thành bảng Postgres thật thay vì 1 blob `meta`) — CHƯA làm, cần quyết định kiến trúc lớn hơn, xem báo cáo audit gốc.
+
+### 3j. Xoá tab Danh sách Recipe + làm lại bảng Specs (2026-09-21, cùng ngày)
+
+Recipe không còn là 1 danh mục quản lý riêng — nó đã được tự động truy xuất từ Item Code (Item Code Master → `lookupItemByCode()`) từ mục 3c/3e, nên tab "Danh sách Recipe" (và toàn bộ `RECIPES`/`RECIPE_OPTIONS`/`saveRecipes()`) chỉ còn là code chết, gây hiểu nhầm. Đồng thời làm lại bảng Specs cho gọn/chuyên nghiệp hơn theo yêu cầu người dùng.
+
+**(a) Xoá hẳn tab "Danh sách Recipe":**
+- Xoá nút tab, `<div id="view-recipelist">`, dòng dispatch trong `showTab()`, entry trong `TAB_ORDER_DEFAULT`/`TAB_LABELS`, và toàn bộ `renderRecipeList()`/`recipeOverrideDetails()`.
+- Xoá `RECIPE_OPTIONS`, `let RECIPES`, `saveRecipes()`, nhánh `'recipes'` trong `applyRemoteMeta()`, và đoạn tải `meta.recipes` trong `init()`.
+- Thêm `allKnownRecipes()` (mirror `allKnownItemCodes()`) — lấy danh sách mã Recipe duy nhất, không rỗng, trực tiếp từ `ITEM_CODE_LIST`. Panel "🧬 Ghi đè theo Recipe" (trong Specs) đổi ô chọn Recipe từ `<select>` cố định sang `renderAutocomplete()` (gõ tự do + gợi ý), dùng chung `allKnownRecipes()`.
+- Số tab giảm từ 13 → **12**; cập nhật 2 chỗ hardcode số tab trong `tests/supabase.test.mjs`, xoá 1 test "Danh sách Recipe" trong `tests/list-tables.test.mjs`, sửa `README.md`/mục "App chính" ở trên, và Guide tab (mục 24 cũ → viết lại thành "Recipe được truy xuất tự động từ Item Code", mục 26 bỏ phần nhắc tới Recipe).
+- **Lưu ý dữ liệu**: `ITEM_CODE_LIST` seed sẵn có 1 số dòng (loại `FGs`/`RW`) mang giá trị `recipe:"0"` (không áp dụng recipe thật) — `allKnownRecipes()` phản ánh đúng dữ liệu master nên "0" vẫn xuất hiện như 1 gợi ý hợp lệ (và có thể là gợi ý ĐẦU TIÊN do sắp xếp alphabet). Không phải lỗi code — nếu muốn dọn, sửa trực tiếp trường Recipe cho các dòng đó trong tab Danh sách Items Code.
+
+**(b) Làm lại bảng Specs (tinh gọn, chuyên nghiệp hơn):**
+- Cột **"Lựa chọn (Danh sách) — mỗi dòng 1 lựa chọn" dời xuống CUỐI CÙNG** (trước cột Hành động) — trước đây nằm giữa (sau Nhãn Đạt/Lỗi).
+- Thêm bộ lọc theo **"Bắt buộc"** (cột Bắt buộc/Ghi chú/±Âm giờ sortable + multi-filter Có/Không bắt buộc) và theo **Lựa chọn** (text filter trên nội dung các dòng lựa chọn) — trước chỉ lọc được Tên/Loại/QMS.
+- **Bỏ hàng "thêm" nội tuyến cũ** (chỉ nhập Tên+Loại) — thay bằng nút **"➕ Thêm chỉ tiêu"** ở đầu mỗi bảng công đoạn, mở 1 **popup** (component `openModal()` mới, chưa từng có pattern modal nào trong app trước đây) nhập đầy đủ 1 lần: Tên, Loại, rồi các trường tuỳ Loại (Giới hạn Số / Nhãn Đạt-Lỗi / Lựa chọn), Bắt buộc, Cho phép ghi chú, ± Số âm, QMS + tên cột QMS.
+- CSS mới `.specs-table` (header nền đậm `var(--ink)` chữ trắng, zebra stripe, hover màu teal nhạt) cho bảng Specs tương phản/dễ đọc hơn — không đụng tới giao diện các bảng khác (PO/Client/Items Code) vốn không nằm trong yêu cầu.
+- `buildEditableTable()` có thêm option `tableClass` (tuỳ chọn, thêm class CSS cho `<table>`) để phục vụ style riêng này mà không phá các bảng còn lại.
+
+**Test cập nhật**: `tests/specs-table.test.mjs` viết lại gần như toàn bộ — thứ tự cột mới, luồng thêm qua popup (2 test mới: thêm chỉ tiêu Loại Số với LSL/USL, và Loại Danh sách với Lựa chọn), lọc theo Bắt buộc, panel Ghi đè theo Recipe dùng `ITEM_CODE_LIST` thay vì `RECIPES`. `tests/list-tables.test.mjs`, `tests/tab-config.test.mjs`, `tests/supabase.test.mjs` cập nhật theo số tab mới/bỏ Recipe. Tổng: vẫn 10 file / **76 test** (thêm 1 test mới ở `specs-table.test.mjs` — thêm chỉ tiêu Loại Danh sách qua popup — bù đúng 1 test "Danh sách Recipe" bị xoá ở `list-tables.test.mjs`), tất cả pass.
 
 ---
 

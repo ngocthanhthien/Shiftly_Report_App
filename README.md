@@ -12,9 +12,11 @@ single-file offline-first PWA, with optional multi-device sync.
   the one-time setup (paste one SQL file into the Supabase dashboard, no
   CLI needed).
 
-The 13-tab UI (Nhập liệu, Dữ liệu — bao gồm truy xuất/lọc theo PO/Ca/ngày,
-Danh sách PO/Recipe/Client, Danh sách Items Code, Data Log, Báo cáo, Thống kê,
+The 12-tab UI (Nhập liệu, Dữ liệu — bao gồm truy xuất/lọc theo PO/Ca/ngày,
+Danh sách PO/Client, Danh sách Items Code, Data Log, Báo cáo, Thống kê,
 Specs, Xuất nhập dữ liệu, Cài đặt, Hướng dẫn) is the same in both builds.
+Recipe is not a separate managed list/tab — it's looked up automatically
+from Item Code (Item Code Master).
 
 ## Architecture (online build)
 

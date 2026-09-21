@@ -4,13 +4,15 @@ import {readFileSync} from 'node:fs';
 import {JSDOM, VirtualConsole} from 'jsdom';
 import {IDBFactory} from 'fake-indexeddb';
 
-// Covers converting tab Specs from "form above + list below (.specfield)"
-// into an editable spreadsheet table — sortable/filterable columns, inline
-// edit, add-row — reusing the same buildEditableTable() shared component as
-// the PO/Recipe/Client/Items Code tabs (see HANDOFF.md). Recipe overrides
-// (a nested per-Recipe sub-table, only meaningful for type "number") stay
-// as a separate expandable panel opened via the "🧬 Ghi đè" action button,
-// not inlined into the row itself.
+// Covers tab Specs as an editable spreadsheet table — sortable/filterable
+// columns, inline edit, and a "➕ Thêm chỉ tiêu" popup for adding a new chỉ
+// tiêu (2026-09-21 redesign: options/"Lựa chọn" column moved last, the old
+// inline add-row replaced by the popup, an extra "Bắt buộc" filter added,
+// and higher-contrast styling — see HANDOFF.md). Recipe overrides (a nested
+// per-Recipe sub-table, only meaningful for type "number") stay as a
+// separate expandable panel opened via the "🧬 Ghi đè" action button, not
+// inlined into the row itself. Recipe is no longer a separately managed
+// list — its autocomplete suggestions come from ITEM_CODE_LIST.
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 
 async function boot() {
@@ -41,6 +43,9 @@ function sectionCard(doc, name) {
 }
 function dataRows(card) { return [...card.querySelectorAll('table.edittable tbody tr')].filter(tr => !tr.classList.contains('addrow')); }
 function rowFor(card, fieldLabel) { return dataRows(card).find(tr => tr.children[0].querySelector('textarea').value.split('\n')[0] === fieldLabel); }
+function addSpecBtn(card) { return [...card.querySelector('.card-h').querySelectorAll('button')].find(b => b.textContent.includes('Thêm chỉ tiêu')); }
+function openModalFor(doc, card) { addSpecBtn(card).click(); return doc.querySelector('.modal-backdrop'); }
+function modalSubmitBtn(modal) { return [...modal.querySelectorAll('button')].find(b => b.classList.contains('teal') && b.textContent.includes('Thêm chỉ tiêu')); }
 // w.eval(...) returns arrays/objects constructed in the jsdom window's own
 // realm — deepEqual (strict) treats those as unequal to a same-shaped Node
 // realm value even when every element matches, so round-trip through JSON.
@@ -53,7 +58,7 @@ const TEST_SCHEMA = `SCHEMA = [
   ]},
 ];`;
 
-test('Specs tab renders each Công đoạn as a sortable/filterable editable table (like Danh sách Items Code)', async () => {
+test('Specs tab renders each Công đoạn as a sortable/filterable editable table, with "Lựa chọn" as the last data column', async () => {
   const {dom, w, errors} = await boot();
   try {
     const doc = w.document;
@@ -61,11 +66,13 @@ test('Specs tab renders each Công đoạn as a sortable/filterable editable tab
     w.showTab('specs');
     const card = sectionCard(doc, 'Test Section');
     assert.ok(card, 'expected a card for the Test Section');
-    assert.ok(card.querySelector('table.edittable'), 'expected an .edittable table');
+    assert.ok(card.querySelector('table.specs-table.edittable'), 'expected an .edittable table with the specs-table styling hook');
     assert.equal(dataRows(card).length, 2);
     const headers = [...card.querySelectorAll('thead tr:first-child th')].map(th => th.textContent);
     assert.ok(headers.some(h => h.includes('Tên chỉ tiêu')));
     assert.ok(headers.some(h => h.includes('Loại')));
+    const lastDataHeaderIdx = headers.length - 2; // last column is the blank actions header
+    assert.ok(headers[lastDataHeaderIdx].includes('Lựa chọn'), 'Lựa chọn (Danh sách) must be the last data column');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
@@ -137,24 +144,24 @@ test('flags (Bắt buộc/Ghi chú) and QMS checkboxes toggle and persist', asyn
     assert.equal(boolInputs[0].value, 'OK');
     assert.equal(boolInputs[1].value, 'NG');
 
-    const flagChecks = tr.children[5].querySelectorAll('input[type=checkbox]');
+    const flagChecks = tr.children[4].querySelectorAll('input[type=checkbox]');
     flagChecks[0].checked = true; // Bắt buộc
     flagChecks[0].dispatchEvent(new w.Event('change'));
     await new Promise(r => setTimeout(r, 30));
     assert.equal(w.eval("SCHEMA.find(s=>s.id==='TST').fields[1].required"), true);
 
-    const qmsCb = tr.children[6].querySelector('input[type=checkbox]');
+    const qmsCb = tr.children[5].querySelector('input[type=checkbox]');
     qmsCb.checked = true;
     qmsCb.dispatchEvent(new w.Event('change'));
     await new Promise(r => setTimeout(r, 30));
     assert.equal(w.eval("SCHEMA.find(s=>s.id==='TST').fields[1].isQMS"), true);
-    const qmsNameInp = tr.children[6].querySelector('input[type=text]');
+    const qmsNameInp = tr.children[5].querySelector('input[type=text]');
     assert.notEqual(qmsNameInp.style.display, 'none', 'QMS column-name input must appear once QMS is checked');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
 
-test('add-row adds a new chỉ tiêu; delete removes it; reorder (▲▼) swaps the underlying field order', async () => {
+test('"➕ Thêm chỉ tiêu" popup adds a new chỉ tiêu (Loại Số with LSL/USL); delete removes it; reorder (▲▼) swaps the underlying field order', async () => {
   const {dom, w, errors} = await boot();
   try {
     const doc = w.document;
@@ -162,12 +169,23 @@ test('add-row adds a new chỉ tiêu; delete removes it; reorder (▲▼) swaps 
     w.showTab('specs');
     let card = sectionCard(doc, 'Test Section');
 
-    const addRow = card.querySelector('table.edittable tbody tr.addrow');
-    addRow.children[0].querySelector('textarea').value = 'Mau sac';
-    addRow.children[1].querySelector('select').value = 'number';
-    addRow.querySelector('.rowbtn.add').click();
+    const modal = openModalFor(doc, card);
+    assert.ok(modal, 'expected the "Thêm chỉ tiêu" popup to open');
+    modal.querySelector('textarea.inp').value = 'Mau sac';
+    // Loại select defaults to 'number' — fill LSL/USL to check the popup
+    // captures type-conditional config up front, not just Tên+Loại.
+    const numInputs = modal.querySelectorAll('input.inp.num');
+    numInputs[0].value = '1'; // LSL
+    numInputs[3].value = '9'; // USL
+    modalSubmitBtn(modal).click();
     await new Promise(r => setTimeout(r, 30));
+
+    assert.equal(doc.querySelector('.modal-backdrop'), null, 'popup must close after a successful add');
     assert.equal(w.eval("SCHEMA.find(s=>s.id==='TST').fields.length"), 3);
+    const added = w.eval("SCHEMA.find(s=>s.id==='TST').fields[2]");
+    assert.equal(added.label, 'Mau sac');
+    assert.equal(added.hardMin, 1);
+    assert.equal(added.hardMax, 9);
 
     card = sectionCard(doc, 'Test Section');
     let rows = dataRows(card);
@@ -192,12 +210,39 @@ test('add-row adds a new chỉ tiêu; delete removes it; reorder (▲▼) swaps 
   } finally { dom.window.close(); }
 });
 
-test('Recipe override panel: "🧬 Ghi đè" toggles an editor below the table, only for type Số; adding a row persists recipeOverrides', async () => {
+test('"➕ Thêm chỉ tiêu" popup: switching Loại to Danh sách reveals the Lựa chọn textarea, and its lines become f.options', async () => {
   const {dom, w, errors} = await boot();
   try {
     const doc = w.document;
     w.eval(TEST_SCHEMA);
-    w.eval("RECIPES = ['400', '452'];");
+    w.showTab('specs');
+    const card = sectionCard(doc, 'Test Section');
+    const modal = openModalFor(doc, card);
+
+    modal.querySelector('textarea.inp').value = 'Loai lo';
+    const typeSel = modal.querySelector('select.inp');
+    typeSel.value = 'select';
+    typeSel.dispatchEvent(new w.Event('change'));
+    const optionsBox = modal.querySelector('[data-box=select]');
+    assert.notEqual(optionsBox.style.display, 'none', 'Lựa chọn box must appear once Loại = Danh sách');
+    const optionsTa = optionsBox.querySelector('textarea');
+    optionsTa.value = 'A\nB\nC';
+    modalSubmitBtn(modal).click();
+    await new Promise(r => setTimeout(r, 30));
+
+    const added = w.eval("SCHEMA.find(s=>s.id==='TST').fields[2]");
+    assert.equal(added.type, 'select');
+    assert.deepEqual(evalJson(w, "SCHEMA.find(s=>s.id==='TST').fields[2].options"), ['A', 'B', 'C']);
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('Recipe override panel: "🧬 Ghi đè" toggles an editor below the table, only for type Số; adding a row persists recipeOverrides (Recipe suggestions come from Item Code Master)', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    w.eval(TEST_SCHEMA);
+    w.eval("ITEM_CODE_LIST = [{itemCode:'X1', name:'Foo', recipe:'400'}, {itemCode:'X2', name:'Bar', recipe:'452'}];");
     w.showTab('specs');
     let card = sectionCard(doc, 'Test Section');
 
@@ -211,24 +256,24 @@ test('Recipe override panel: "🧬 Ghi đè" toggles an editor below the table, 
     const numOvBtn = [...numRow.querySelectorAll('.rowbtn')].find(b => b.textContent.includes('Ghi đè'));
     numOvBtn.click();
     await new Promise(r => setTimeout(r, 30));
-    const panel = card.parentElement.querySelector('.overriderow-hdr') ? card : null;
     assert.ok(doc.querySelector('#view-specs').textContent.includes('Ghi đè theo Recipe — Nhiet do'), 'override panel must open for the Số field');
 
     const addOvBtn = [...doc.querySelectorAll('#view-specs button')].find(b => b.textContent.includes('Thêm ghi đè theo Recipe'));
     addOvBtn.click();
     await new Promise(r => setTimeout(r, 30));
     assert.equal(w.eval("Object.keys(SCHEMA.find(s=>s.id==='TST').fields[0].recipeOverrides||{}).length"), 1);
+    assert.equal(w.eval("SCHEMA.find(s=>s.id==='TST').fields[0].recipeOverrides['400']!==undefined"), true, 'the first suggested Recipe (from ITEM_CODE_LIST) must be used as the new row\'s default');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
 
-test('filter by Loại (multi-select) and text-filter by Tên chỉ tiêu narrow the table', async () => {
+test('filter by Loại (multi-select), by Bắt buộc, and text-filter by Tên chỉ tiêu narrow the table', async () => {
   const {dom, w, errors} = await boot();
   try {
     const doc = w.document;
     w.eval(`SCHEMA = [
       {id:'TST', name:'Test Section', fields: [
-        {id:'TST_A', label:'Nhiet do Rang', type:'number'},
+        {id:'TST_A', label:'Nhiet do Rang', type:'number', required:true},
         {id:'TST_B', label:'Kiem tra mau', type:'boolean'},
         {id:'TST_C', label:'Nhiet do Say', type:'number'},
       ]},
@@ -253,6 +298,18 @@ test('filter by Loại (multi-select) and text-filter by Tên chỉ tiêu narrow
     await new Promise(r => setTimeout(r, 30));
     labels = dataRows(card).map(tr => tr.children[0].querySelector('textarea').value);
     assert.deepEqual(labels, ['Kiem tra mau']);
+    boolCb.checked = false;
+    boolCb.dispatchEvent(new w.Event('change'));
+    await new Promise(r => setTimeout(r, 30));
+
+    // "Bắt buộc" filter lives on the flags column (index 4).
+    const flagsMsf = filterRow.children[4].querySelector('details.msf');
+    const requiredCb = [...flagsMsf.querySelectorAll('.msf-opt')].find(o => o.textContent.includes('Bắt buộc') && !o.textContent.includes('Không')).querySelector('input[type=checkbox]');
+    requiredCb.checked = true;
+    requiredCb.dispatchEvent(new w.Event('change'));
+    await new Promise(r => setTimeout(r, 30));
+    labels = dataRows(card).map(tr => tr.children[0].querySelector('textarea').value);
+    assert.deepEqual(labels, ['Nhiet do Rang']);
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
@@ -280,7 +337,7 @@ test('"Hiển thị trong báo cáo QMS" defaults to unchecked for every chỉ t
     const doc = w.document;
     w.showTab('specs');
     const card = sectionCard(doc, 'Rang (ROA)');
-    const qmsChecks = [...card.querySelectorAll('table.edittable tbody tr:not(.addrow)')].map(tr => tr.children[6].querySelector('input[type=checkbox]'));
+    const qmsChecks = [...card.querySelectorAll('table.edittable tbody tr:not(.addrow)')].map(tr => tr.children[5].querySelector('input[type=checkbox]'));
     assert.ok(qmsChecks.every(cb => cb.checked === false), 'every QMS checkbox in the Specs table must render unchecked by default');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
