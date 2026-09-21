@@ -58,6 +58,7 @@ async function rpc(db, fn, params) {
   const table = {
     sync_whoami: ['select sync_whoami() as result', []],
     sync_get_checkpoints: ['select sync_get_checkpoints($1) as result', [p.p_since ?? 0]],
+    sync_get_checkpoint_images: ['select sync_get_checkpoint_images($1::jsonb) as result', [JSON.stringify(p.p_keys)]],
     sync_put_checkpoints: ['select sync_put_checkpoints($1::jsonb) as result', [JSON.stringify(p.p_rows)]],
     sync_delete_checkpoints: ['select sync_delete_checkpoints($1::jsonb) as result', [JSON.stringify(p.p_deletes)]],
     sync_get_meta: ['select sync_get_meta($1) as result', [p.p_since ?? null]],
@@ -78,6 +79,7 @@ test('every sync_* function rejects an unauthenticated caller with {error:"unaut
   await signInAs(db, null);
   assert.equal((await rpc(db, 'sync_whoami', {})).error, 'unauthorized');
   assert.equal((await rpc(db, 'sync_get_checkpoints', {})).error, 'unauthorized');
+  assert.equal((await rpc(db, 'sync_get_checkpoint_images', { p_keys: [] })).error, 'unauthorized');
   assert.equal((await rpc(db, 'sync_put_checkpoints', { p_rows: [] })).error, 'unauthorized');
   assert.equal((await rpc(db, 'sync_delete_checkpoints', { p_deletes: [{ key: 'x', updatedAt: '2026-01-01' }] })).error, 'unauthorized');
   assert.equal((await rpc(db, 'sync_get_meta', {})).error, 'unauthorized');
@@ -226,7 +228,7 @@ test('sync_delete_checkpoints: 1 call batches multiple keys, each keeping its ow
   assert.equal(got.find(r => r.key === 'b2').deleted, false, 'a stale delete (older than current updatedAt) must be rejected, even inside a batch');
 });
 
-test('images travel inline as base64 dataUrl inside the checkpoint row — no separate table/round trip', async () => {
+test('images travel inline as base64 dataUrl inside the checkpoint row — fetched separately via sync_get_checkpoint_images, not inline in sync_get_checkpoints', async () => {
   const db = await backend();
   const uid = await createMember(db);
   await signInAs(db, uid);
@@ -236,7 +238,14 @@ test('images travel inline as base64 dataUrl inside the checkpoint row — no se
   };
   await rpc(db, 'sync_put_checkpoints', { p_rows: [cp] });
   const got = (await rpc(db, 'sync_get_checkpoints', { p_since: 0 })).rows.find(r => r.key === 'k2');
-  assert.equal(got.images[0].dataUrl, 'data:image/jpeg;base64,AAAA');
+  // Audit egress 2026-09-21: sync_get_checkpoints itself must NEVER carry the
+  // bytes any more — only a cheap fingerprint (imagesFp), same shape
+  // imagesFingerprint() computes client-side, so another device can tell
+  // whether the photos actually changed without downloading them.
+  assert.equal('images' in got, false, 'sync_get_checkpoints must not include the images column at all');
+  assert.equal(got.imagesFp, '123');
+  const imgs = await rpc(db, 'sync_get_checkpoint_images', { p_keys: ['k2'] });
+  assert.equal(imgs.items.k2[0].dataUrl, 'data:image/jpeg;base64,AAAA');
 });
 
 test('checkpoints: omitting the `images` key on a later push preserves the existing photos (bandwidth optimization); sending an empty array still clears them', async () => {
@@ -256,14 +265,34 @@ test('checkpoints: omitting the `images` key on a later push preserves the exist
   await rpc(db, 'sync_put_checkpoints', { p_rows: [fieldOnlyEdit] });
   let row = (await rpc(db, 'sync_get_checkpoints', { p_since: 0 })).rows.find(r => r.key === 'k3');
   assert.equal(row.fields.a, 2, 'the field edit itself must still apply');
-  assert.equal(row.images.length, 1, 'existing photo must survive a push that omits `images`');
-  assert.equal(row.images[0].dataUrl, 'data:image/jpeg;base64,AAAA');
+  // The field-only edit must NOT change imagesFp — this is exactly the signal
+  // that lets a polling device skip re-fetching images it already has.
+  assert.equal(row.imagesFp, '111', 'imagesFp must survive a push that omits `images` unchanged');
+  let imgs = await rpc(db, 'sync_get_checkpoint_images', { p_keys: ['k3'] });
+  assert.equal(imgs.items.k3.length, 1, 'existing photo must survive a push that omits `images`');
+  assert.equal(imgs.items.k3[0].dataUrl, 'data:image/jpeg;base64,AAAA');
 
   // A deliberate clear (client sends images: []) must still actually clear them.
   const clearImages = { ...fieldOnlyEdit, images: [], updatedAt: '2026-09-19T03:00:00Z' };
   await rpc(db, 'sync_put_checkpoints', { p_rows: [clearImages] });
   row = (await rpc(db, 'sync_get_checkpoints', { p_since: 0 })).rows.find(r => r.key === 'k3');
-  assert.equal(row.images.length, 0, 'explicitly sending an empty array must still clear existing photos');
+  assert.equal(row.imagesFp, '', 'explicitly clearing images must reset the fingerprint too');
+  imgs = await rpc(db, 'sync_get_checkpoint_images', { p_keys: ['k3'] });
+  assert.equal(imgs.items.k3.length, 0, 'explicitly sending an empty array must still clear existing photos');
+});
+
+test('sync_get_checkpoint_images: batches multiple keys in 1 call, and only ever returns photos for the keys asked for', async () => {
+  const db = await backend();
+  const uid = await createMember(db);
+  await signInAs(db, uid);
+  await rpc(db, 'sync_put_checkpoints', { p_rows: [
+    { key: 'ik1', date: '2026-09-20', shift: '1', section: 'FP', po: '', recipe: '', client: '', technician: '', fields: {}, fieldNotes: {}, images: [{ name: 'a.jpg', dataUrl: 'data:image/jpeg;base64,AAAA', ts: 1 }], updatedAt: '2026-09-20T01:00:00Z' },
+    { key: 'ik2', date: '2026-09-20', shift: '1', section: 'FP', po: '', recipe: '', client: '', technician: '', fields: {}, fieldNotes: {}, images: [{ name: 'b.jpg', dataUrl: 'data:image/jpeg;base64,BBBB', ts: 2 }], updatedAt: '2026-09-20T01:00:00Z' },
+  ] });
+  const res = await rpc(db, 'sync_get_checkpoint_images', { p_keys: ['ik1', 'ik2'] });
+  assert.equal(Object.keys(res.items).length, 2, 'one call must return every requested key, not just one');
+  assert.equal(res.items.ik1[0].dataUrl, 'data:image/jpeg;base64,AAAA');
+  assert.equal(res.items.ik2[0].dataUrl, 'data:image/jpeg;base64,BBBB');
 });
 
 test('meta: last-write-wins round trip', async () => {
@@ -468,6 +497,76 @@ test('full app boots, requires login once cloud sync is configured, then syncs a
     await new Promise(r => setTimeout(r, 50)); // onAccessRevoked() is fire-and-forget from cloudFetch — give it a tick to finish signOut()+showLoginGate()
     assert.equal(w.document.getElementById('loginGate').style.display, '', 'a disabled account must be signed out back to the login gate');
     assert.equal(w.eval('currentMember'), null);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test('pullFromCloud(): fetches a photo only via sync_get_checkpoint_images (audit egress 2026-09-21), and a later field-only edit from another device does not re-fetch it or wipe it locally', async () => {
+  const db = await backend();
+  const uid = await createMember(db, { role: 'user', displayName: 'QA Hai', username: 'qa2' });
+  const fixtures = new Map([[`qa2@x.users.internal`, { userId: uid, password: 'secret123' }]]);
+
+  const errors = [];
+  const vc = new VirtualConsole();
+  vc.on('jsdomError', e => errors.push(e.message));
+  const dom = new JSDOM(html, {
+    url: 'https://someuser.github.io/shiftly-report-app/',
+    runScripts: 'dangerously',
+    pretendToBeVisual: true,
+    virtualConsole: vc,
+    beforeParse(w) {
+      w.indexedDB = new IDBFactory();
+      w.Headers = Headers;
+      w.AbortSignal = AbortSignal;
+      w.supabase = fakeSupabaseSdk(fixtures);
+      w.__imageCallCount = 0;
+      w.fetch = async (url, opts) => {
+        const u = new URL(url);
+        const fn = u.pathname.split('/rest/v1/rpc/')[1];
+        const authHeader = (opts && opts.headers && opts.headers['Authorization']) || '';
+        const token = authHeader.replace(/^Bearer\s+/, '');
+        await signInAs(db, token || null);
+        const params = opts && opts.body ? JSON.parse(opts.body) : {};
+        if (fn === 'sync_get_checkpoint_images') w.__imageCallCount++;
+        const result = await rpc(db, fn, params);
+        return new Response(JSON.stringify(result), { status: 200 });
+      };
+    },
+  });
+  try {
+    const w = dom.window;
+    for (let i = 0; i < 100 && !w.eval('typeof DB !== "undefined" && DB !== null'); i++) await new Promise(r => setTimeout(r, 10));
+    await new Promise(r => setTimeout(r, 50));
+
+    await w.eval("(async () => { await saveCloudConfig('https://x.supabase.co', 'anon-key'); })()");
+    const ok = await w.eval("(async () => await signInUser('qa2', 'secret123'))()");
+    assert.equal(ok, null);
+
+    // Simulate ANOTHER device pushing a checkpoint with a photo directly via RPC.
+    await rpc(db, 'sync_put_checkpoints', { p_rows: [{
+      key: 'remote1', date: '2026-09-21', shift: '1', section: 'FP', po: '', recipe: '', client: '', technician: 'QA',
+      fields: {}, fieldNotes: {}, images: [{ name: 'a.jpg', dataUrl: 'data:image/jpeg;base64,AAAA', ts: 999 }], updatedAt: '2026-09-21T01:00:00Z',
+    }] });
+
+    await w.eval('(async () => { await pullFromCloud(); })()');
+    let local = await w.idbGet('shifts', 'remote1');
+    assert.equal(local.images[0].dataUrl, 'data:image/jpeg;base64,AAAA', 'first pull must fetch the photo via sync_get_checkpoint_images');
+    assert.equal(w.eval('window.__imageCallCount'), 1);
+
+    // Another device edits an unrelated field only (images key omitted) — the
+    // exact scenario that used to force EVERY device to re-download the photo.
+    await rpc(db, 'sync_put_checkpoints', { p_rows: [{
+      key: 'remote1', date: '2026-09-21', shift: '1', section: 'FP', po: '', recipe: '', client: '', technician: 'QA',
+      fields: { FP_R55C: true }, fieldNotes: {}, updatedAt: '2026-09-21T02:00:00Z',
+    }] });
+    await w.eval('(async () => { await pullFromCloud(); })()');
+    local = await w.idbGet('shifts', 'remote1');
+    assert.equal(local.fields.FP_R55C, true, 'the field-only edit must still apply');
+    assert.equal(local.images[0].dataUrl, 'data:image/jpeg;base64,AAAA', 'photo must survive a field-only pull, not get wiped to []');
+    assert.equal(w.eval('window.__imageCallCount'), 1, 'sync_get_checkpoint_images must NOT be called again — imagesFp is unchanged');
+
+    assert.equal(errors.length, 0, errors.join('\n'));
   } finally {
     dom.window.close();
   }

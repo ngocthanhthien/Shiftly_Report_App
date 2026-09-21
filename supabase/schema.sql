@@ -29,6 +29,7 @@ create table if not exists checkpoints (
   fields jsonb not null default '{}',
   field_notes jsonb not null default '{}',
   images jsonb not null default '[]',
+  images_fp text not null default '',
   updated_at text not null,
   deleted boolean not null default false,
   seq bigint not null default 0
@@ -36,6 +37,17 @@ create table if not exists checkpoints (
 -- Migration for a project created before item_code existed — `create table
 -- if not exists` above doesn't touch an already-existing table's columns.
 alter table checkpoints add column if not exists item_code text not null default '';
+-- Migration for a project created before images_fp existed (audit egress
+-- 2026-09-21 — see sync_get_checkpoints/sync_get_checkpoint_images below).
+-- Backfill mirrors imagesFingerprint() in index.html (sorted, comma-joined
+-- photo timestamps) so existing rows immediately report a correct
+-- fingerprint instead of '' (which would look like "no photos" and force
+-- every device to (correctly, if wastefully) fetch them once more).
+alter table checkpoints add column if not exists images_fp text not null default '';
+update checkpoints set images_fp = coalesce((
+  select string_agg((im->>'ts'), ',' order by (im->>'ts')::float)
+  from jsonb_array_elements(images) im
+), '') where images_fp = '' and images <> '[]'::jsonb;
 create sequence if not exists checkpoints_seq;
 create index if not exists idx_checkpoints_seq on checkpoints (seq);
 create index if not exists idx_checkpoints_date_shift on checkpoints (date, shift);
@@ -151,6 +163,15 @@ grant execute on function sync_whoami() to authenticated;
 
 -- ===================== Checkpoints =====================
 
+-- Audit egress 2026-09-21: `images` (base64, nặng nhất trong toàn bộ payload)
+-- KHÔNG còn nằm trong hàm này nữa — trước đây mỗi khi 1 checkpoint có ảnh bị
+-- sửa BẤT KỲ field nào (seq tăng), MỌI thiết bị khác polling đều tải lại
+-- nguyên ảnh cũ y hệt dù ảnh không hề đổi (cơ chế bỏ-ảnh-không-đổi cũ,
+-- stripLocalMarkers(), chỉ tối ưu chiều đẩy LÊN, không giúp gì chiều tải
+-- XUỐNG này). Giờ chỉ trả `imagesFp` (fingerprint rẻ, xem cột images_fp ở
+-- trên) — client so sánh với ảnh đang có sẵn cục bộ, chỉ gọi
+-- sync_get_checkpoint_images() riêng khi thật sự cần (xem pullFromCloud()
+-- trong index.html).
 drop function if exists sync_get_checkpoints(text, bigint);
 create or replace function sync_get_checkpoints(p_since bigint default 0)
 returns jsonb
@@ -163,12 +184,26 @@ begin
   select coalesce(jsonb_agg(jsonb_build_object(
       'key', c.key, 'date', c.date, 'shift', c.shift, 'section', c.section, 'po', c.po,
       'itemCode', c.item_code, 'recipe', c.recipe, 'client', c.client, 'technician', c.technician,
-      'fields', c.fields, 'fieldNotes', c.field_notes, 'images', c.images,
+      'fields', c.fields, 'fieldNotes', c.field_notes, 'imagesFp', c.images_fp,
       'updatedAt', c.updated_at, 'deleted', c.deleted
     ) order by c.seq), '[]'::jsonb), max(c.seq)
     into v_rows, v_cursor
   from (select * from checkpoints where seq > p_since order by seq limit 5000) c;
   return jsonb_build_object('rows', v_rows, 'cursor', coalesce(v_cursor, p_since), 'hasMore', jsonb_array_length(v_rows) = 5000);
+end;
+$$;
+
+-- Ảnh riêng (audit egress 2026-09-21): client gọi hàm này CHỈ với đúng các
+-- key mà imagesFp (từ sync_get_checkpoints) khác với ảnh đang có sẵn cục bộ,
+-- gộp NHIỀU key trong 1 lệnh (không N+1 — 1 lần gọi cho cả 1 đợt pull).
+create or replace function sync_get_checkpoint_images(p_keys jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
+  return jsonb_build_object('items', coalesce((
+    select jsonb_object_agg(key, images) from checkpoints
+    where key in (select jsonb_array_elements_text(p_keys)) and not deleted
+  ), '{}'::jsonb));
 end;
 $$;
 
@@ -181,6 +216,7 @@ declare
   v_key text;
   v_updated_at text;
   v_current_updated_at text;
+  v_images_fp text;
   v_results jsonb := '[]'::jsonb;
 begin
   if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
@@ -199,12 +235,23 @@ begin
     -- stripLocalMarkers() trong index.html). Phân biệt "không gửi field này"
     -- (giữ nguyên ảnh cũ, toán tử `?`kiểm tra key có tồn tại trong JSON hay
     -- không) với "gửi mảng ảnh rỗng" (xoá hết ảnh — vẫn hỗ trợ bình thường).
-    insert into checkpoints (key, date, shift, section, po, item_code, recipe, client, technician, fields, field_notes, images, updated_at, deleted, seq)
+    -- images_fp (audit egress 2026-09-21): chỉ tính lại khi client THẬT SỰ
+    -- gửi kèm `images` lần này — mirror đúng imagesFingerprint() phía client
+    -- (nối các timestamp ảnh, đã sắp xếp, cách nhau dấu phẩy) để
+    -- sync_get_checkpoints có thể báo cho thiết bị khác biết ảnh CÓ đổi hay
+    -- không mà không cần gửi kèm bytes.
+    v_images_fp := null;
+    if v_row ? 'images' then
+      select coalesce(string_agg((im->>'ts'), ',' order by (im->>'ts')::float), '')
+        into v_images_fp from jsonb_array_elements(coalesce(v_row->'images', '[]'::jsonb)) im;
+    end if;
+    insert into checkpoints (key, date, shift, section, po, item_code, recipe, client, technician, fields, field_notes, images, images_fp, updated_at, deleted, seq)
     values (
       v_key, v_row->>'date', v_row->>'shift', v_row->>'section', coalesce(v_row->>'po', ''),
       coalesce(v_row->>'itemCode', ''), coalesce(v_row->>'recipe', ''), coalesce(v_row->>'client', ''), coalesce(v_row->>'technician', ''),
       coalesce(v_row->'fields', '{}'::jsonb), coalesce(v_row->'fieldNotes', '{}'::jsonb),
       case when v_row ? 'images' then coalesce(v_row->'images', '[]'::jsonb) else '[]'::jsonb end,
+      coalesce(v_images_fp, ''),
       v_updated_at, false, nextval('checkpoints_seq')
     )
     on conflict (key) do update set
@@ -212,6 +259,7 @@ begin
       item_code = excluded.item_code, recipe = excluded.recipe, client = excluded.client, technician = excluded.technician,
       fields = excluded.fields, field_notes = excluded.field_notes,
       images = case when v_row ? 'images' then excluded.images else checkpoints.images end,
+      images_fp = case when v_row ? 'images' then excluded.images_fp else checkpoints.images_fp end,
       updated_at = excluded.updated_at, deleted = false, seq = excluded.seq
     where excluded.updated_at > checkpoints.updated_at;
     v_results := v_results || jsonb_build_object('key', v_key, 'applied', v_current_updated_at is null or v_updated_at > v_current_updated_at);
@@ -343,6 +391,29 @@ end;
 $$;
 revoke all on function prune_logs_older_than(int) from public;
 
+-- ===================== Data retention (checkpoint photos) — MANUAL, KHÔNG tự chạy =====================
+-- Audit egress 2026-09-21: một thiết bị MỚI (tablet thay thế, hoặc bấm "Đồng
+-- bộ lại toàn bộ từ đầu") tải TOÀN BỘ lịch sử checkpoints từ p_since=0, kể cả
+-- ảnh của những ca đã rất cũ — càng lâu dữ liệu càng phình to. Hàm dưới đây
+-- CHỈ xoá phần `images` của các checkpoint cũ hơn p_days (giữ nguyên toàn bộ
+-- số liệu QC — vẫn tra cứu/audit/export bình thường, chỉ mất ảnh đính kèm),
+-- KHÔNG grant cho anon/authenticated (không có nút nào trong app gọi hàm
+-- này) — cùng nguyên tắc với prune_logs_older_than ở trên: thời hạn giữ ảnh
+-- là quyết định nghiệp vụ, Admin tự chạy tay trong SQL Editor khi đã chốt.
+-- Ví dụ dùng: `select clear_old_checkpoint_images(365)` (xoá ảnh của checkpoint
+-- cập nhật lần cuối hơn 365 ngày trước).
+create or replace function clear_old_checkpoint_images(p_days int) returns bigint
+language plpgsql security definer set search_path = public as $$
+declare v_count bigint;
+begin
+  update checkpoints set images = '[]'::jsonb, images_fp = ''
+  where images <> '[]'::jsonb and updated_at::timestamptz < (now() - (p_days || ' days')::interval);
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+revoke all on function clear_old_checkpoint_images(int) from public;
+
 -- ===================== Cleanup of the old shared-secret model =====================
 -- Shiftly used to authorize every sync_* call with a shared password argument
 -- (`set_sync_secret` / `check_secret` / `app_secret`) instead of real Auth
@@ -365,9 +436,13 @@ drop table if exists app_secret;
 -- inside each checkpoint's `images` jsonb column (same shape the app already
 -- keeps locally) — there is no separate images table/endpoint. Simpler and
 -- plenty for this app's actual photo volume (a per-shift QC log, not a photo
--- host); revisit only if that changes.
+-- host); revisit only if that changes. sync_get_checkpoints itself no longer
+-- returns the bytes though (see images_fp / sync_get_checkpoint_images above,
+-- audit egress 2026-09-21) — the client fetches them separately, only when
+-- actually needed.
 
 grant execute on function sync_get_checkpoints(bigint) to authenticated;
+grant execute on function sync_get_checkpoint_images(jsonb) to authenticated;
 grant execute on function sync_put_checkpoints(jsonb) to authenticated;
 grant execute on function sync_delete_checkpoints(jsonb) to authenticated;
 grant execute on function sync_get_meta(text) to authenticated;

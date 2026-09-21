@@ -1230,12 +1230,25 @@ async function queueCheckpointDelete(key){
   await queueOutbox('checkpointDelete', {key, updatedAt: new Date().toISOString()});
   scheduleFlush();
 }
+// Debounce THẬT SỰ (reset lại mỗi lần gọi) riêng cho meta — khác hẳn
+// scheduleFlush() ở trên (chỉ gộp các lệnh gọi trong 1 cửa sổ CỐ ĐỊNH kể từ
+// lần gọi ĐẦU TIÊN). Các bảng chỉnh sửa trực tiếp (Specs/Danh sách PO/
+// Recipe/Client/Items Code) lưu ngay mỗi lần blur/change 1 ô — mỗi lần lưu
+// là 1 lần đẩy + khiến MỌI thiết bị khác tải lại NGUYÊN cả danh sách (Item
+// Code Master ~55KB/524 dòng, Specs ~9KB...). Đợi im lặng 1 khoảng rồi mới
+// thực sự đẩy khiến cả 1 phiên sửa nhiều ô liên tiếp chỉ còn đúng 1 lần đồng
+// bộ thay vì 1 lần/ô (xem audit egress 2026-09-21).
+let metaFlushTimer = null;
+function scheduleMetaFlush(delayMs){
+  clearTimeout(metaFlushTimer);
+  metaFlushTimer = setTimeout(()=>{ metaFlushTimer = null; flushOutbox(); }, delayMs==null?2500:delayMs);
+}
 async function queueMetaSync(key, value){
   const updatedAt = new Date().toISOString();
   metaAppliedAt[key] = updatedAt;
   await idbPut('meta', {k:'metaAppliedAt', value: metaAppliedAt});
   await queueOutbox('meta', {key, value, updatedAt});
-  scheduleFlush();
+  scheduleMetaFlush();
 }
 // Displayable source for an attached image — the base64 dataUrl travels
 // with the checkpoint itself now (both locally and through Supabase), so
@@ -1267,23 +1280,52 @@ async function pullFromCloud(){
   const cpRes = await cloudFetch('sync_get_checkpoints', {p_since: Number(syncCursors.checkpoints||'0')});
   if(cpRes && Array.isArray(cpRes.rows)){
     lastPullCount += cpRes.rows.length;
+    // Ảnh (base64) không còn nằm trong cpRes.rows nữa (audit egress
+    // 2026-09-21, xem schema.sql) — mỗi dòng chỉ mang `imagesFp` (fingerprint
+    // rẻ). Gom lại đúng những key có fingerprint KHÁC ảnh đang có sẵn cục bộ
+    // (hoặc chưa từng thấy dòng này) rồi tải ảnh cho ĐÚNG các key đó bằng 1
+    // lệnh duy nhất — trước đây mọi dòng đều kèm sẵn ảnh dù chỉ 1 con số
+    // khác vừa đổi, khiến mọi thiết bị khác tải lại ảnh cũ y hệt vô ích.
+    const needImages = [];
     for(const row of cpRes.rows){
       const local = await idbGet('shifts', row.key);
       if(row.deleted){
         if(local && row.updatedAt >= local.updatedAt){ await idbDelete('shifts', row.key); changed = true; }
-      } else if(!local || row.updatedAt > local.updatedAt){
+        continue;
+      }
+      if(!local || row.updatedAt > local.updatedAt){
+        const fp = row.imagesFp || '';
+        const keepLocalImages = !!local && local._imagesSyncedFp === fp;
         await idbPut('shifts', {
           key:row.key, date:row.date, shift:row.shift, section:row.section, po:row.po, itemCode:row.itemCode||'', recipe:row.recipe,
           client:row.client, technician:row.technician, fields:row.fields||{}, fieldNotes:row.fieldNotes||{},
-          images:row.images||[], updatedAt:row.updatedAt, _syncedAt: row.updatedAt, _imagesSyncedFp: imagesFingerprint(row),
+          images: keepLocalImages ? (local.images||[]) : [], updatedAt:row.updatedAt, _syncedAt: row.updatedAt, _imagesSyncedFp: fp,
         });
+        if(!keepLocalImages && fp) needImages.push(row.key);
         changed = true;
       }
     }
-    if(cpRes.cursor!=null) syncCursors.checkpoints = String(cpRes.cursor);
-    await idbPut('meta', {k:'syncCursors', value: syncCursors});
+    let imagesOk = true;
+    if(needImages.length){
+      const imgRes = await cloudFetch('sync_get_checkpoint_images', {p_keys: needImages});
+      if(imgRes && imgRes.items){
+        for(const key of needImages){
+          const images = imgRes.items[key];
+          if(!Array.isArray(images)) continue;
+          const cp = await idbGet('shifts', key);
+          if(cp){ cp.images = images; await idbPut('shifts', cp); }
+        }
+      } else {
+        // Lỗi mạng/RPC lúc lấy ảnh — KHÔNG tiến cursor, để lần poll sau thử
+        // lại nguyên trang này (kể cả phần ảnh) thay vì bỏ sót ảnh vĩnh viễn.
+        imagesOk = false;
+      }
+    }
+    if(imagesOk && cpRes.cursor!=null){ syncCursors.checkpoints = String(cpRes.cursor); await idbPut('meta', {k:'syncCursors', value: syncCursors}); }
+    hasMore = imagesOk && !!cpRes.hasMore;
+  } else {
+    hasMore = false;
   }
-  hasMore = !!(cpRes && cpRes.hasMore);
   if(!cpRes) break;
   }
   // p_since: cursor riêng cho meta (giống hệt nguyên lý seq của checkpoints)
@@ -1444,9 +1486,16 @@ function armSync(){
 // quản lý/xem còn lại) muốn thấy dữ liệu mới nhanh hơn khi đang mở xem —
 // vô hại khi không có realtime lẫn không tốn thêm gì đáng kể (chỉ vài GET
 // nhỏ mỗi lần, xem cloudFetch).
+// Audit egress 2026-09-21: khi Realtime Broadcast đã XÁC NHẬN kết nối
+// (realtimeConnected — xem startRealtime), polling chỉ còn là lưới an toàn
+// dự phòng (Realtime đã lo phần "gần như tức thời") — nới nhịp lên hẳn để
+// bớt số lần gọi liên tục 24/7 trên mỗi thiết bị đang mở app. Chưa kết nối
+// được (CDN chặn, mạng kém, hoặc chưa từng thử) thì vẫn giữ nhịp cũ.
 function baseSyncDelay(){
   const active = qs('.tab[aria-selected="true"]');
-  return (active && active.dataset.tab!=='input') ? 8000 : 20000;
+  const isInput = active && active.dataset.tab==='input';
+  if(realtimeConnected) return isInput ? 60000 : 30000;
+  return isInput ? 20000 : 8000;
 }
 function wakeSync(){
   if(document.visibilityState==='hidden'){ clearTimeout(syncTimer); return; }
@@ -1481,6 +1530,11 @@ armSync();
 let sbClient = null;
 let realtimeChannel = null;
 let realtimePullTimer = null;
+// Audit egress 2026-09-21: cờ này (không phải chỉ "có channel object hay
+// không") mới thật sự nói lên Realtime có đang SỐNG hay không — dùng để nới
+// nhịp polling ở baseSyncDelay() phía trên khi đã chắc chắn không cần polling
+// dồn dập nữa.
+let realtimeConnected = false;
 function ensureSupabaseClient(){
   if(!cloudConfigured() || typeof window.supabase === 'undefined') return null;
   if(sbClient && sbClient._shiftlyUrl===cloudCfg.url && sbClient._shiftlyKey===cloudCfg.anonKey) return sbClient;
@@ -1506,15 +1560,21 @@ function startRealtime(){
   try{
     const ch = sb.channel('shiftly-changes', {config:{broadcast:{self:false}}});
     ch.on('broadcast', {event:'changed'}, scheduleRealtimePull);
-    ch.subscribe();
+    ch.subscribe(status=>{
+      realtimeConnected = (status==='SUBSCRIBED');
+      // Vừa xác nhận kết nối (hoặc vừa MẤT kết nối) — áp dụng nhịp poll mới
+      // (baseSyncDelay()) ngay thay vì đợi tới lần armSync() kế tiếp mới đổi.
+      syncDelay = baseSyncDelay();
+    });
     realtimeChannel = ch;
-  }catch(e){ console.error('Realtime subscribe failed (falling back to polling only):', e); realtimeChannel = null; }
+  }catch(e){ console.error('Realtime subscribe failed (falling back to polling only):', e); realtimeChannel = null; realtimeConnected = false; }
 }
 function stopRealtime(){
   if(realtimeChannel){
     try{ if(sbClient && sbClient.removeChannel) sbClient.removeChannel(realtimeChannel); else realtimeChannel.unsubscribe(); }catch(e){}
   }
   realtimeChannel = null;
+  realtimeConnected = false;
 }
 function pingRealtimeChanged(){
   if(!realtimeChannel) return;
