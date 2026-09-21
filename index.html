@@ -3051,19 +3051,29 @@ function buildEditableTable(opts){
       });
       return el('td',{},[sel]);
     }
-    if(type==='text'){
-      const inp = el('input',{class:'cellinput', type:'text'});
+    if(type==='text' || type==='textarea'){
+      const inp = type==='textarea' ? el('textarea',{class:'cellinput', rows: col.rows||'2'}) : el('input',{class:'cellinput', type:'text'});
       inp.value = col.get(row) ?? '';
       const commit = async ()=>{
-        const v = inp.value.trim();
+        const v = type==='textarea' ? inp.value : inp.value.trim();
         const prev = String(col.get(row) ?? '');
         if(v===prev) return;
         const ok = await col.set(row, v);
         if(ok===false) inp.value = prev;
       };
       inp.addEventListener('blur', commit);
-      inp.addEventListener('keydown', e=>{ if(e.key==='Enter') inp.blur(); });
+      if(type==='text') inp.addEventListener('keydown', e=>{ if(e.key==='Enter') inp.blur(); });
       return el('td',{},[inp]);
+    }
+    if(type==='checkbox'){
+      const cb = el('input',{type:'checkbox'});
+      cb.checked = !!col.get(row);
+      cb.addEventListener('change', async ()=>{
+        const prev = !!col.get(row);
+        const ok = await col.set(row, cb.checked);
+        if(ok===false) cb.checked = prev;
+      });
+      return el('td',{style:'text-align:center;'},[cb]);
     }
     const content = col.render ? col.render(row) : String(col.get ? (col.get(row) ?? '—') : '—');
     return el('td',{},[content]);
@@ -3081,10 +3091,13 @@ function buildEditableTable(opts){
           const sel = el('select',{class:'cellinput'});
           (col.options||[]).forEach(o=>sel.appendChild(el('option',{value:o.value},[o.label])));
           inputs[col.key]=sel; td.appendChild(sel);
-        } else if(type==='text'){
-          const inp = el('input',{class:'cellinput', type:'text', placeholder: col.addPlaceholder||''});
-          inp.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); });
+        } else if(type==='text' || type==='textarea'){
+          const inp = type==='textarea' ? el('textarea',{class:'cellinput', rows: col.rows||'2', placeholder: col.addPlaceholder||''}) : el('input',{class:'cellinput', type:'text', placeholder: col.addPlaceholder||''});
+          if(type==='text') inp.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); });
           inputs[col.key]=inp; td.appendChild(inp);
+        } else if(type==='checkbox'){
+          const cb = el('input',{type:'checkbox'});
+          inputs[col.key]=cb; td.appendChild(cb);
         }
         addTr.appendChild(td);
       });
@@ -3094,7 +3107,7 @@ function buildEditableTable(opts){
       addTr.appendChild(actTd);
       async function submit(){
         const values = {};
-        Object.keys(inputs).forEach(k=>{ values[k]=inputs[k].value; });
+        Object.keys(inputs).forEach(k=>{ values[k]= (inputs[k].type==='checkbox') ? inputs[k].checked : inputs[k].value; });
         await onAdd(values);
       }
       addBtn.addEventListener('click', submit);
@@ -4619,6 +4632,61 @@ function drawSPC(container, field){
 }
 
 /* ===================== SPECS TAB (parameters CRUD) ===================== */
+// Ghi đè LSL/LCL/UCL/USL theo Recipe cho 1 chỉ tiêu kiểu Số — tách riêng
+// khỏi bảng chính (renderSpecs) vì đây là 1 bảng con lồng bên trong, mở ra
+// khi bấm nút "🧬 Ghi đè" ở dòng tương ứng. Tự lưu ngay khi đổi (không có
+// nút "Lưu" riêng), khớp triết lý sửa-tới-đâu-lưu-tới-đó của bảng chính.
+function buildRecipeOverrideEditor(f){
+  const wrap = el('div',{class:'card', style:'padding:12px 14px;background:#F8FAFC;'},[
+    el('div',{class:'card-h'},[`Ghi đè theo Recipe — ${f.label.split('\n')[0]}`, el('div',{class:'rule'})]),
+  ]);
+  if(f.type!=='number'){
+    wrap.appendChild(el('div',{class:'sub', style:'margin:0;'},['Chỉ áp dụng cho chỉ tiêu kiểu Số.']));
+    return wrap;
+  }
+  let overrideRows = f.recipeOverrides ? Object.keys(f.recipeOverrides).map(r=>({recipe:r, ...f.recipeOverrides[r]})) : [];
+  async function persist(){
+    if(overrideRows.length){
+      f.recipeOverrides = {};
+      overrideRows.forEach(r=>{
+        if(!r.recipe) return;
+        const o = {};
+        if(r.hardMin!=null) o.hardMin=r.hardMin; if(r.tMin!=null) o.tMin=r.tMin; if(r.tMax!=null) o.tMax=r.tMax; if(r.hardMax!=null) o.hardMax=r.hardMax;
+        f.recipeOverrides[r.recipe] = o;
+      });
+    } else {
+      delete f.recipeOverrides;
+    }
+    await saveSchema();
+  }
+  const overrideList = el('div',{},[]);
+  function renderOverrides(){
+    overrideList.innerHTML = '';
+    if(overrideRows.length===0){
+      overrideList.appendChild(el('div',{class:'sub', style:'margin:0 0 6px;'},['Chưa có ghi đè nào.']));
+    }
+    overrideRows.forEach((row,idx)=>{
+      const rSel = el('select',{class:'inp'},[]);
+      RECIPES.forEach(rc=>{ const o=el('option',{value:rc},[rc]); if(row.recipe===rc) o.setAttribute('selected','selected'); rSel.appendChild(o); });
+      rSel.addEventListener('change', async ()=>{ row.recipe = rSel.value; await persist(); });
+      const mkNum = (key)=>{ const inp = el('input',{class:'inp num', type:'text', inputmode:'decimal', placeholder:'—'},[]); if(row[key]!=null) inp.value=row[key]; inp.addEventListener('change', async ()=>{ row[key]=toNum(inp.value); await persist(); }); return inp; };
+      const rmBtn = el('button',{class:'btn danger sm', type:'button'},['🗑']);
+      rmBtn.addEventListener('click', async ()=>{ overrideRows.splice(idx,1); renderOverrides(); await persist(); });
+      overrideList.appendChild(el('div',{class:'overriderow'},[
+        rSel, mkNum('hardMin'), mkNum('tMin'), mkNum('tMax'), mkNum('hardMax'), rmBtn,
+      ]));
+    });
+  }
+  renderOverrides();
+  const addOverrideBtn = el('button',{class:'btn ghost sm', type:'button', style:'margin-top:6px;'},['➕ Thêm ghi đè theo Recipe']);
+  addOverrideBtn.addEventListener('click', async ()=>{ overrideRows.push({recipe:RECIPES[0]||'', hardMin:null,tMin:null,tMax:null,hardMax:null}); renderOverrides(); await persist(); });
+  wrap.appendChild(el('div',{class:'overriderow overriderow-hdr'},[
+    el('span',{},['Recipe']), el('span',{},['LSL']), el('span',{},['LCL']), el('span',{},['UCL']), el('span',{},['USL']), el('span',{},['']),
+  ]));
+  wrap.appendChild(overrideList);
+  wrap.appendChild(addOverrideBtn);
+  return wrap;
+}
 function renderSpecs(){
   const root = qs('#view-specs');
   root.innerHTML = '';
@@ -4667,237 +4735,193 @@ function renderSpecs(){
     }catch(err){ console.error(err); toast('File JSON không hợp lệ'); }
   });
 
+  const SPEC_TYPE_TAGS = {number:'Số',boolean:'Đạt/Lỗi',text:'Chữ',select:'Danh sách',textarea:'Ghi chú'};
+  const SPEC_TYPE_OPTIONS = Object.keys(SPEC_TYPE_TAGS).map(t=>({value:t, label:SPEC_TYPE_TAGS[t]}));
+  function clearSpecTypeSpecificProps(f){
+    delete f.hardMin; delete f.tMin; delete f.tMax; delete f.hardMax;
+    delete f.options; delete f.recipeOverrides; delete f.trueLabel; delete f.falseLabel;
+  }
+  function specMiniNumInput(value, onCommit){
+    const inp = el('input',{class:'inp num', type:'text', inputmode:'decimal', placeholder:'—', style:'min-width:0;padding:5px 6px;font-size:11.5px;min-height:30px;'});
+    if(value!=null) inp.value = value;
+    inp.addEventListener('blur', async ()=>{ await onCommit(toNum(inp.value)); });
+    return inp;
+  }
+  function specMiniTextInput(value, placeholder, onCommit){
+    const inp = el('input',{class:'inp', type:'text', placeholder: placeholder||'', style:'min-width:0;padding:5px 6px;font-size:11.5px;min-height:30px;'});
+    inp.value = value||'';
+    inp.addEventListener('blur', async ()=>{ await onCommit(inp.value.trim()); });
+    return inp;
+  }
+
+  renderSpecs._tableState = renderSpecs._tableState || {};
+  renderSpecs._overrideOpen = renderSpecs._overrideOpen || {};
+
   SCHEMA.forEach(sec=>{
     const card = el('div',{class:'card'},[
       el('div',{class:'card-h'},[sec.name+` (${sec.fields.length})`, el('div',{class:'rule'})]),
     ]);
-    const listBox = el('div',{},[]);
-    card.appendChild(listBox);
-    const addBtn = el('button',{class:'btn ghost sm', style:'margin-top:10px;'},['➕ Thêm chỉ tiêu']);
-    card.appendChild(addBtn);
-    const formSlot = el('div',{},[]);
-    card.appendChild(formSlot);
-    let editingFieldId = null;
+    root.appendChild(card);
 
-    function renderList(){
-      listBox.innerHTML='';
-      sec.fields.forEach((f,idx)=>{
-        const specDesc = f.type==='number' ? specText(f) : (f.type==='select' ? `Lựa chọn: ${(f.options||[]).join(', ')}` : (f.type==='boolean' ? `${boolLabels(f).t} / ${boolLabels(f).f}` : ''));
-        const upAttrs = {class:'btn ghost sm', title:'Lên trên'}; if(idx===0) upAttrs.disabled='disabled';
-        const downAttrs = {class:'btn ghost sm', title:'Xuống dưới'}; if(idx===sec.fields.length-1) downAttrs.disabled='disabled';
-        const row = el('div',{class:'specfield'},[
-          el('div',{class:'reorder'},[
-            el('button',upAttrs,['▲']),
-            el('button',downAttrs,['▼']),
-          ]),
-          el('span',{class:'typetag'},[{number:'Số',boolean:'Đạt/Lỗi',text:'Chữ',select:'Danh sách',textarea:'Ghi chú'}[f.type] || f.type]),
-          el('div',{class:'fi'},[
-            el('b',{},[f.label.split('\n')[0], f.required?el('span',{class:'reqbadge'},['BẮT BUỘC']):null, f.allowNote?el('span',{class:'reqbadge', style:'background:var(--teal-l);color:var(--teal-d);'},['CÓ GHI CHÚ']):null, f.allowNegative?el('span',{class:'reqbadge', style:'background:#F1F5F9;color:#334155;'},['± SỐ ÂM']):null, f.isQMS?el('span',{class:'reqbadge', style:'background:#EDE9FE;color:#6D28D9;'},['QMS']):null]),
-            specDesc?el('span',{},[specDesc + (f.recipeOverrides && Object.keys(f.recipeOverrides).length ? ` · ${Object.keys(f.recipeOverrides).length} ghi đè theo Recipe` : '')]):null,
-          ]),
-          el('button',{class:'btn ghost sm'},[editingFieldId===f.id?'✕':'✏️']),
-          el('button',{class:'btn danger sm'},['🗑️']),
-        ]);
-        const [upBtn, downBtn, editBtn, delBtn] = qsa('button', row);
+    renderSpecs._tableState[sec.id] = renderSpecs._tableState[sec.id] || {filters:{}, sort:{key:null,dir:null}};
+    const overridePanelSlot = el('div',{style:'margin-top:12px;'},[]);
+    function refreshOverridePanel(){
+      overridePanelSlot.innerHTML = '';
+      const openId = renderSpecs._overrideOpen[sec.id];
+      if(!openId) return;
+      const f = sec.fields.find(x=>x.id===openId);
+      if(!f) return;
+      overridePanelSlot.appendChild(buildRecipeOverrideEditor(f));
+    }
+
+    function rebuildSection(){ renderSpecs(); }
+
+    const table = buildEditableTable({
+      state: renderSpecs._tableState[sec.id],
+      rows: sec.fields.map((f,idx)=>({f, idx})),
+      emptyText: 'Chưa có chỉ tiêu nào trong công đoạn này — thêm ở dòng trên cùng.',
+      columns: [
+        {
+          key:'label', label:'Tên chỉ tiêu', sortable:true, filter:'text', type:'textarea', rows:'2',
+          get: row=>row.f.label, addPlaceholder:'Tên chỉ tiêu (dòng 1) — có thể thêm dòng mô tả bên dưới',
+          sortVal: row=>row.f.label.split('\n')[0],
+          filterVal: row=>row.f.label,
+          set: async (row, val) => {
+            if(!val.trim()){ toast('Cần nhập tên chỉ tiêu'); return false; }
+            row.f.label = val;
+            await saveSchema();
+          },
+        },
+        {
+          key:'type', label:'Loại', sortable:true,
+          filter:{type:'multi', options:SPEC_TYPE_OPTIONS},
+          filterVal: row=>row.f.type, sortVal: row=>row.f.type,
+          type:'select', options:SPEC_TYPE_OPTIONS,
+          get: row=>row.f.type,
+          set: async (row, val) => {
+            if(val===row.f.type) return;
+            clearSpecTypeSpecificProps(row.f);
+            row.f.type = val;
+            await saveSchema();
+            rebuildSection();
+          },
+        },
+        {
+          key:'limits', label:'Giới hạn (Số): LSL / LCL / UCL / USL',
+          render: row => {
+            const f = row.f;
+            if(f.type!=='number') return el('span',{class:'sub', style:'margin:0;'},['— (chỉ áp dụng cho Loại Số)']);
+            const wrap = el('div',{style:'display:grid;grid-template-columns:repeat(4,1fr);gap:4px;min-width:200px;'});
+            wrap.appendChild(specMiniNumInput(f.hardMin, async v=>{ if(v==null) delete f.hardMin; else f.hardMin=v; await saveSchema(); }));
+            wrap.appendChild(specMiniNumInput(f.tMin, async v=>{ if(v==null) delete f.tMin; else f.tMin=v; await saveSchema(); }));
+            wrap.appendChild(specMiniNumInput(f.tMax, async v=>{ if(v==null) delete f.tMax; else f.tMax=v; await saveSchema(); }));
+            wrap.appendChild(specMiniNumInput(f.hardMax, async v=>{ if(v==null) delete f.hardMax; else f.hardMax=v; await saveSchema(); }));
+            return wrap;
+          },
+        },
+        {
+          key:'boolLabels', label:'Nhãn Đạt / Lỗi',
+          render: row => {
+            const f = row.f;
+            if(f.type!=='boolean') return el('span',{class:'sub', style:'margin:0;'},['—']);
+            const wrap = el('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:4px;min-width:140px;'});
+            wrap.appendChild(specMiniTextInput(f.trueLabel, 'Đạt', async v=>{ if(v) f.trueLabel=v; else delete f.trueLabel; await saveSchema(); }));
+            wrap.appendChild(specMiniTextInput(f.falseLabel, 'Lỗi', async v=>{ if(v) f.falseLabel=v; else delete f.falseLabel; await saveSchema(); }));
+            return wrap;
+          },
+        },
+        {
+          key:'options', label:'Lựa chọn (Danh sách) — mỗi dòng 1 lựa chọn', type:'textarea', rows:'2',
+          get: row=> row.f.type==='select' ? (row.f.options||[]).join('\n') : '',
+          set: async (row, val) => {
+            if(row.f.type!=='select') return false;
+            row.f.options = val.split('\n').map(s=>s.trim()).filter(Boolean);
+            await saveSchema();
+          },
+        },
+        {
+          key:'flags', label:'Bắt buộc / Ghi chú / ±Âm',
+          render: row => {
+            const f = row.f;
+            const wrap = el('div',{style:'display:flex;flex-direction:column;gap:4px;font-size:11.5px;min-width:120px;'});
+            const mk = (checked, labelTxt, onCommit) => {
+              const cb = el('input',{type:'checkbox'}); cb.checked = !!checked;
+              cb.addEventListener('change', async ()=>{ onCommit(cb.checked); await saveSchema(); });
+              return el('label',{style:'display:flex;align-items:center;gap:6px;'},[cb, labelTxt]);
+            };
+            wrap.appendChild(mk(f.required, 'Bắt buộc', v=>{ f.required=v; }));
+            wrap.appendChild(mk(f.allowNote, 'Ghi chú', v=>{ f.allowNote=v; }));
+            if(f.type==='number') wrap.appendChild(mk(f.allowNegative, '± Số âm', v=>{ f.allowNegative=v; }));
+            return wrap;
+          },
+        },
+        {
+          key:'qms', label:'QMS (báo cáo QMS ở tab Báo cáo)',
+          sortable:true, sortVal: row=> row.f.isQMS?1:0,
+          filter:{type:'multi', options:[{value:'yes',label:'Có QMS'},{value:'no',label:'Không QMS'}]},
+          filterVal: row=> row.f.isQMS ? 'yes' : 'no',
+          render: row => {
+            const f = row.f;
+            const wrap = el('div',{style:'display:flex;flex-direction:column;gap:4px;min-width:150px;'});
+            const cb = el('input',{type:'checkbox'}); cb.checked = !!f.isQMS;
+            const nameInp = specMiniTextInput(f.qmsLabel, 'Tên cột khi xuất', async v=>{ if(v) f.qmsLabel=v; else delete f.qmsLabel; await saveSchema(); });
+            nameInp.style.display = f.isQMS ? '' : 'none';
+            cb.addEventListener('change', async ()=>{ f.isQMS = cb.checked; nameInp.style.display = cb.checked?'':'none'; await saveSchema(); });
+            wrap.appendChild(el('label',{style:'display:flex;align-items:center;gap:6px;font-size:11.5px;'},[cb, 'Xuất QMS']));
+            wrap.appendChild(nameInp);
+            return wrap;
+          },
+        },
+      ],
+      onAdd: async (values) => {
+        const label = String(values.label||'').trim();
+        if(!label){ toast('Cần nhập tên chỉ tiêu'); return false; }
+        const type = values.type || 'number';
+        sec.fields.push({id: newFieldId(sec.id), label, type, required:false, allowNote:false, isQMS:false});
+        await saveSchema();
+        toast('Đã thêm chỉ tiêu');
+        rebuildSection();
+      },
+      renderActions: row => {
+        const f = row.f, idx = row.idx;
+        const upBtn = el('button',{class:'rowbtn'},['▲']);
+        if(idx===0) upBtn.disabled = true;
         upBtn.addEventListener('click', async ()=>{
           if(idx===0) return;
           [sec.fields[idx-1], sec.fields[idx]] = [sec.fields[idx], sec.fields[idx-1]];
           await saveSchema();
-          renderList();
+          rebuildSection();
         });
+        const downBtn = el('button',{class:'rowbtn'},['▼']);
+        if(idx===sec.fields.length-1) downBtn.disabled = true;
         downBtn.addEventListener('click', async ()=>{
           if(idx===sec.fields.length-1) return;
           [sec.fields[idx+1], sec.fields[idx]] = [sec.fields[idx], sec.fields[idx+1]];
           await saveSchema();
-          renderList();
+          rebuildSection();
         });
-        editBtn.addEventListener('click', ()=>{
-          editingFieldId = (editingFieldId===f.id) ? null : f.id;
-          renderList();
+        const ovLabel = `🧬 Ghi đè${f.recipeOverrides && Object.keys(f.recipeOverrides).length ? ` (${Object.keys(f.recipeOverrides).length})` : ''}`;
+        const ovBtn = el('button',{class:'rowbtn', style: f.type!=='number' ? 'opacity:.4;' : ''},[ovLabel]);
+        ovBtn.addEventListener('click', ()=>{
+          if(f.type!=='number'){ toast('Ghi đè theo Recipe chỉ áp dụng cho chỉ tiêu kiểu Số.'); return; }
+          renderSpecs._overrideOpen[sec.id] = (renderSpecs._overrideOpen[sec.id]===f.id) ? null : f.id;
+          refreshOverridePanel();
         });
+        const delBtn = el('button',{class:'rowbtn del'},['🗑️']);
         delBtn.addEventListener('click', async ()=>{
           if(confirm(`Xoá chỉ tiêu "${f.label.split('\n')[0]}"? Dữ liệu đã lưu trước đó của chỉ tiêu này sẽ không còn hiện trong form (vẫn còn trong CSV cũ).`)){
             sec.fields = sec.fields.filter(x=>x.id!==f.id);
+            if(renderSpecs._overrideOpen[sec.id]===f.id) renderSpecs._overrideOpen[sec.id] = null;
             await saveSchema();
-            renderSpecs();
+            rebuildSection();
           }
         });
-        listBox.appendChild(row);
-        if(editingFieldId===f.id){
-          const inlineSlot = el('div',{},[]);
-          listBox.appendChild(inlineSlot);
-          openForm(f, inlineSlot, ()=>{ editingFieldId=null; renderList(); });
-        }
-      });
-    }
-    function openForm(existing, targetContainer, onClose){
-      targetContainer = targetContainer || formSlot;
-      onClose = onClose || (()=>{ formSlot.innerHTML=''; });
-      targetContainer.innerHTML='';
-      const isEdit = !!existing;
-      const labelInp = el('input',{class:'inp', type:'text', placeholder:'Tên chỉ tiêu'},[]);
-      labelInp.value = existing ? existing.label : '';
-      const typeSel = el('select',{class:'inp'},[]);
-      const TYPE_LABELS = {
-        number:   '🔢 Số — có giới hạn (VD: nhiệt độ 45.2°C, độ ẩm 4.5%)',
-        boolean:  '✅ Đạt / Không đạt — kiểm tra ngoại quan (VD: không phát hiện dị vật)',
-        text:     '🔤 Chữ / Mã số — nhập tự do (VD: mã lô, số PO)',
-        select:   '📋 Danh sách chọn sẵn — dropdown (VD: loại lỗi, phân loại)',
-        textarea: '📝 Ghi chú dài — nhiều dòng (VD: mô tả bất thường, ý kiến)',
-      };
-      ['number','boolean','text','select','textarea'].forEach(t=>{
-        const o = el('option',{value:t},[TYPE_LABELS[t]]); if(existing && existing.type===t) o.setAttribute('selected','selected'); typeSel.appendChild(o);
-      });
-      const trueLabelInp = el('input',{class:'inp', type:'text', placeholder:'Đạt'},[]);
-      trueLabelInp.value = (existing && existing.trueLabel) || '';
-      const falseLabelInp = el('input',{class:'inp', type:'text', placeholder:'Lỗi'},[]);
-      falseLabelInp.value = (existing && existing.falseLabel) || '';
-      const boolBox = el('div',{class:'grid g2', style:'margin-bottom:8px;'},[
-        el('label',{class:'fld'},[el('span',{class:'lab'},['Nhãn khi Đạt (True)']), trueLabelInp]),
-        el('label',{class:'fld'},[el('span',{class:'lab'},['Nhãn khi Lỗi (False)']), falseLabelInp]),
-      ]);
-      const lslInp = el('input',{class:'inp num', type:'text', inputmode:'decimal', placeholder:'—'},[]);
-      const lclInp = el('input',{class:'inp num', type:'text', inputmode:'decimal', placeholder:'—'},[]);
-      const uclInp = el('input',{class:'inp num', type:'text', inputmode:'decimal', placeholder:'—'},[]);
-      const uslInp = el('input',{class:'inp num', type:'text', inputmode:'decimal', placeholder:'—'},[]);
-      if(existing){
-        if(existing.hardMin!=null) lslInp.value=existing.hardMin;
-        if(existing.tMin!=null) lclInp.value=existing.tMin;
-        if(existing.tMax!=null) uclInp.value=existing.tMax;
-        if(existing.hardMax!=null) uslInp.value=existing.hardMax;
-      }
-      const optsInp = el('textarea',{class:'inp', rows:'3', placeholder:'Mỗi lựa chọn 1 dòng'},[]);
-      optsInp.value = existing && existing.options ? existing.options.join('\n') : '';
-      const reqChk = el('input',{type:'checkbox'},[]);
-      reqChk.checked = !!(existing && existing.required);
-      const reqRow = el('label',{class:'fld', style:'display:flex;align-items:center;gap:8px;margin-bottom:8px;'},[
-        reqChk, el('span',{class:'lab', style:'margin:0;'},['Bắt buộc nhập (Mandatory)']),
-      ]);
-      const noteChk = el('input',{type:'checkbox'},[]);
-      noteChk.checked = !!(existing && existing.allowNote);
-      const noteRow = el('label',{class:'fld', style:'display:flex;align-items:center;gap:8px;margin-bottom:8px;'},[
-        noteChk, el('span',{class:'lab', style:'margin:0;'},['Cho phép ghi chú bất thường (thêm ô ghi chú bên cạnh khi nhập liệu)']),
-      ]);
-      const negChk = el('input',{type:'checkbox'},[]);
-      negChk.checked = !!(existing && existing.allowNegative);
-      const negRow = el('label',{class:'fld', style:'display:flex;align-items:center;gap:8px;margin-bottom:8px;'},[
-        negChk, el('span',{class:'lab', style:'margin:0;'},['Cho phép số âm (thêm nút ± khi nhập liệu — dùng cho chỉ tiêu có thể xuống dưới 0, VD: nhiệt độ buồng sấy)']),
-      ]);
-      const qmsChk = el('input',{type:'checkbox'},[]);
-      qmsChk.checked = !!(existing && existing.isQMS);
-      const qmsLabelInp = el('input',{class:'inp', type:'text', placeholder:'Để trống dùng luôn tên chỉ tiêu ở trên'},[]);
-      qmsLabelInp.value = (existing && existing.qmsLabel) || '';
-      const qmsLabelRow = el('label',{class:'fld', style:'margin:6px 0 8px;'},[el('span',{class:'lab'},['Tên cột khi xuất báo cáo QMS']), qmsLabelInp]);
-      qmsLabelRow.style.display = qmsChk.checked ? '' : 'none';
-      const qmsRow = el('label',{class:'fld', style:'display:flex;align-items:center;gap:8px;margin-bottom:0;'},[
-        qmsChk, el('span',{class:'lab', style:'margin:0;'},['Hiển thị trong báo cáo QMS ở tab Báo cáo']),
-      ]);
-      qmsChk.addEventListener('change', ()=>{ qmsLabelRow.style.display = qmsChk.checked ? '' : 'none'; });
-
-      // Per-Recipe spec overrides (only meaningful for number fields)
-      let overrideRows = existing && existing.recipeOverrides
-        ? Object.keys(existing.recipeOverrides).map(r=>({recipe:r, ...existing.recipeOverrides[r]}))
-        : [];
-      const overrideList = el('div',{},[]);
-      function renderOverrides(){
-        overrideList.innerHTML = '';
-        overrideRows.forEach((row,idx)=>{
-          const rSel = el('select',{class:'inp'},[]);
-          RECIPES.forEach(rc=>{ const o=el('option',{value:rc},[rc]); if(row.recipe===rc) o.setAttribute('selected','selected'); rSel.appendChild(o); });
-          rSel.addEventListener('change', ()=>{ row.recipe = rSel.value; });
-          const mkNum = (key)=>{ const inp = el('input',{class:'inp num', type:'text', inputmode:'decimal', placeholder:'—'},[]); if(row[key]!=null) inp.value=row[key]; inp.addEventListener('change', ()=>{ row[key]=toNum(inp.value); }); return inp; };
-          const rmBtn = el('button',{class:'btn danger sm', type:'button'},['🗑']);
-          rmBtn.addEventListener('click', ()=>{ overrideRows.splice(idx,1); renderOverrides(); });
-          overrideList.appendChild(el('div',{class:'overriderow'},[
-            rSel, mkNum('hardMin'), mkNum('tMin'), mkNum('tMax'), mkNum('hardMax'), rmBtn,
-          ]));
-        });
-      }
-      renderOverrides();
-      const addOverrideBtn = el('button',{class:'btn ghost sm', type:'button', style:'margin-top:6px;'},['➕ Thêm ghi đè theo Recipe']);
-      addOverrideBtn.addEventListener('click', ()=>{ overrideRows.push({recipe:RECIPES[0]||'', hardMin:null,tMin:null,tMax:null,hardMax:null}); renderOverrides(); });
-      const overrideBox = el('div',{style:'margin-top:12px;'},[
-        el('div',{class:'lab', style:'margin-bottom:6px;'},['Ghi đè LSL/LCL/UCL/USL theo Recipe (tuỳ chọn)']),
-        el('div',{class:'overriderow overriderow-hdr'},[
-          el('span',{},['Recipe']), el('span',{},['LSL']), el('span',{},['LCL']), el('span',{},['UCL']), el('span',{},['USL']), el('span',{},['']),
-        ]),
-        overrideList, addOverrideBtn,
-      ]);
-
-      const numBox = el('div',{},[
-        negRow,
-        el('div',{class:'grid g4'},[
-          el('label',{class:'fld'},[el('span',{class:'lab'},['LSL']), lslInp]),
-          el('label',{class:'fld'},[el('span',{class:'lab'},['LCL']), lclInp]),
-          el('label',{class:'fld'},[el('span',{class:'lab'},['UCL']), uclInp]),
-          el('label',{class:'fld'},[el('span',{class:'lab'},['USL']), uslInp]),
-        ]),
-        overrideBox,
-      ]);
-      const optBox = el('div',{},[optsInp]);
-      function syncVisibility(){
-        numBox.style.display = typeSel.value==='number' ? '' : 'none';
-        optBox.style.display = typeSel.value==='select' ? '' : 'none';
-        boolBox.style.display = typeSel.value==='boolean' ? '' : 'none';
-      }
-      typeSel.addEventListener('change', syncVisibility);
-      const form = el('div',{class:'specform'},[
-        el('label',{class:'fld', style:'margin-bottom:8px;'},[el('span',{class:'lab'},['Tên chỉ tiêu']), labelInp]),
-        el('label',{class:'fld', style:'margin-bottom:8px;'},[el('span',{class:'lab'},['Kiểu dữ liệu']), typeSel]),
-        reqRow, noteRow, qmsRow, qmsLabelRow,
-        boolBox, numBox, optBox,
-        el('div',{class:'row', style:'margin-top:10px;'},[
-          el('button',{class:'btn teal sm'},[isEdit?'💾 Lưu thay đổi':'➕ Thêm']),
-          el('button',{class:'btn ghost sm'},['Huỷ']),
-        ])
-      ]);
-      targetContainer.appendChild(form);
-      syncVisibility();
-      const [saveB, cancelB] = qsa('button', form).slice(-2);
-      cancelB.addEventListener('click', onClose);
-      saveB.addEventListener('click', async ()=>{
-        const label = labelInp.value.trim();
-        if(!label){ toast('Cần nhập tên chỉ tiêu'); return; }
-        const type = typeSel.value;
-        const obj = existing || {id: newFieldId(sec.id)};
-        obj.label = label; obj.type = type;
-        obj.required = reqChk.checked;
-        obj.allowNote = noteChk.checked;
-        obj.allowNegative = negChk.checked;
-        obj.isQMS = qmsChk.checked;
-        const qmsLabelVal = qmsLabelInp.value.trim();
-        if(qmsLabelVal) obj.qmsLabel = qmsLabelVal; else delete obj.qmsLabel;
-        delete obj.hardMin; delete obj.tMin; delete obj.tMax; delete obj.hardMax; delete obj.options; delete obj.recipeOverrides; delete obj.trueLabel; delete obj.falseLabel;
-        if(type==='boolean'){
-          const tl = trueLabelInp.value.trim(), fl = falseLabelInp.value.trim();
-          if(tl) obj.trueLabel = tl;
-          if(fl) obj.falseLabel = fl;
-        }
-        if(type==='number'){
-          const lsl=toNum(lslInp.value), lcl=toNum(lclInp.value), ucl=toNum(uclInp.value), usl=toNum(uslInp.value);
-          if(lsl!=null) obj.hardMin=lsl; if(lcl!=null) obj.tMin=lcl; if(ucl!=null) obj.tMax=ucl; if(usl!=null) obj.hardMax=usl;
-          const validOverrides = overrideRows.filter(r=>r.recipe);
-          if(validOverrides.length){
-            obj.recipeOverrides = {};
-            validOverrides.forEach(r=>{
-              const o = {};
-              if(r.hardMin!=null) o.hardMin=r.hardMin; if(r.tMin!=null) o.tMin=r.tMin; if(r.tMax!=null) o.tMax=r.tMax; if(r.hardMax!=null) o.hardMax=r.hardMax;
-              obj.recipeOverrides[r.recipe] = o;
-            });
-          }
-        }
-        if(type==='select'){
-          obj.options = optsInp.value.split('\n').map(s=>s.trim()).filter(Boolean);
-        }
-        if(!existing) sec.fields.push(obj);
-        await saveSchema();
-        onClose();
-        renderSpecs();
-      });
-    }
-    addBtn.addEventListener('click', ()=>openForm(null));
-    renderList();
-    root.appendChild(card);
+        return [upBtn, downBtn, ovBtn, delBtn];
+      },
+    });
+    card.appendChild(table);
+    card.appendChild(overridePanelSlot);
+    refreshOverridePanel();
   });
 }
 
@@ -5537,8 +5561,8 @@ function renderGuide(){
     <p>Tab Xuất nhập dữ liệu có mục "Nhập ảnh đính kèm": chọn đúng Ngày + Ca + Công đoạn + PO của điểm kiểm tra rồi chọn ảnh — dùng khi nhận được ảnh bằng chứng qua Zalo/email từ người khác thay vì tự chụp trực tiếp trong ca.</p>
     <h4>20. Dán ảnh trực tiếp (Copy/Paste)</h4>
     <p>Ô "📋 Dán ảnh vào đây (Ctrl+V)" dưới mỗi Ghi chú bất thường — chạm vào ô rồi dán (paste) ảnh đã copy sẵn, không cần lưu file trước.</p>
-    <h4>21. Chỉ tiêu Bắt buộc & ghi đè theo Recipe (tab Specs)</h4>
-    <p>Khi thêm/sửa chỉ tiêu, tick "Bắt buộc nhập" để đánh dấu Mandatory (hiện dấu * và cảnh báo mạnh hơn khi lưu thiếu). Với chỉ tiêu số, có thể thêm "Ghi đè theo Recipe" — cùng 1 chỉ tiêu nhưng LSL/LCL/UCL/USL khác nhau tuỳ Recipe đang chọn ở công đoạn đó.</p>
+    <h4>21. Tab Specs — bảng chỉnh sửa trực tiếp, Bắt buộc & ghi đè theo Recipe</h4>
+    <p>Mỗi Công đoạn là 1 bảng riêng (giống tab Danh sách Items Code) — bấm tiêu đề cột để sắp xếp, gõ vào ô "Lọc" dưới mỗi cột để tìm nhanh, sửa Tên/Loại/Giới hạn/Lựa chọn/Nhãn/Bắt buộc/QMS ngay trong ô (gõ xong bấm ra ngoài hoặc tick là lưu ngay, không cần nút Lưu riêng). Hàng đầu tiên của bảng dùng để thêm chỉ tiêu mới. Nút ▲▼ ở cột Hành động để sắp xếp thủ công thứ tự hiển thị ở tab Nhập liệu (tắt sắp xếp cột khác trước để thấy rõ khi dùng ▲▼). Tick "Bắt buộc" để đánh dấu Mandatory (hiện dấu * và cảnh báo mạnh hơn khi lưu thiếu ở tab Nhập liệu). Với chỉ tiêu Loại Số, bấm nút "🧬 Ghi đè" ở cuối dòng để mở bảng con "Ghi đè theo Recipe" ngay bên dưới — cùng 1 chỉ tiêu nhưng LSL/LCL/UCL/USL khác nhau tuỳ Recipe đang chọn ở công đoạn đó.</p>
     <h4>22. Mỗi điểm kiểm tra = 1 Công đoạn + 1 PO riêng</h4>
     <p>Khác với trước đây (1 ca chỉ có 1 PO chung), giờ mỗi điểm kiểm tra tự chọn PO riêng của nó. Nhờ vậy 1 ca có thể có nhiều PO chạy song song ở các công đoạn khác nhau, hoặc thậm chí nhiều PO khác nhau cùng 1 công đoạn (VD: 2 mẻ Trích ly liên tiếp) — mỗi cái là 1 điểm kiểm tra riêng biệt, không đè lên nhau. Khi bắt đầu nhập, app tự gợi ý copy số liệu từ <b>lần kiểm tra gần nhất của đúng PO + Công đoạn đó</b> (không phải "ca trước" nói chung).</p>
     <h4>23. Tab Danh sách PO</h4>
