@@ -94,7 +94,7 @@ test('normalizeTabConfig: "settings" can never be hidden, and reordering is resp
   const {dom, w, errors} = await boot();
   try {
     w.eval(`window._testCfg = normalizeTabConfig({
-      order: ['guide','settings','input','table','trace','polist','recipelist','clientlist','datalog','report','stats','specs','share'],
+      order: ['guide','settings','input','table','polist','recipelist','clientlist','datalog','report','stats','specs','share'],
       hidden: {user: ['settings'], supervisor: ['settings','input']},
     })`);
     const cfg = evalJson(w, 'window._testCfg');

@@ -68,9 +68,9 @@ async function rpc(db, fn, params) {
   return res.rows[0].result;
 }
 
-test('HTML script compiles and 14 tabs remain', () => {
+test('HTML script compiles and 13 tabs remain', () => {
   new vm.Script(source);
-  assert.equal((html.match(/data-tab="/g) || []).length, 14);
+  assert.equal((html.match(/data-tab="/g) || []).length, 13);
 });
 
 test('every sync_* function rejects an unauthenticated caller with {error:"unauthorized"}, not an exception', async () => {
@@ -413,7 +413,7 @@ test('full app boots, requires login once cloud sync is configured, then syncs a
     const w = dom.window;
     for (let i = 0; i < 100 && !w.eval('typeof DB !== "undefined" && DB !== null'); i++) await new Promise(r => setTimeout(r, 10));
     await new Promise(r => setTimeout(r, 50));
-    assert.equal(w.document.querySelectorAll('.tab').length, 14);
+    assert.equal(w.document.querySelectorAll('.tab').length, 13);
 
     // https://<project-ref>.supabase.co — shadowAuthDomain() derives
     // "x.users.internal" from the hostname's first label, matching the

@@ -4,10 +4,10 @@ import {readFileSync} from 'node:fs';
 import {JSDOM, VirtualConsole} from 'jsdom';
 import {IDBFactory} from 'fake-indexeddb';
 
-// Covers the new "Danh sách Items Code" tab: a flat FGs/RW item-code <->
-// product-name <-> Recipe reference table, pre-seeded from the user's real
-// data (DEFAULT_ITEM_CODE_LIST), with the same add/edit/delete + Excel
-// template/export/import UX as the existing Danh sách Client tab.
+// Covers the new "Danh sách Items Code" tab, rendered as a spreadsheet-style
+// editable table (sortable columns, a filter row, a pinned add-row, cells
+// editable in place) shared with the PO/Recipe/Client list tabs. Pre-seeded
+// from the user's real data (DEFAULT_ITEM_CODE_LIST).
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 
 async function boot() {
@@ -30,7 +30,11 @@ async function boot() {
   return {dom, w, errors};
 }
 
-test('ITEM_CODE_LIST is pre-seeded from the real data on a fresh device, and the tab exists', async () => {
+function tableRoot(w){ return w.document.querySelector('#view-itemcodelist table.edittable'); }
+function dataRows(w){ return [...tableRoot(w).querySelectorAll('tbody tr')].filter(tr => !tr.classList.contains('addrow')); }
+function cellInput(tr, colIndex){ return tr.children[colIndex].querySelector('input,select'); }
+
+test('ITEM_CODE_LIST is pre-seeded from the real data on a fresh device, and the tab renders as a table', async () => {
   const {dom, w, errors} = await boot();
   try {
     const count = w.eval('ITEM_CODE_LIST.length');
@@ -39,12 +43,13 @@ test('ITEM_CODE_LIST is pre-seeded from the real data on a fresh device, and the
     assert.ok(w.eval('ITEM_CODE_LIST.some(i=>i.type==="RW")'));
     w.showTab('itemcodelist');
     await new Promise(r => setTimeout(r, 50));
-    assert.ok(w.document.querySelector('#view-itemcodelist .section-title'));
+    assert.ok(tableRoot(w), 'expected an .edittable table in the Items Code tab');
+    assert.equal(dataRows(w).length, count);
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
 
-test('adding an item via the form persists to IndexedDB and shows up in the list', async () => {
+test('adding an item via the add-row persists to IndexedDB and shows up in the table', async () => {
   const {dom, w, errors} = await boot();
   try {
     // Start from a small, known dataset so this test isn't at the mercy of
@@ -53,13 +58,11 @@ test('adding an item via the form persists to IndexedDB and shows up in the list
     w.showTab('itemcodelist');
     await new Promise(r => setTimeout(r, 50));
 
-    const doc = w.document;
-    const root = doc.querySelector('#view-itemcodelist');
-    const codeInp = [...root.querySelectorAll('input[placeholder="VD: 10100001"]')][0];
-    const nameInp = [...root.querySelectorAll('input')].find(i => i.placeholder === 'Tên sản phẩm');
-    codeInp.value = 'X2';
-    nameInp.value = 'New Product';
-    const addBtn = [...root.querySelectorAll('button')].find(b => b.textContent.includes('Thêm'));
+    const addRow = tableRoot(w).querySelector('tbody tr.addrow');
+    // Columns: Loại(select), Item Code(text), Tên sản phẩm(text), Recipe(text), actions
+    cellInput(addRow, 1).value = 'X2';
+    cellInput(addRow, 2).value = 'New Product';
+    const addBtn = addRow.querySelector('.rowbtn.add');
     addBtn.click();
     await new Promise(r => setTimeout(r, 50));
 
@@ -71,28 +74,24 @@ test('adding an item via the form persists to IndexedDB and shows up in the list
   } finally { dom.window.close(); }
 });
 
-test('editing an existing row updates it in place (by index, not by code — real data has repeated RW codes)', async () => {
+test('editing a cell in place updates the row by index (no separate edit form, no duplication)', async () => {
   const {dom, w, errors} = await boot();
   try {
     w.eval("ITEM_CODE_LIST = [{type:'RW', itemCode:'R1', name:'Old Name', recipe:'352'}];");
     w.showTab('itemcodelist');
     await new Promise(r => setTimeout(r, 50));
 
-    const doc = w.document;
-    const editBtn = [...doc.querySelectorAll('#view-itemcodelist button')].find(b => b.textContent.includes('✏️'));
-    editBtn.click();
-    await new Promise(r => setTimeout(r, 50));
-
-    const root = doc.querySelector('#view-itemcodelist');
-    const nameInp = [...root.querySelectorAll('input')].find(i => i.placeholder === 'Tên sản phẩm');
-    assert.equal(nameInp.value, 'Old Name', 'the edit form must be pre-filled');
+    const tr = dataRows(w)[0];
+    const nameInp = cellInput(tr, 2);
+    assert.equal(nameInp.value, 'Old Name', 'the cell must be pre-filled with the current value');
     nameInp.value = 'Renamed';
-    const saveBtn = [...root.querySelectorAll('button')].find(b => b.textContent.includes('Lưu thay đổi'));
-    saveBtn.click();
+    nameInp.dispatchEvent(new w.Event('blur'));
     await new Promise(r => setTimeout(r, 50));
 
     assert.equal(w.eval('ITEM_CODE_LIST.length'), 1, 'editing must not create a duplicate row');
     assert.equal(w.eval('ITEM_CODE_LIST[0].name'), 'Renamed');
+    const stored = await w.idbGet('meta', 'itemCodeList');
+    assert.equal(stored.value[0].name, 'Renamed', 'edit must persist to IndexedDB');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
@@ -105,7 +104,7 @@ test('deleting a row removes only that row', async () => {
     await new Promise(r => setTimeout(r, 50));
     w.confirm = () => true;
 
-    const delBtn = [...w.document.querySelectorAll('#view-itemcodelist button')].find(b => b.textContent.includes('🗑️'));
+    const delBtn = dataRows(w)[0].querySelector('.rowbtn.del');
     delBtn.click();
     await new Promise(r => setTimeout(r, 50));
 
@@ -115,7 +114,7 @@ test('deleting a row removes only that row', async () => {
   } finally { dom.window.close(); }
 });
 
-test('search box filters by Item Code / Name / Recipe; type filter narrows by FGs vs RW', async () => {
+test('column filter row narrows by Item Code / Name / Recipe text and by Loại (multi-select)', async () => {
   const {dom, w, errors} = await boot();
   try {
     w.eval(`ITEM_CODE_LIST = [
@@ -126,23 +125,53 @@ test('search box filters by Item Code / Name / Recipe; type filter narrows by FG
     w.showTab('itemcodelist');
     await new Promise(r => setTimeout(r, 50));
 
-    const doc = w.document;
-    const root = doc.querySelector('#view-itemcodelist');
-    const searchInp = root.querySelector('input[placeholder*="Tìm theo"]');
-    searchInp.value = 'coffee';
-    searchInp.dispatchEvent(new w.Event('input'));
+    const filterRow = tableRoot(w).querySelector('thead tr.filterrow');
+    // Columns order: Loại, Item Code, Tên sản phẩm, Recipe — editable cells
+    // store their value as an input/select .value, not as textContent.
+    const names = () => dataRows(w).map(tr => cellInput(tr, 2).value);
+    const nameFilterInp = filterRow.children[2].querySelector('input');
+    nameFilterInp.value = 'coffee';
+    nameFilterInp.dispatchEvent(new w.Event('input'));
     await new Promise(r => setTimeout(r, 50));
-    let text = root.textContent;
-    assert.ok(text.includes('Coffee Freeze Dried') && text.includes('Rework Coffee'), 'search must match both rows containing "coffee"');
-    assert.ok(!text.includes('Something Else'), 'search must exclude the non-matching row');
+    assert.deepEqual(names().sort(), ['Coffee Freeze Dried', 'Rework Coffee'], 'text filter must match both rows containing "coffee" and exclude the non-matching row');
 
-    const typeSel = [...root.querySelectorAll('select')].find(s => [...s.options].some(o => o.textContent.includes('Chỉ RW')));
-    typeSel.value = 'RW';
-    typeSel.dispatchEvent(new w.Event('change'));
+    // Multi-select filter on Loại: tick only "RW".
+    const typeMsf = filterRow.children[0].querySelector('details.msf');
+    const rwCheckbox = [...typeMsf.querySelectorAll('.msf-opt')].find(o => o.textContent.includes('RW')).querySelector('input[type=checkbox]');
+    rwCheckbox.checked = true;
+    rwCheckbox.dispatchEvent(new w.Event('change'));
     await new Promise(r => setTimeout(r, 50));
-    text = root.textContent;
-    assert.ok(text.includes('Rework Coffee'), 'RW filter must keep the RW row');
-    assert.ok(!text.includes('Coffee Freeze Dried'), 'RW filter must exclude the FGs row even though it matches the search text');
+    assert.deepEqual(names(), ['Rework Coffee'], 'Loại=RW filter must further narrow to just the RW row, even though the FGs row also matches the text filter');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('clicking a sortable column header sorts the rows, and toggles asc/desc/none', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    w.eval(`ITEM_CODE_LIST = [
+      {type:'FGs', itemCode:'C', name:'Charlie', recipe:''},
+      {type:'FGs', itemCode:'A', name:'Alpha', recipe:''},
+      {type:'FGs', itemCode:'B', name:'Beta', recipe:''},
+    ];`);
+    w.showTab('itemcodelist');
+    await new Promise(r => setTimeout(r, 50));
+
+    const itemCodeHeader = [...tableRoot(w).querySelectorAll('thead tr:first-child th')].find(th => th.textContent.includes('Item Code'));
+    itemCodeHeader.click();
+    await new Promise(r => setTimeout(r, 20));
+    let codes = dataRows(w).map(tr => cellInput(tr, 1).value);
+    assert.deepEqual(codes, ['A', 'B', 'C'], 'first click must sort ascending');
+
+    itemCodeHeader.click();
+    await new Promise(r => setTimeout(r, 20));
+    codes = dataRows(w).map(tr => cellInput(tr, 1).value);
+    assert.deepEqual(codes, ['C', 'B', 'A'], 'second click must sort descending');
+
+    itemCodeHeader.click();
+    await new Promise(r => setTimeout(r, 20));
+    codes = dataRows(w).map(tr => cellInput(tr, 1).value);
+    assert.deepEqual(codes, ['C', 'A', 'B'], 'third click must clear the sort (back to original order)');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });

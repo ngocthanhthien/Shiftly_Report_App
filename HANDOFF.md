@@ -23,7 +23,7 @@ Tài liệu bàn giao để tiếp tục làm việc ở phiên AI/công cụ kh
 
 **Đã ÁP DỤNG (2026-09-18, đảo ngược quyết định trước đó cùng ngày)** mô hình 2 tầng tài khoản thật từ skill `supabase-sync-auth-patterns` (`references/access-management.md`), theo yêu cầu rõ ràng của người dùng để có "ngăn truy cập, quản lý tài khoản, đồng bộ realtime" giống hệt project song song [CloseCAPGMP](https://github.com/ngocthanhthien/CloseCAPGMP) (`C:\Users\BinhDang\Documents\GitHub\CloseCAPGMP`) — xem `HANDOFF_WEB.md`/`README.md` của project đó để đối chiếu chi tiết pattern gốc (bảng `gmp_members`, Edge Function `admin-users`, username→email nội bộ). Đánh đổi được người dùng xác nhận rõ: cần cài Supabase CLI 1 lần để deploy Edge Function (trước đó Shiftly cố tình giữ "không cần CLI, chỉ dán SQL"); đổi lại có tài khoản riêng từng người + Admin tự quản lý được, không còn 1 mật khẩu chung.
 
-**App chính**: [index.html](index.html) (~5300+ dòng, single file, HTML+CSS+JS inline, tiếng Việt). 14 tab: Nhập liệu, Dữ liệu, Truy xuất, Danh sách PO/Recipe/Client, **Danh sách Items Code** (mới 2026-09-21, xem mục 3c), Data Log, Báo cáo, Thống kê, Specs, Xuất nhập dữ liệu, Cài đặt, Hướng dẫn.
+**App chính**: [index.html](index.html) (~5400+ dòng, single file, HTML+CSS+JS inline, tiếng Việt). 13 tab: Nhập liệu, Dữ liệu (đã gộp Truy xuất — xem mục 3d), Danh sách PO/Recipe/Client, **Danh sách Items Code** (mới 2026-09-21, xem mục 3c), Data Log, Báo cáo, Thống kê, Specs, Xuất nhập dữ liệu, Cài đặt, Hướng dẫn.
 
 **Data model cốt lõi:**
 - `SCHEMA` (khai báo `DEFAULT_SCHEMA`/`SCHEMA` gần đầu script) — mảng section: `ROA, EXT, EVA, FOAMING, FD, FP, REWORK, META`. Mỗi section có `fields[]` (type: number/boolean/text/textarea/select; có `hardMin/hardMax`, `recipeOverrides` theo Recipe, `trueLabel/falseLabel` cho boolean).
@@ -32,7 +32,7 @@ Tài liệu bàn giao để tiếp tục làm việc ở phiên AI/công cụ kh
 
 **Các hàm/khu vực quan trọng để sửa** (đúng tại thời điểm 2026-09-18 — chạy lại `grep -n "^function \|^async function "` nếu nghi ngờ đã lệch do sửa code sau này):
 - Nhập liệu: [renderInputForm](index.html:1531), [renderField](index.html:2007), [renderAutocomplete](index.html:1886)
-- Xem/tra cứu: [renderTable](index.html:2081), [renderDetail](index.html:2259), [renderTrace](index.html:2759)
+- Xem/tra cứu (kể cả lọc theo PO/Ca/ngày, đã gộp "Truy xuất" vào — mục 3d): [renderTable](index.html), [renderDetail](index.html)
 - Danh mục: [renderPOList](index.html:2388), [renderRecipeList](index.html:2512), [renderClientList](index.html:2581)
 - Audit: [renderDataLog](index.html:2698), [logChange](index.html:506)
 - Báo cáo (ảnh SVG để share/in): [renderReport](index.html:3415), [buildReportSVG](index.html:3317), [buildImagesLineForCheckpoint](index.html:3303), [renderLinesToSVG](index.html:2899)
@@ -46,7 +46,7 @@ Tài liệu bàn giao để tiếp tục làm việc ở phiên AI/công cụ kh
 
 Ghi chú bảo mật: mật khẩu app hardcode `const APP_PASSWORD = '1234'` ở [index.html:496](index.html:496) — dùng cho `promptPasswordOK()` (gate 1 số thao tác nhạy cảm trong app, VD xoá dữ liệu, sửa PO đã đóng), KHÁC HẲN với đăng nhập Supabase Auth ở trên — 2 lớp độc lập, đừng nhầm lẫn khi sửa 1 trong 2.
 
-**Test**: `npm ci && npm test` — chạy schema.sql THẬT qua Postgres nhúng (`@electric-sql/pglite`, không phải giả lập, có thêm stand-in `auth.users`/`auth.uid()` CHỈ trong test harness để mô phỏng Supabase Auth thật) + boot toàn bộ app qua jsdom rồi đăng nhập + đồng bộ thật qua đúng luồng RPC, kể cả case tài khoản bị vô hiệu hóa giữa phiên bị đá về màn hình đăng nhập, vai trò supervisor bị chặn ghi, và tính năng xuất Process/QMS (Item Code, cờ isQMS, định dạng ngày, không lộ ảnh). 44 test / 5 file, tất cả đang pass: `tests/supabase.test.mjs`, `tests/input-draft.test.mjs`, `tests/tab-config.test.mjs`, `tests/process-qms-export.test.mjs`, `tests/item-code-list.test.mjs` (mới, mục 3c). **Chưa/không thể test được**: Edge Function `admin-users` (chạy trên Deno, không có runtime Deno trong môi trường test này) — chỉ được review code thủ công, chưa chạy tự động; nếu sửa file này, test bằng tay qua Supabase Dashboard → Edge Functions → Invoke, hoặc deploy thật rồi thử qua UI "👥 Quản lý tài khoản".
+**Test**: `npm ci && npm test` — chạy schema.sql THẬT qua Postgres nhúng (`@electric-sql/pglite`, không phải giả lập, có thêm stand-in `auth.users`/`auth.uid()` CHỈ trong test harness để mô phỏng Supabase Auth thật) + boot toàn bộ app qua jsdom rồi đăng nhập + đồng bộ thật qua đúng luồng RPC, kể cả case tài khoản bị vô hiệu hóa giữa phiên bị đá về màn hình đăng nhập, vai trò supervisor bị chặn ghi, và tính năng xuất Process/QMS (Item Code, cờ isQMS, định dạng ngày, không lộ ảnh). 52 test / 7 file, tất cả đang pass: `tests/supabase.test.mjs`, `tests/input-draft.test.mjs`, `tests/tab-config.test.mjs`, `tests/process-qms-export.test.mjs`, `tests/item-code-list.test.mjs`, `tests/list-tables.test.mjs`, `tests/data-tab-search.test.mjs` (3 file cuối mới, mục 3c/3d). **Chưa/không thể test được**: Edge Function `admin-users` (chạy trên Deno, không có runtime Deno trong môi trường test này) — chỉ được review code thủ công, chưa chạy tự động; nếu sửa file này, test bằng tay qua Supabase Dashboard → Edge Functions → Invoke, hoặc deploy thật rồi thử qua UI "👥 Quản lý tài khoản".
 
 ---
 
@@ -131,6 +131,29 @@ Người dùng đính kèm file thật `Items Code.xlsx` (524 dòng, sheet `Code
 - **Test**: `tests/item-code-list.test.mjs` (6 test, mới) — pre-seed ≥500 dòng cả 2 loại; thêm/sửa/xoá qua form; tìm kiếm + lọc theo Loại; round-trip Excel export→import (không tạo trùng khi import lại đúng file).
 - **Guide tab**: đã thêm mục 36 trong `index.html` giải thích tab này + lưu ý định dạng `.xls`.
 
+### 3d. Bảng chỉnh sửa trực tiếp cho 4 tab danh mục + gộp Truy xuất vào Dữ liệu (2026-09-21)
+
+Người dùng yêu cầu 2 việc liên tiếp trong cùng phiên:
+
+**(a) 4 tab Danh sách PO/Recipe/Client/Items Code → dạng bảng (table), có filter (nhiều lựa chọn), sort, điền mới & sửa trực tiếp trong bảng** (theo mẫu 1 bảng issue-tracker người dùng đính kèm ảnh). Thay hoàn toàn UI cũ "form thêm/sửa phía trên + danh sách `.specfield` phía dưới" bằng 1 component dùng chung mới, `buildEditableTable(opts)` (đặt ngay trước `renderPOList()` trong `index.html`):
+- Header có thể bấm để sort (chu kỳ 3 trạng thái: không sort → tăng dần → giảm dần → không sort), mũi tên `⇅/▲/▼` cạnh tên cột.
+- Hàng filter riêng ngay dưới header: cột dạng text có ô lọc gõ-là-lọc-ngay; cột dạng enum (Loại FGs/RW, Trạng thái PO, Highlight Client, Có/Không ghi đè Recipe) dùng multi-select thả xuống kiểu checkbox (`multiSelectFilterEl`, class `.msf`) — đúng yêu cầu "filter nhiều lựa chọn".
+- 1 hàng "Thêm mới" luôn ghim ở đầu `<tbody>` — điền rồi bấm "➕ Thêm" (hoặc Enter) để thêm dòng, không cần form riêng.
+- Mọi ô có thể sửa được (input/select) đều sửa TRỰC TIẾP trong bảng — commit khi `blur`/`change`; `col.set()` trả về `false` sẽ tự revert ô về giá trị cũ (dùng cho validate trùng tên/mã, hoặc huỷ xác thực đóng PO).
+- Thêm/xoá dòng (thay đổi CẤU TRÚC mảng) gọi lại nguyên hàm render của tab (VD `renderPOList()`) để rebuild toàn bảng; sửa 1 ô riêng lẻ (rename/đổi enum) CHỈ mutate trực tiếp object nguồn (cùng reference với mảng `PO_LIST`/`CLIENT_LIST`/`ITEM_CODE_LIST`) và lưu, KHÔNG re-render toàn bảng — tránh mất vị trí cuộn khi sửa 1 dòng giữa danh sách 524 dòng (Items Code).
+- Tab PO: gộp LUÔN 2 phần cũ (textarea khai báo PO + card "Tiến độ & Xác thực đóng PO") thành 1 bảng duy nhất — cột Trạng thái là `<select>` Đang mở/Đã đóng, chọn "Đã đóng" khi điền chưa đủ 100% sẽ `confirm()` giống hệt nút Verify cũ; các PO chỉ xuất hiện từ dữ liệu (chưa khai báo trong `PO_LIST`) hiển thị nhãn "từ dữ liệu", không sửa/xoá được (không có gì để xoá).
+- Excel import/export của Client/Items Code giữ nguyên logic cũ, chỉ đổi phần hiển thị danh sách bên dưới.
+- **Test**: `tests/item-code-list.test.mjs` viết lại hoàn toàn cho DOM bảng mới (7 test); `tests/list-tables.test.mjs` (mới, 3 test) cho PO/Recipe/Client.
+- **Lưu ý jsdom**: `window.scrollTo` không được jsdom implement (log "Not implemented" qua virtualConsole) — ban đầu định thêm tính năng tự khôi phục vị trí cuộn sau mỗi lần render lại, đã BỎ tính năng này (không phải yêu cầu của người dùng) để tránh phức tạp hoá test, thay vì viết code work-around.
+
+**(b) Gộp tab "Truy xuất" vào tab "Dữ liệu"** — theo đúng yêu cầu *"Truy xuất dựa vào bảng thông tin của Tab Dữ Liệu"*: xoá hẳn tab/nút/view `trace` và hàm `renderTrace()`; toàn bộ chức năng tìm theo PO (autocomplete, gồm cả PO đã đóng)/Ca/khoảng ngày chuyển thành 1 thẻ lọc "🔎 Truy xuất — lọc theo PO / Ca / khoảng ngày" nằm ngay trên **chính bảng danh sách ca** đã có sẵn ở tab Dữ liệu (không phải 1 bảng kết quả riêng như trước) — lọc live ngay khi đổi (PO commit lúc blur/chọn gợi ý, Ca/ngày lúc `change`), không cần bấm nút "Tìm kiếm". Khi có lọc: loại bỏ checkpoint `META`, hiện thêm nút "📊 Xuất Excel kết quả" (dùng lại `buildExcelXml`), và nút "✕ Xoá bộ lọc". Trạng thái lọc lưu ở `renderTable._filter` (persist qua các lần render giống `_mode`/`_editIdx` các tab khác).
+- **Sửa 1 gap hành vi khi gộp**: nút "✎ Sửa" ở tab Dữ liệu trước đây KHÔNG hỏi mật khẩu Force khi checkpoint thuộc 1 PO đã đóng (chỉ Truy xuất có guard này) — nay áp dụng guard đó cho MỌI nút Sửa ở Dữ liệu, không chỉ khi tìm qua bộ lọc.
+- Nút "👁 Xem" ở tab Danh sách PO (mở nhanh các điểm kiểm tra của 1 PO) đổi từ `renderTrace._prefillPO` sang set `renderTable._filter = {po, ...}` rồi `showTab('table')`.
+- Số tab giảm từ 14 → **13**; cập nhật `TAB_ORDER_DEFAULT`/`TAB_LABELS`, `README.md`, mục 14 trong Guide tab (`index.html`), và 3 chỗ hardcode số lượng tab trong test (`tests/supabase.test.mjs` ×2, `tests/tab-config.test.mjs` ×1 — chỉ là 1 mảng test input, không ảnh hưởng assertion).
+- **Test mới**: `tests/data-tab-search.test.mjs` (4 test) — xác nhận tab `trace` không còn tồn tại, lọc live thu hẹp đúng bảng + loại bỏ META, nút "Xem" ở PO nhảy đúng sang Dữ liệu kèm bộ lọc, và guard mật khẩu Force áp dụng cho checkpoint thuộc PO đã đóng.
+
+Tổng cộng sau 2 việc trên: 52/52 test pass (`npm test`).
+
 ---
 
 ## 4. (Lịch sử) Câu hỏi từng cần xác nhận — xem mục 3 ở trên để biết câu trả lời đã chốt
@@ -160,6 +183,7 @@ Người dùng đính kèm file thật `Items Code.xlsx` (524 dòng, sheet `Code
   - Test: `tests/supabase.test.mjs` có thêm test cho cursor `sync_get_meta` và batch-delete độc lập last-write-wins theo từng key trong cùng 1 lệnh gọi.
   - **Không đổi** (không phải quick win, cần kiến trúc lớn hơn): pull-side chưa tối ưu ảnh trùng lặp giữa các thiết bị — chỉ mới tối ưu chiều push (bỏ ảnh không đổi) ở audit trước.
 - [x] **Tab "Danh sách Items Code"** (2026-09-21) — bảng liên đới Item Code ↔ Tên sản phẩm ↔ Recipe, pre-seed 524 dòng dữ liệu thật, xuất template/nhập/xuất Excel — xong, có test (chi tiết mục 3c ở trên).
+- [x] **4 tab Danh sách PO/Recipe/Client/Items Code → dạng bảng chỉnh sửa trực tiếp** (filter nhiều lựa chọn, sort, thêm/sửa ngay trong bảng) + **gộp tab Truy xuất vào tab Dữ liệu** (2026-09-21) — xong, có test (chi tiết mục 3d ở trên). Số tab: 14 → 13.
 - [ ] Người dùng cần: (a) chạy lại `supabase/schema.sql` mới nhất (thêm `item_code`, `members.role` cho phép `supervisor`, `is_writer_member()`, tối ưu `sync_put_checkpoints` bỏ-qua-ảnh-không-đổi, `prune_logs_older_than`) trên project Supabase thật; (b) tự rà lại danh sách chỉ tiêu đã được TỰ ĐỘNG tích "isQMS" (xem `QMS_DEFAULT_SEED` trong index.html) — bỏ chọn cái nào không đúng; (c) nếu chưa làm ở phiên trước: bật Email auth, tạo Admin đầu tiên bằng SQL, deploy lại Edge Function `admin-users` bằng Supabase CLI (đã sửa để nhận thêm role `supervisor`).
 - [ ] Chưa test Edge Function `admin-users` với 1 project Supabase thật (không có runtime Deno trong sandbox) — người dùng cần tự thử luồng tạo/vô hiệu hóa tài khoản qua UI "👥 Quản lý tài khoản" sau khi deploy, và báo lại nếu có lỗi.
 - [ ] **Quyết định nghiệp vụ còn treo (KHÔNG tự làm)**: thời hạn lưu `logs` (Data Log) — hàm `prune_logs_older_than(days)` đã có trong schema.sql nhưng KHÔNG tự chạy (không grant, không pg_cron) vì đây có thể là dữ liệu cần cho audit FSSC/khách hàng — chỉ Admin tự chạy thủ công trong SQL Editor khi đã chốt được thời hạn, xem comment ngay phía trên hàm đó trong schema.sql.

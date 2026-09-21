@@ -217,6 +217,37 @@ textarea.inp{resize:vertical;min-height:64px;}
 .datatable{width:100%;border-collapse:collapse;font-size:11.5px;}
 .datatable th{text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.2px;padding:7px 8px;border-bottom:1.5px solid var(--line);white-space:nowrap;background:#F8FAFC;position:sticky;top:0;}
 .datatable td{padding:7px 8px;border-bottom:1px dashed var(--line);white-space:nowrap;}
+
+/* Editable list tables (Danh sách PO/Recipe/Client/Items Code) — sortable
+   headers, an inline filter row, a pinned "add new" row, and directly
+   editable cells. Shares .datatable/.tablescroll for base look. */
+.edittable th{position:sticky;top:0;z-index:2;}
+.edittable th.sortable{cursor:pointer;user-select:none;}
+.edittable th.sortable:hover{color:var(--teal-d);}
+.edittable .sortarrow{font-size:9px;opacity:.55;margin-left:3px;}
+.edittable th.sorted .sortarrow{opacity:1;color:var(--teal);}
+.edittable .filterrow th{background:#fff;padding:5px 6px;border-bottom:1.5px solid var(--line);}
+.edittable .filterrow input.cellinput,.edittable .filterrow select.cellinput{min-height:30px;font-size:11.5px;padding:4px 7px;}
+.edittable td,.edittable .filterrow th{white-space:normal;}
+.edittable input.cellinput,.edittable select.cellinput{width:100%;min-width:90px;border:1.3px solid transparent;background:transparent;border-radius:7px;padding:6px 7px;font-size:12.5px;color:var(--text);min-height:34px;}
+.edittable input.cellinput:hover,.edittable select.cellinput:hover{border-color:var(--line2);background:#F8FAFC;}
+.edittable input.cellinput:focus,.edittable select.cellinput:focus{border-color:var(--teal);background:#fff;outline:none;}
+.edittable tr.addrow td{background:var(--teal-l);border-bottom:1.5px solid var(--teal);}
+.edittable tr.addrow input.cellinput,.edittable tr.addrow select.cellinput{background:#fff;border-color:var(--line2);}
+.edittable .rowbtn{padding:5px 8px;border-radius:7px;font-size:12px;font-weight:700;background:#EEF1F6;min-height:30px;white-space:nowrap;}
+.edittable .rowbtn.del{background:var(--fail-bg);color:var(--fail);}
+.edittable .rowbtn.add{background:var(--teal);color:#fff;}
+.edittable td.actions{white-space:nowrap;}
+.edittable td.actions .row{display:flex;gap:5px;flex-wrap:nowrap;}
+.msf{position:relative;display:inline-block;}
+.msf>summary{list-style:none;cursor:pointer;min-height:30px;padding:4px 10px;border-radius:7px;border:1.3px solid var(--line2);background:#fff;font-size:11.5px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:5px;white-space:nowrap;}
+.msf>summary::-webkit-details-marker{display:none;}
+.msf>summary::after{content:'▾';font-size:9px;color:var(--muted);}
+.msf[open]>summary{border-color:var(--teal);color:var(--teal-d);}
+.msf-menu{position:absolute;top:calc(100% + 4px);left:0;background:#fff;border:1.5px solid var(--line2);border-radius:10px;box-shadow:var(--shadow);padding:6px;z-index:30;min-width:170px;max-height:240px;overflow-y:auto;}
+.msf-opt{display:flex;align-items:center;gap:7px;padding:6px 7px;border-radius:7px;font-size:12px;white-space:nowrap;cursor:pointer;}
+.msf-opt:hover{background:#F1F5F9;}
+.msf-opt input[type=checkbox]{width:15px;height:15px;}
 .datatable tr:hover td{background:#F8FAFC;}
 .datatable .mini{padding:5px 9px;border-radius:7px;font-size:11px;font-weight:700;background:#EEF1F6;color:var(--text);margin-right:4px;min-height:30px;}
 .datatable .mini.del{background:var(--fail-bg);color:var(--fail);}
@@ -288,7 +319,6 @@ svg.chart{width:100%;height:auto;display:block;}
   <div class="tabs" role="tablist">
     <button class="tab" data-tab="input" aria-selected="true" title="Nhập liệu"><span class="ic">✍️</span><span class="lbl">Nhập liệu</span></button>
     <button class="tab" data-tab="table" aria-selected="false" title="Dữ liệu"><span class="ic">📋</span><span class="lbl">Dữ liệu</span></button>
-    <button class="tab" data-tab="trace" aria-selected="false" title="Truy xuất"><span class="ic">🔎</span><span class="lbl">Truy xuất</span></button>
     <button class="tab" data-tab="polist" aria-selected="false" title="Danh sách PO"><span class="ic">📃</span><span class="lbl">Danh sách PO</span></button>
     <button class="tab" data-tab="recipelist" aria-selected="false" title="Danh sách Recipe"><span class="ic">🧪</span><span class="lbl">Danh sách Recipe</span></button>
     <button class="tab" data-tab="clientlist" aria-selected="false" title="Danh sách Client"><span class="ic">🏷️</span><span class="lbl">Danh sách Client</span></button>
@@ -304,7 +334,6 @@ svg.chart{width:100%;height:auto;display:block;}
   <div class="main">
     <div class="view active" id="view-input"></div>
     <div class="view" id="view-table"></div>
-    <div class="view" id="view-trace"></div>
     <div class="view" id="view-polist"></div>
     <div class="view" id="view-recipelist"></div>
     <div class="view" id="view-clientlist"></div>
@@ -356,6 +385,10 @@ function computeHeaderMap(){
 const DEFAULT_TECHNICIANS = ["Định","Trân","Trang","Huy","Hiền"];
 let TECHNICIANS = DEFAULT_TECHNICIANS.slice();
 let RECIPES = RECIPE_OPTIONS.slice();
+async function saveRecipes(){
+  await idbPut('meta', {k:'recipes', value: RECIPES});
+  await queueMetaSync('recipes', RECIPES);
+}
 
 async function saveSchema(){
   await idbPut('meta', {k:'schema', value: SCHEMA});
@@ -550,8 +583,9 @@ function allKnownPOs(){
   allCheckpoints.forEach(rec=> { if(rec.po && !isPOClosed(rec.po)) set.add(rec.po); });
   return [...set].sort();
 }
-// For Truy xuất (traceability): include BOTH open and closed POs, since
-// tracing history should not be limited by current closure status.
+// For the Dữ liệu tab's PO/Ca/date filter (traceability): include BOTH open
+// and closed POs, since tracing history should not be limited by current
+// closure status.
 function allPOsEverUsed(){
   const set = new Set();
   PO_LIST.forEach(po=>{ if(po) set.add(po); });
@@ -573,7 +607,7 @@ function idbOpen(){
       // Chuẩn bị cho truy vấn theo khoảng ngày / theo PO thay vì phải load
       // toàn bộ `shifts` vào RAM mỗi lần (xem refreshCache) — bản thân việc
       // thêm index này an toàn/không phá vỡ gì (IndexedDB tự lập chỉ mục lại
-      // dữ liệu cũ); các hàm đọc dữ liệu (renderTable/renderTrace/...) CHƯA
+      // dữ liệu cũ); các hàm đọc dữ liệu (renderTable/...) CHƯA
       // được chuyển sang dùng index này — đó là bước tối ưu lớn hơn, cân
       // nhắc làm riêng để tránh rủi ro ảnh hưởng nhiều tab cùng lúc.
       if(!shiftsStore.indexNames.contains('by_date')) shiftsStore.createIndex('by_date','date');
@@ -1633,7 +1667,6 @@ function showTab(name){
   qsa('.tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.tab===name)));
   qsa('.view').forEach(v => v.classList.toggle('active', v.id === 'view-'+name));
   if(name==='table') renderTable();
-  if(name==='trace') renderTrace();
   if(name==='polist') renderPOList();
   if(name==='recipelist') renderRecipeList();
   if(name==='clientlist') renderClientList();
@@ -1660,8 +1693,8 @@ qsa('.tab').forEach(t => t.addEventListener('click', ()=>showTab(t.dataset.tab))
    of this config — Admin can't lock themselves out). Stored as a single
    meta key ('tabConfig'), synced like PO_LIST/RECIPES/etc. — see
    applyRemoteMeta() and the "🗂️ Sắp xếp & Ẩn/hiện Tab" card in Cài đặt. */
-const TAB_ORDER_DEFAULT = ['input','table','trace','polist','recipelist','clientlist','itemcodelist','datalog','report','stats','specs','share','settings','guide'];
-const TAB_LABELS = {input:'Nhập liệu', table:'Dữ liệu', trace:'Truy xuất', polist:'Danh sách PO', recipelist:'Danh sách Recipe', clientlist:'Danh sách Client', itemcodelist:'Danh sách Items Code', datalog:'Data Log', report:'Báo cáo', stats:'Thống kê', specs:'Specs', share:'Xuất nhập dữ liệu', settings:'Cài đặt', guide:'Hướng dẫn'};
+const TAB_ORDER_DEFAULT = ['input','table','polist','recipelist','clientlist','itemcodelist','datalog','report','stats','specs','share','settings','guide'];
+const TAB_LABELS = {input:'Nhập liệu', table:'Dữ liệu', polist:'Danh sách PO', recipelist:'Danh sách Recipe', clientlist:'Danh sách Client', itemcodelist:'Danh sách Items Code', datalog:'Data Log', report:'Báo cáo', stats:'Thống kê', specs:'Specs', share:'Xuất nhập dữ liệu', settings:'Cài đặt', guide:'Hướng dẫn'};
 // Mặc định: Nhân viên (user) thấy đủ mọi tab như trước (không đổi hành vi
 // cũ); Giám sát/Quản lý (supervisor) mặc định ẩn tab Nhập liệu vì vai trò
 // này chỉ để xem — Admin chỉnh thêm được trong Cài đặt.
@@ -2318,8 +2351,39 @@ function renderTable(){
 
   if(mode==='day'){ renderDayView(root); return; }
 
-  root.appendChild(el('div',{class:'sub', style:'margin-top:-4px;'},['Xem nhanh tất cả các ca, đổi QC ngay trong bảng, hoặc mở chi tiết / sửa / xoá từng ca. Xem tiến độ &amp; xác thực đóng PO ở tab "Tiến độ PO".']));
+  root.appendChild(el('div',{class:'sub', style:'margin-top:-4px;'},['Xem nhanh tất cả các ca, đổi QC ngay trong bảng, hoặc mở chi tiết / sửa / xoá từng ca. Lọc theo PO/Ca/khoảng ngày để truy xuất nhanh. Xem tiến độ &amp; xác thực đóng PO ở tab "Danh sách PO".']));
+
+  renderTable._filter = renderTable._filter || {po:'', shift:'', from:'', to:''};
+  const filt = renderTable._filter;
   const selectedKeys = new Set();
+
+  const filterCard = el('div',{class:'card'},[
+    el('div',{class:'card-h'},['🔎 Truy xuất — lọc theo PO / Ca / khoảng ngày', el('div',{class:'rule'})]),
+  ]);
+  const poAC = renderAutocomplete(filt.po, allPOsEverUsed(), 'Chọn hoặc nhập mã PO', v=>{ filt.po=v; renderTable(); });
+  const shiftSel = el('select',{class:'inp'},[]);
+  shiftSel.appendChild(el('option',{value:''},['— Tất cả ca —']));
+  ['1','2','3'].forEach(v=>{ const o=el('option',{value:v},[`Ca ${v}`]); if(filt.shift===v) o.setAttribute('selected','selected'); shiftSel.appendChild(o); });
+  shiftSel.addEventListener('change', ()=>{ filt.shift=shiftSel.value; renderTable(); });
+  const fromInp = el('input',{class:'inp', type:'date', value: filt.from||''},[]);
+  fromInp.addEventListener('change', ()=>{ filt.from=fromInp.value; renderTable(); });
+  const toInp = el('input',{class:'inp', type:'date', value: filt.to||''},[]);
+  toInp.addEventListener('change', ()=>{ filt.to=toInp.value; renderTable(); });
+  filterCard.appendChild(el('div',{class:'grid g2'},[
+    el('label',{class:'fld'},[el('span',{class:'lab'},['Mã PO']), poAC.node]),
+    el('label',{class:'fld'},[el('span',{class:'lab'},['Ca']), shiftSel]),
+  ]));
+  filterCard.appendChild(el('div',{class:'grid g2', style:'margin-top:10px;'},[
+    el('label',{class:'fld'},[el('span',{class:'lab'},['Từ ngày']), fromInp]),
+    el('label',{class:'fld'},[el('span',{class:'lab'},['Đến ngày']), toInp]),
+  ]));
+  const hasFilter = !!(filt.po || filt.shift || filt.from || filt.to);
+  if(hasFilter){
+    const clearBtn = el('button',{class:'btn ghost sm', style:'margin-top:12px;'},['✕ Xoá bộ lọc']);
+    clearBtn.addEventListener('click', ()=>{ renderTable._filter = {po:'', shift:'', from:'', to:''}; renderTable(); });
+    filterCard.appendChild(clearBtn);
+  }
+  root.appendChild(filterCard);
 
   const toolCard = el('div',{class:'card'},[
     el('div',{class:'card-h'},['Xuất nhanh ca đã chọn (Short CSV)', el('div',{class:'rule'})]),
@@ -2338,15 +2402,40 @@ function renderTable(){
     await exportFileToPreferredLocation(file, {title:'Shiftly Short CSV', fallbackMsg:`Đã tải file Short CSV (${subset.length} ca) về máy`});
   });
 
+  let sortedCps = [...allCheckpoints].sort((a,b)=>(b.date+b.shift+ (b.updatedAt||'')).localeCompare(a.date+a.shift+(a.updatedAt||'')));
+  if(hasFilter){
+    sortedCps = sortedCps.filter(rec=>{
+      if(rec.section==='META') return false;
+      if(filt.from && rec.date < filt.from) return false;
+      if(filt.to && rec.date > filt.to) return false;
+      if(filt.shift && rec.shift !== filt.shift) return false;
+      if(filt.po && !matchPO(rec, filt.po)) return false;
+      return true;
+    });
+    const summaryCard = el('div',{class:'card', style:'padding:12px 16px;'},[
+      el('div',{class:'sub', style:'margin:0;'},[`Tìm thấy ${sortedCps.length} điểm kiểm tra khớp bộ lọc.`]),
+    ]);
+    if(sortedCps.length>0){
+      const xlsBtn = el('button',{class:'btn ghost sm', style:'margin-top:8px;'},['📊 Xuất Excel kết quả']);
+      xlsBtn.addEventListener('click', async ()=>{
+        const xml = buildExcelXml(sortedCps);
+        const file = new File([xml], `Truyxuat_${todayStr()}_${sortedCps.length}.xls`, {type:'application/vnd.ms-excel'});
+        await exportFileToPreferredLocation(file, {title:'Truy xuất Shiftly', fallbackMsg:`Đã tải Excel (${sortedCps.length} dòng) về máy`});
+      });
+      summaryCard.appendChild(xlsBtn);
+    }
+    root.appendChild(summaryCard);
+    if(sortedCps.length===0) return;
+  }
 
   const wrap = el('div',{class:'card tablescroll'},[]);
   const table = el('table',{class:'datatable'},[]);
   table.innerHTML = '<thead><tr><th><input type="checkbox" id="selAll"></th><th>#</th><th>Ngày</th><th>Ca</th><th>Công đoạn</th><th>PO</th><th>Item Code</th><th>QC</th><th>Điền dữ liệu</th><th>Hành động</th></tr></thead>';
   const tbody = el('tbody',{},[]);
-  const sortedCps = [...allCheckpoints].sort((a,b)=>(b.date+b.shift+ (b.updatedAt||'')).localeCompare(a.date+a.shift+(a.updatedAt||'')));
   sortedCps.forEach((rec,i)=>{
     const fr = fillRate(rec);
     const secName = sectionById(rec.section) ? sectionById(rec.section).name : rec.section;
+    const closed = rec.po && isPOClosed(rec.po);
     const chk = el('input',{type:'checkbox'},[]);
     chk.addEventListener('change', ()=>{
       if(chk.checked) selectedKeys.add(rec.key); else selectedKeys.delete(rec.key);
@@ -2367,6 +2456,7 @@ function renderTable(){
     const delBtn = el('button',{class:'mini del'},['🗑']);
     viewBtn.addEventListener('click', ()=>renderDetail(rec.key));
     editBtn.addEventListener('click', ()=>{
+      if(closed && !promptPasswordOK(`PO "${rec.po}" đã đóng. Nhập mật khẩu để Force sửa dữ liệu:`)) return;
       renderInputForm._date = rec.date; renderInputForm._shift = rec.shift;
       renderInputForm._editKey = rec.key; renderInputForm._addOpen = false; renderInputForm._draft = null;
       showTab('input'); renderInputForm();
@@ -2390,13 +2480,14 @@ function renderTable(){
     ]);
     const tdTech = el('td',{},[techSel]);
     const tdActions = el('td',{},[viewBtn, editBtn, delBtn]);
+    const poCell = rec.po ? el('span',{},[rec.po+' ', closed?el('span',{class:'typetag'},['Đã đóng']):null]) : '—';
     const tr = el('tr',{},[
       el('td',{},[chk]),
       el('td',{},[String(i+1)]),
       el('td',{},[fmtDateVN(rec.date)]),
       el('td',{},[rec.shift]),
       el('td',{},[secName]),
-      el('td',{},[rec.po || '—']),
+      el('td',{},[poCell]),
       el('td',{},[rec.itemCode || '—']),
       tdTech,
       el('td',{},[fillCell]),
@@ -2608,25 +2699,249 @@ function parseTableExcelXml(text){
     });
   }catch(e){ console.error(e); return null; }
 }
+/* ===================== EDITABLE LIST TABLE (shared UI) =====================
+   Spreadsheet-style table shared by tabs Danh sách PO/Recipe/Client/Items
+   Code: sortable column headers, a filter row (text and/or multi-select
+   per column), a pinned "add new" row, and cells editable directly in
+   place — replaces the old "form above + list below" UI for these tabs.
+
+   opts = {
+     columns: [{
+       key, label,
+       sortable, sortVal(row) -> optional, defaults to get(row),
+       filter: null | 'text' | {type:'multi', options:[{value,label}]},
+       filterVal(row) -> optional, defaults to get(row),
+       get(row) -> current value,
+       set(row, val) -> async; return false to reject/revert the edit
+         (e.g. failed validation). Omit for a read-only column.
+       type: 'text' | 'select' | (row)=>'text'|'select'|null — which
+         editable widget to render; a function lets a column be editable
+         only on some rows (e.g. a PO not yet declared in PO_LIST). The
+         add-row calls type(null).
+       options: [{value,label}] — for type 'select',
+       render(row) -> optional custom read-only cell content (Node|string),
+       addPlaceholder: placeholder for this column's add-row input,
+     }],
+     rows: [...] — row view-objects (kept by reference so edits persist
+       without a full rebuild),
+     rowStyle(row) -> optional CSS string applied to that <tr>,
+     state: {filters:{}, sort:{key:null,dir:null}} — owned by the caller
+       (kept as a static prop on the render fn, like the existing
+       _search/_editIdx convention) so it survives re-render,
+     onAdd(values) -> async, values keyed by column.key from the add-row;
+       return false to keep the add-row filled in (validation failed) —
+       the caller is responsible for a full re-render on success,
+     renderActions(row) -> [...elements] for a trailing actions <td>, or
+       falsy to render nothing there for that row,
+     emptyText: shown when the filtered list is empty.
+   } */
+function multiSelectFilterEl(label, options, selectedSet, onChange){
+  const details = el('details',{class:'msf'});
+  const labelFor = ()=> label + (selectedSet.size ? ` (${selectedSet.size})` : '');
+  const summary = el('summary',{},[labelFor()]);
+  details.appendChild(summary);
+  const menu = el('div',{class:'msf-menu'});
+  options.forEach(opt=>{
+    const cb = el('input',{type:'checkbox'});
+    cb.checked = selectedSet.has(opt.value);
+    cb.addEventListener('change', ()=>{
+      if(cb.checked) selectedSet.add(opt.value); else selectedSet.delete(opt.value);
+      summary.textContent = labelFor();
+      onChange();
+    });
+    menu.appendChild(el('label',{class:'msf-opt'},[cb, el('span',{},[opt.label])]));
+  });
+  details.appendChild(menu);
+  return details;
+}
+function buildEditableTable(opts){
+  const {columns, rows, onAdd, renderActions, emptyText, rowStyle, state} = opts;
+  state.filters = state.filters || {};
+  state.sort = state.sort || {key:null, dir:null};
+  const actionsCol = !!renderActions;
+  const resolveType = (col, row) => typeof col.type==='function' ? col.type(row) : col.type;
+
+  const wrap = el('div',{class:'card', style:'padding:0;overflow:hidden;'});
+  const scroll = el('div',{class:'tablescroll'});
+  const table = el('table',{class:'datatable edittable'});
+  const theadHdr = el('tr',{});
+  const theadFilter = el('tr',{class:'filterrow'});
+  columns.forEach(col=>{
+    const th = el('th',{},[col.label]);
+    if(col.sortable){
+      th.classList.add('sortable');
+      const arrow = el('span',{class:'sortarrow'},['⇅']);
+      th.appendChild(arrow);
+      col._refreshSortUi = ()=>{
+        const active = state.sort.key===col.key;
+        th.classList.toggle('sorted', active);
+        arrow.textContent = active ? (state.sort.dir==='asc'?'▲':'▼') : '⇅';
+      };
+      col._refreshSortUi();
+      th.addEventListener('click', ()=>{
+        if(state.sort.key!==col.key) state.sort = {key:col.key, dir:'asc'};
+        else if(state.sort.dir==='asc') state.sort.dir = 'desc';
+        else state.sort = {key:null, dir:null};
+        renderBody();
+      });
+    }
+    theadHdr.appendChild(th);
+    const fth = el('th',{});
+    if(col.filter==='text'){
+      const inp = el('input',{class:'cellinput', type:'text', placeholder:'Lọc...'});
+      inp.value = state.filters[col.key]||'';
+      inp.addEventListener('input', ()=>{ state.filters[col.key]=inp.value; renderBody(); });
+      fth.appendChild(inp);
+    } else if(col.filter && col.filter.type==='multi'){
+      if(!(state.filters[col.key] instanceof Set)) state.filters[col.key] = new Set();
+      fth.appendChild(multiSelectFilterEl('Lọc', col.filter.options, state.filters[col.key], renderBody));
+    }
+    theadFilter.appendChild(fth);
+  });
+  if(actionsCol){ theadHdr.appendChild(el('th',{},[''])); theadFilter.appendChild(el('th',{})); }
+  table.appendChild(el('thead',{},[theadHdr, theadFilter]));
+  const tbody = el('tbody',{});
+  table.appendChild(tbody);
+  scroll.appendChild(table); wrap.appendChild(scroll);
+
+  function passesFilters(row){
+    return columns.every(col=>{
+      if(!col.filter) return true;
+      if(col.filter==='text'){
+        const q = (state.filters[col.key]||'').trim().toLowerCase();
+        if(!q) return true;
+        const v = String((col.filterVal?col.filterVal(row):col.get(row)) ?? '').toLowerCase();
+        return v.includes(q);
+      }
+      if(col.filter.type==='multi'){
+        const sel = state.filters[col.key];
+        if(!sel || sel.size===0) return true;
+        return sel.has(col.filterVal?col.filterVal(row):col.get(row));
+      }
+      return true;
+    });
+  }
+  function sortedFiltered(){
+    let list = rows.filter(passesFilters);
+    const {key,dir} = state.sort;
+    if(key){
+      const col = columns.find(c=>c.key===key);
+      list = list.slice().sort((a,b)=>{
+        const va = col.sortVal ? col.sortVal(a) : col.get(a);
+        const vb = col.sortVal ? col.sortVal(b) : col.get(b);
+        let cmp;
+        if(typeof va==='number' || typeof vb==='number') cmp = (Number(va)||0)-(Number(vb)||0);
+        else cmp = String(va??'').localeCompare(String(vb??''), 'vi');
+        return dir==='desc' ? -cmp : cmp;
+      });
+    }
+    return list;
+  }
+  function editableCell(col, row){
+    const type = resolveType(col, row);
+    if(type==='select'){
+      const sel = el('select',{class:'cellinput'});
+      (col.options||[]).forEach(o=>{ const op=el('option',{value:o.value},[o.label]); if(col.get(row)===o.value) op.setAttribute('selected','selected'); sel.appendChild(op); });
+      sel.addEventListener('change', async ()=>{
+        const prev = col.get(row);
+        const ok = await col.set(row, sel.value);
+        if(ok===false) sel.value = prev;
+      });
+      return el('td',{},[sel]);
+    }
+    if(type==='text'){
+      const inp = el('input',{class:'cellinput', type:'text'});
+      inp.value = col.get(row) ?? '';
+      const commit = async ()=>{
+        const v = inp.value.trim();
+        const prev = String(col.get(row) ?? '');
+        if(v===prev) return;
+        const ok = await col.set(row, v);
+        if(ok===false) inp.value = prev;
+      };
+      inp.addEventListener('blur', commit);
+      inp.addEventListener('keydown', e=>{ if(e.key==='Enter') inp.blur(); });
+      return el('td',{},[inp]);
+    }
+    const content = col.render ? col.render(row) : String(col.get ? (col.get(row) ?? '—') : '—');
+    return el('td',{},[content]);
+  }
+  function renderBody(){
+    columns.forEach(col=>{ if(col._refreshSortUi) col._refreshSortUi(); });
+    tbody.innerHTML = '';
+    if(onAdd){
+      const addTr = el('tr',{class:'addrow'});
+      const inputs = {};
+      columns.forEach(col=>{
+        const td = el('td',{});
+        const type = resolveType(col, null);
+        if(type==='select'){
+          const sel = el('select',{class:'cellinput'});
+          (col.options||[]).forEach(o=>sel.appendChild(el('option',{value:o.value},[o.label])));
+          inputs[col.key]=sel; td.appendChild(sel);
+        } else if(type==='text'){
+          const inp = el('input',{class:'cellinput', type:'text', placeholder: col.addPlaceholder||''});
+          inp.addEventListener('keydown', e=>{ if(e.key==='Enter') submit(); });
+          inputs[col.key]=inp; td.appendChild(inp);
+        }
+        addTr.appendChild(td);
+      });
+      const actTd = el('td',{class:'actions'});
+      const addBtn = el('button',{class:'rowbtn add'},['➕ Thêm']);
+      actTd.appendChild(addBtn);
+      addTr.appendChild(actTd);
+      async function submit(){
+        const values = {};
+        Object.keys(inputs).forEach(k=>{ values[k]=inputs[k].value; });
+        await onAdd(values);
+      }
+      addBtn.addEventListener('click', submit);
+      tbody.appendChild(addTr);
+    }
+    const list = sortedFiltered();
+    if(list.length===0){
+      const tr = el('tr',{});
+      const td = el('td',{colspan:String(columns.length + (actionsCol?1:0)), style:'text-align:center;color:var(--muted);padding:18px;white-space:normal;'},[emptyText||'Không có dữ liệu.']);
+      tr.appendChild(td); tbody.appendChild(tr);
+      return;
+    }
+    list.forEach(row=>{
+      const tr = el('tr',{});
+      if(rowStyle){ const s = rowStyle(row); if(s) tr.setAttribute('style', s); }
+      columns.forEach(col=> tr.appendChild(editableCell(col, row)));
+      if(actionsCol){
+        const actTd = el('td',{class:'actions'});
+        const rowDiv = el('div',{class:'row'});
+        (renderActions(row)||[]).forEach(b=>rowDiv.appendChild(b));
+        actTd.appendChild(rowDiv);
+        tr.appendChild(actTd);
+      }
+      tbody.appendChild(tr);
+    });
+  }
+  renderBody();
+  return wrap;
+}
+
+/* ===================== DANH SÁCH PO TAB ===================== */
+function poTableRows(){
+  const allPOs = new Set(PO_LIST);
+  allCheckpoints.forEach(r=>{ if(r.po) allPOs.add(r.po); });
+  return [...allPOs].sort().map(po=>{
+    const idx = PO_LIST.indexOf(po);
+    const matches = allCheckpoints.filter(r=>r.po===po);
+    const avgFill = matches.length ? Math.round(matches.reduce((a,r)=>a+fillRate(r).pct,0)/matches.length) : 0;
+    const sectionsTouched = [...new Set(matches.map(r=>r.section))].map(sid=>{ const s = sectionById(sid); return s ? s.name : sid; });
+    const techs = [...new Set(matches.map(r=>r.technician).filter(Boolean))];
+    const dates = matches.map(r=>r.date).sort();
+    return {po, idx, closed: isPOClosed(po), matches, avgFill, sectionsTouched, techs, dates};
+  });
+}
 function renderPOList(){
   const root = qs('#view-polist');
   root.innerHTML = '';
   root.appendChild(el('div',{class:'section-title'},['Danh sách PO']));
-  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},['Nhập trước các mã PO sẽ dùng — mỗi mã 1 dòng. Danh sách này (trừ PO đã đóng) sẽ hiện ra để chọn nhanh ở tab Nhập liệu và tab Truy xuất.']));
-
-  const card = el('div',{class:'card'},[]);
-  const area = el('textarea',{class:'inp', rows:'10'},[]);
-  area.value = PO_LIST.join('\n');
-  card.appendChild(area);
-  const saveBtn = el('button',{class:'btn teal sm', style:'margin-top:10px;'},['💾 Lưu danh sách PO']);
-  card.appendChild(saveBtn);
-  root.appendChild(card);
-  saveBtn.addEventListener('click', async ()=>{
-    PO_LIST = area.value.split('\n').map(s=>s.trim()).filter(Boolean);
-    await savePOList();
-    toast('Đã lưu danh sách PO');
-    renderPOList();
-  });
+  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},['Mọi mã PO — đã khai báo trước hoặc đã dùng trong dữ liệu — cùng tiến độ điền dữ liệu. Lọc/sắp xếp theo từng cột, sửa hoặc xác thực đóng ngay trong bảng, thêm mã mới ở hàng đầu tiên.']));
 
   const xlsCard = el('div',{class:'card'},[
     el('div',{class:'card-h'},['Xuất / Nhập bằng Excel', el('div',{class:'rule'})]),
@@ -2661,135 +2976,161 @@ function renderPOList(){
     renderPOList();
   });
 
-  root.appendChild(el('div',{class:'section-title', style:'margin-top:22px;'},['Tiến độ & Xác thực đóng PO']));
-  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},['Gộp tất cả các điểm kiểm tra đã dùng cùng 1 PO. Xác thực đóng khi hoàn thành — PO đã đóng sẽ không còn hiện trong danh sách chọn ở tab Nhập liệu.']));
-
-  const allPOs = new Set(PO_LIST);
-  allCheckpoints.forEach(r=>{ if(r.po) allPOs.add(r.po); });
-  const openPOs = [...allPOs].filter(po=>!isPOClosed(po)).sort();
-  const closedPOs2 = [...allPOs].filter(po=>isPOClosed(po)).sort();
-
-  if(openPOs.length===0 && closedPOs2.length===0){
-    root.appendChild(el('div',{class:'card empty'},[el('div',{class:'ic'},['📶']), el('div',{},['Chưa có PO nào — thêm ở trên hoặc bắt đầu nhập liệu.'])]));
-    return;
-  }
-
-  function poCard(po, closed){
-    const matches = allCheckpoints.filter(r=>r.po===po);
-    const avgFill = matches.length ? Math.round(matches.reduce((a,r)=>a+fillRate(r).pct,0)/matches.length) : 0;
-    const sectionsTouched = [...new Set(matches.map(r=>r.section))].map(sid=>{
-      const s = sectionById(sid); return s ? s.name : sid;
-    });
-    const techs = [...new Set(matches.map(r=>r.technician).filter(Boolean))];
-    const dates = matches.map(r=>r.date).sort();
-    const card = el('div',{class:'card'},[
-      el('div',{class:'card-h'},[`PO ${po}`, el('div',{class:'rule'}), closed?el('span',{class:'pill'},['Đã đóng']):null]),
-      el('div',{class:'kv'},[el('span',{class:'k'},['Số điểm kiểm tra']), el('span',{class:'v'},[String(matches.length)])]),
-      el('div',{class:'kv'},[el('span',{class:'k'},['Mức điền dữ liệu TB']), el('span',{class:'v'},[`${avgFill}%`])]),
-      el('div',{class:'kv'},[el('span',{class:'k'},['Công đoạn đã có dữ liệu']), el('span',{class:'v'},[sectionsTouched.join(', ')||'—'])]),
-      el('div',{class:'kv'},[el('span',{class:'k'},['QC tham gia']), el('span',{class:'v'},[techs.join(', ')||'—'])]),
-      el('div',{class:'kv'},[el('span',{class:'k'},['Khoảng ngày']), el('span',{class:'v'},[dates.length?`${fmtDateVN(dates[0])} → ${fmtDateVN(dates[dates.length-1])}`:'—'])]),
-    ]);
-    const btnRow = el('div',{class:'row', style:'margin-top:10px;'},[]);
-    if(!closed){
-      const vBtn = el('button',{class:'btn teal sm'},['✅ Verify — Xác thực đóng PO']);
-      vBtn.addEventListener('click', async ()=>{
-        if(avgFill<100){
-          const ok = confirm(`PO ${po} còn ${100-avgFill}% dữ liệu chưa điền đầy đủ. Vẫn xác thực đóng?`);
-          if(!ok) return;
-        }
-        await setPOClosed(po, true);
-        toast(`Đã xác thực đóng PO ${po}`);
-        renderPOList();
-      });
-      btnRow.appendChild(vBtn);
-    } else {
-      const rBtn = el('button',{class:'btn danger sm'},['🔓 Mở lại PO']);
-      rBtn.addEventListener('click', async ()=>{
-        if(confirm(`Mở lại PO ${po} để tiếp tục chỉnh sửa?`)){
-          await setPOClosed(po, false);
-          toast(`Đã mở lại PO ${po}`);
-          renderPOList();
-        }
-      });
-      btnRow.appendChild(rBtn);
-    }
-    if(matches.length){
-      const viewBtn = el('button',{class:'btn ghost sm'},['👁 Xem các điểm kiểm tra']);
-      viewBtn.addEventListener('click', ()=>{ renderTrace._prefillPO = po; showTab('trace'); });
-      btnRow.appendChild(viewBtn);
-    }
-    card.appendChild(btnRow);
-    return card;
-  }
-
-  if(openPOs.length===0) root.appendChild(el('div',{class:'card empty'},[el('div',{},['Không có PO nào đang mở.'])]));
-  openPOs.forEach(po=>root.appendChild(poCard(po,false)));
-  if(closedPOs2.length){
-    root.appendChild(el('div',{class:'section-title', style:'margin-top:20px;'}, [`Đã đóng (${closedPOs2.length})`]));
-    closedPOs2.forEach(po=>root.appendChild(poCard(po,true)));
-  }
+  renderPOList._table = renderPOList._table || {filters:{}, sort:{key:null,dir:null}};
+  const table = buildEditableTable({
+    state: renderPOList._table,
+    rows: poTableRows(),
+    emptyText: 'Chưa có PO nào — thêm ở dòng trên cùng hoặc bắt đầu nhập liệu.',
+    columns: [
+      {
+        key:'po', label:'Mã PO', sortable:true, filter:'text',
+        get: row=>row.po,
+        type: row => (!row || row.idx!==-1) ? 'text' : null,
+        addPlaceholder:'VD: 712600007',
+        render: row => el('span',{},[row.po+' ', el('span',{class:'typetag', style:'background:#F1F5F9;color:var(--muted);'},['từ dữ liệu'])]),
+        set: async (row, val) => {
+          if(!val) return false;
+          const dupIdx = PO_LIST.findIndex((p,i)=>p===val && i!==row.idx);
+          if(dupIdx!==-1){ toast('Mã PO này đã có trong danh sách'); return false; }
+          PO_LIST[row.idx] = val; row.po = val;
+          await savePOList();
+        },
+      },
+      {
+        key:'status', label:'Trạng thái', sortable:true,
+        filter:{type:'multi', options:[{value:'open',label:'🟢 Đang mở'},{value:'closed',label:'🔒 Đã đóng'}]},
+        filterVal: row => row.closed ? 'closed' : 'open',
+        sortVal: row => row.closed ? 1 : 0,
+        type:'select', options:[{value:'open',label:'🟢 Đang mở'},{value:'closed',label:'🔒 Đã đóng'}],
+        get: row => row.closed ? 'closed' : 'open',
+        set: async (row, val) => {
+          const wantClosed = val==='closed';
+          if(wantClosed===row.closed) return;
+          if(wantClosed){
+            if(row.avgFill<100 && !confirm(`PO ${row.po} còn ${100-row.avgFill}% dữ liệu chưa điền đầy đủ. Vẫn xác thực đóng?`)) return false;
+            await setPOClosed(row.po, true);
+            toast(`Đã xác thực đóng PO ${row.po}`);
+          } else {
+            if(!confirm(`Mở lại PO ${row.po} để tiếp tục chỉnh sửa?`)) return false;
+            await setPOClosed(row.po, false);
+            toast(`Đã mở lại PO ${row.po}`);
+          }
+          row.closed = wantClosed;
+        },
+      },
+      { key:'count', label:'Số điểm kiểm tra', sortable:true, sortVal:row=>row.matches.length, render:row=>String(row.matches.length) },
+      { key:'avgFill', label:'Mức điền TB', sortable:true, sortVal:row=>row.avgFill, render:row=>`${row.avgFill}%` },
+      { key:'sections', label:'Công đoạn đã có dữ liệu', filter:'text', filterVal:row=>row.sectionsTouched.join(', '), render:row=>row.sectionsTouched.join(', ')||'—' },
+      { key:'techs', label:'QC tham gia', filter:'text', filterVal:row=>row.techs.join(', '), render:row=>row.techs.join(', ')||'—' },
+      { key:'dates', label:'Khoảng ngày', sortable:true, sortVal:row=>row.dates[0]||'', render:row=> row.dates.length ? `${fmtDateVN(row.dates[0])} → ${fmtDateVN(row.dates[row.dates.length-1])}` : '—' },
+    ],
+    onAdd: async (values) => {
+      const po = (values.po||'').trim();
+      if(!po){ toast('Cần nhập mã PO'); return false; }
+      if(PO_LIST.includes(po)){ toast('Mã PO này đã có trong danh sách'); return false; }
+      PO_LIST.push(po);
+      await savePOList();
+      toast('Đã thêm PO');
+      renderPOList();
+    },
+    renderActions: row => {
+      const btns = [];
+      if(row.matches.length){
+        const viewBtn = el('button',{class:'rowbtn'},['👁 Xem']);
+        viewBtn.addEventListener('click', ()=>{ renderTable._filter = {po: row.po, shift:'', from:'', to:''}; renderTable._mode = 'list'; showTab('table'); });
+        btns.push(viewBtn);
+      }
+      if(row.idx!==-1){
+        const delBtn = el('button',{class:'rowbtn del'},['🗑️']);
+        delBtn.addEventListener('click', async ()=>{
+          if(confirm(`Xoá mã PO "${row.po}" khỏi danh sách? (Các điểm kiểm tra đã dùng mã này không bị xoá.)`)){
+            PO_LIST.splice(row.idx,1);
+            await savePOList();
+            renderPOList();
+          }
+        });
+        btns.push(delBtn);
+      }
+      return btns;
+    },
+  });
+  root.appendChild(table);
 }
 
 /* ===================== DANH SÁCH RECIPE TAB ===================== */
+function recipeOverrideDetails(rc){
+  const overrides = [];
+  SCHEMA.forEach(sec=>{
+    sec.fields.forEach(f=>{
+      if(f.recipeOverrides && f.recipeOverrides[rc]){
+        const ov = f.recipeOverrides[rc];
+        const parts = [];
+        if(ov.hardMin!=null) parts.push(`LSL ${ov.hardMin}`);
+        if(ov.tMin!=null) parts.push(`LCL ${ov.tMin}`);
+        if(ov.tMax!=null) parts.push(`UCL ${ov.tMax}`);
+        if(ov.hardMax!=null) parts.push(`USL ${ov.hardMax}`);
+        overrides.push(`${sec.name} — ${f.label.split('\n')[0]}: ${parts.join(', ')||'—'}`);
+      }
+    });
+  });
+  return overrides;
+}
 function renderRecipeList(){
   const root = qs('#view-recipelist');
   root.innerHTML = '';
   root.appendChild(el('div',{class:'section-title'},['Danh sách Recipe']));
-  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},['Mỗi mã Recipe 1 dòng. Recipe được chọn khi nhập điểm kiểm tra — quyết định bộ giới hạn LSL/LCL/UCL/USL riêng nào áp dụng cho các chỉ tiêu (cấu hình ghi đè cụ thể theo Recipe ở tab Specs, trong từng chỉ tiêu).']));
+  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},['Recipe được chọn khi nhập điểm kiểm tra — quyết định bộ giới hạn LSL/LCL/UCL/USL riêng nào áp dụng cho các chỉ tiêu (cấu hình ghi đè cụ thể theo Recipe ở tab Specs, trong từng chỉ tiêu).']));
 
-  const card = el('div',{class:'card'},[]);
-  const area = el('textarea',{class:'inp', rows:'8'},[]);
-  area.value = RECIPES.join('\n');
-  card.appendChild(area);
-  const saveBtn = el('button',{class:'btn teal sm', style:'margin-top:10px;'},['💾 Lưu danh sách Recipe']);
-  card.appendChild(saveBtn);
-  root.appendChild(card);
-  saveBtn.addEventListener('click', async ()=>{
-    RECIPES = area.value.split('\n').map(s=>s.trim()).filter(Boolean);
-    await idbPut('meta', {k:'recipes', value: RECIPES});
-    await queueMetaSync('recipes', RECIPES);
-    toast('Đã lưu danh sách Recipe');
-    renderRecipeList();
-  });
-
-  const overviewCard = el('div',{class:'card'},[
-    el('div',{class:'card-h'},['Bộ thông số Specs theo từng Recipe', el('div',{class:'rule'})]),
-    el('p',{class:'sub', style:'margin:0 0 10px;'},['Chỉnh giá trị ghi đè cụ thể ở tab Specs (mở 1 chỉ tiêu số → "Ghi đè theo Recipe"). Ở đây chỉ xem tổng quan Recipe nào đang ghi đè chỉ tiêu nào.']),
-  ]);
-  if(RECIPES.length===0){
-    overviewCard.appendChild(el('div',{class:'sub'},['Chưa có Recipe nào.']));
-  } else {
-    RECIPES.forEach(rc=>{
-      const overrides = [];
-      SCHEMA.forEach(sec=>{
-        sec.fields.forEach(f=>{
-          if(f.recipeOverrides && f.recipeOverrides[rc]){
-            const ov = f.recipeOverrides[rc];
-            const parts = [];
-            if(ov.hardMin!=null) parts.push(`LSL ${ov.hardMin}`);
-            if(ov.tMin!=null) parts.push(`LCL ${ov.tMin}`);
-            if(ov.tMax!=null) parts.push(`UCL ${ov.tMax}`);
-            if(ov.hardMax!=null) parts.push(`USL ${ov.hardMax}`);
-            overrides.push(`${sec.name} — ${f.label.split('\n')[0]}: ${parts.join(', ')||'—'}`);
-          }
-        });
+  renderRecipeList._table = renderRecipeList._table || {filters:{}, sort:{key:null,dir:null}};
+  const table = buildEditableTable({
+    state: renderRecipeList._table,
+    rows: RECIPES.map((value,idx)=>({value, idx})),
+    emptyText: 'Chưa có Recipe nào — thêm ở dòng trên cùng.',
+    columns: [
+      {
+        key:'value', label:'Mã Recipe', sortable:true, filter:'text', type:'text',
+        get: row=>row.value, addPlaceholder:'VD: 405',
+        set: async (row, val) => {
+          if(!val) return false;
+          if(RECIPES.some((v,i)=>v===val && i!==row.idx)){ toast('Recipe này đã tồn tại'); return false; }
+          RECIPES[row.idx] = val; row.value = val;
+          await saveRecipes();
+        },
+      },
+      {
+        key:'overrides', label:'Số chỉ tiêu ghi đè', sortable:true,
+        filter:{type:'multi', options:[{value:'has',label:'Có ghi đè'},{value:'none',label:'Chưa ghi đè'}]},
+        filterVal: row => recipeOverrideDetails(row.value).length ? 'has' : 'none',
+        sortVal: row => recipeOverrideDetails(row.value).length,
+        render: row => String(recipeOverrideDetails(row.value).length),
+      },
+      {
+        key:'detail', label:'Chi tiết ghi đè',
+        render: row => { const list = recipeOverrideDetails(row.value); return list.length ? list.join('; ') : '—'; },
+      },
+    ],
+    onAdd: async (values) => {
+      const value = (values.value||'').trim();
+      if(!value){ toast('Cần nhập mã Recipe'); return false; }
+      if(RECIPES.includes(value)){ toast('Recipe này đã tồn tại'); return false; }
+      RECIPES.push(value);
+      await saveRecipes();
+      toast('Đã thêm Recipe');
+      renderRecipeList();
+    },
+    renderActions: row => {
+      const delBtn = el('button',{class:'rowbtn del'},['🗑️']);
+      delBtn.addEventListener('click', async ()=>{
+        if(confirm(`Xoá Recipe "${row.value}"?`)){
+          RECIPES.splice(row.idx,1);
+          await saveRecipes();
+          renderRecipeList();
+        }
       });
-      const row = el('div',{class:'specfield'},[
-        el('div',{class:'fi'},[
-          el('b',{},[rc]),
-          el('span',{},[overrides.length ? `${overrides.length} chỉ tiêu ghi đè` : 'Chưa có chỉ tiêu nào ghi đè riêng']),
-        ]),
-      ]);
-      overviewCard.appendChild(row);
-      if(overrides.length){
-        const detail = el('div',{style:'padding:0 14px 12px;font-size:11.5px;color:var(--muted);'},[]);
-        overrides.forEach(o=>detail.appendChild(el('div',{style:'margin-top:2px;'},[o])));
-        overviewCard.appendChild(detail);
-      }
-    });
-  }
-  root.appendChild(overviewCard);
+      return [delBtn];
+    },
+  });
+  root.appendChild(table);
 }
 
 /* ===================== DANH SÁCH CLIENT TAB ===================== */
@@ -2805,42 +3146,7 @@ function renderClientList(){
   const root = qs('#view-clientlist');
   root.innerHTML = '';
   root.appendChild(el('div',{class:'section-title'},['Danh sách Client']));
-  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},['Quản lý danh sách khách hàng — có thể ghi chú riêng và đánh dấu nổi bật (highlight). Client được chọn khi nhập điểm kiểm tra; nếu có ghi chú, sẽ hiện nổi bật ngay khi chọn.']));
-
-  const editIdx = renderClientList._editIdx;
-  const editing = (editIdx!=null) ? CLIENT_LIST[editIdx] : null;
-
-  const formCard = el('div',{class:'card'},[
-    el('div',{class:'card-h'},[editing?'✏️ Sửa Client':'➕ Thêm Client', el('div',{class:'rule'})]),
-  ]);
-  const nameInp = el('input',{class:'inp', type:'text', placeholder:'Tên khách hàng/Client', value: editing?editing.name:''},[]);
-  const noteInp = el('textarea',{class:'inp', rows:'2', placeholder:'Ghi chú (tuỳ chọn) — VD: yêu cầu riêng về độ ẩm, bao bì...'},[]);
-  noteInp.value = editing ? (editing.note||'') : '';
-  const hlSel = el('select',{class:'inp'},[]);
-  CLIENT_HIGHLIGHTS.forEach(h=>{ const o=el('option',{value:h.value},[h.label]); if(editing && editing.highlight===h.value) o.setAttribute('selected','selected'); hlSel.appendChild(o); });
-  formCard.appendChild(el('label',{class:'fld'},[el('span',{class:'lab'},['Tên Client']), nameInp]));
-  formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Ghi chú']), noteInp]));
-  formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Highlight']), hlSel]));
-  const btnRow = el('div',{class:'row', style:'margin-top:12px;'},[
-    el('button',{class:'btn teal sm'},[editing?'💾 Lưu thay đổi':'➕ Thêm Client']),
-  ]);
-  if(editing) btnRow.appendChild(el('button',{class:'btn ghost sm'},['Huỷ']));
-  formCard.appendChild(btnRow);
-  root.appendChild(formCard);
-  const formBtns = qsa('button', btnRow);
-  formBtns[0].addEventListener('click', async ()=>{
-    const name = nameInp.value.trim();
-    if(!name){ toast('Cần nhập tên Client'); return; }
-    const dupIdx = CLIENT_LIST.findIndex(c=>c.name===name);
-    if(dupIdx!==-1 && dupIdx!==editIdx){ toast('Tên Client này đã tồn tại'); return; }
-    const obj = {name, note: noteInp.value.trim(), highlight: hlSel.value};
-    if(editing) CLIENT_LIST[editIdx] = obj; else CLIENT_LIST.push(obj);
-    await saveClientList();
-    toast(editing ? 'Đã lưu thay đổi' : 'Đã thêm Client');
-    renderClientList._editIdx = null;
-    renderClientList();
-  });
-  if(editing) formBtns[1].addEventListener('click', ()=>{ renderClientList._editIdx=null; renderClientList(); });
+  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},['Client được chọn khi nhập điểm kiểm tra; nếu có ghi chú, sẽ hiện nổi bật ngay khi chọn.']));
 
   const xlsCard = el('div',{class:'card'},[
     el('div',{class:'card-h'},['Xuất / Nhập bằng Excel', el('div',{class:'rule'})]),
@@ -2854,9 +3160,9 @@ function renderClientList(){
     ]),
   ]);
   root.appendChild(xlsCard);
-  const XLS_HEADERS = ['Tên Client','Ghi chú','Highlight (Đỏ/Cam/Xanh/để trống)'];
+  const CLIENT_XLS_HEADERS = ['Tên Client','Ghi chú','Highlight (Đỏ/Cam/Xanh/để trống)'];
   qs('#btnClientTemplate', xlsCard).addEventListener('click', ()=>{
-    const xml = buildTableExcelXml('Client Template', XLS_HEADERS, [
+    const xml = buildTableExcelXml('Client Template', CLIENT_XLS_HEADERS, [
       ['VD: ACME Corp', 'Yêu cầu độ ẩm dưới 3%', 'Đỏ'],
       ['VD: Beta Trading', '', ''],
     ]);
@@ -2864,7 +3170,7 @@ function renderClientList(){
   });
   qs('#btnClientExportXls', xlsCard).addEventListener('click', ()=>{
     const rows = CLIENT_LIST.map(c=>[c.name, c.note||'', CLIENT_HL_EXPORT_WORD[c.highlight]||'']);
-    const xml = buildTableExcelXml('Danh sách Client', XLS_HEADERS, rows);
+    const xml = buildTableExcelXml('Danh sách Client', CLIENT_XLS_HEADERS, rows);
     downloadBlob(new Blob([xml],{type:'application/vnd.ms-excel'}), `Shiftly_Client_List_${todayStr()}.xls`);
   });
   qs('#clientXlsInput', xlsCard).addEventListener('change', async e=>{
@@ -2889,32 +3195,64 @@ function renderClientList(){
     renderClientList();
   });
 
-  const listCard = el('div',{class:'card'},[
-    el('div',{class:'card-h'},[`Danh sách Client (${CLIENT_LIST.length})`, el('div',{class:'rule'})]),
-  ]);
-  if(CLIENT_LIST.length===0){
-    listCard.appendChild(el('div',{class:'sub'},['Chưa có Client nào.']));
-  } else {
-    CLIENT_LIST.forEach((c,idx)=>{
-      const hl = CLIENT_HIGHLIGHTS.find(h=>h.value===c.highlight) || CLIENT_HIGHLIGHTS[0];
-      const row = el('div',{class:'specfield', style: c.highlight ? `background:${hl.color};` : ''},[
-        el('div',{class:'fi'},[ el('b',{},[c.name]), el('span',{},[c.note || '—']) ]),
-        el('button',{class:'btn ghost sm'},['✏️']),
-        el('button',{class:'btn danger sm'},['🗑️']),
-      ]);
-      const [editBtn, delBtn] = qsa('button', row);
-      editBtn.addEventListener('click', ()=>{ renderClientList._editIdx = idx; renderClientList(); });
+  renderClientList._table = renderClientList._table || {filters:{}, sort:{key:null,dir:null}};
+  const table = buildEditableTable({
+    state: renderClientList._table,
+    rows: CLIENT_LIST.map((item,idx)=>({item, idx})),
+    emptyText: 'Chưa có Client nào — thêm ở dòng trên cùng.',
+    rowStyle: row => {
+      const hl = CLIENT_HIGHLIGHTS.find(h=>h.value===row.item.highlight);
+      return (hl && hl.color!=='transparent') ? `background:${hl.color};` : '';
+    },
+    columns: [
+      {
+        key:'name', label:'Tên Client', sortable:true, filter:'text', type:'text',
+        get: row=>row.item.name, addPlaceholder:'Tên khách hàng/Client',
+        set: async (row, val) => {
+          if(!val){ toast('Cần nhập tên Client'); return false; }
+          const dup = CLIENT_LIST.findIndex((c,i)=>c.name===val && i!==row.idx);
+          if(dup!==-1){ toast('Tên Client này đã tồn tại'); return false; }
+          CLIENT_LIST[row.idx].name = val;
+          await saveClientList();
+        },
+      },
+      {
+        key:'note', label:'Ghi chú', filter:'text', type:'text',
+        get: row=>row.item.note||'', addPlaceholder:'Ghi chú (tuỳ chọn)',
+        set: async (row, val) => { CLIENT_LIST[row.idx].note = val; await saveClientList(); },
+      },
+      {
+        key:'highlight', label:'Highlight', sortable:true,
+        filter:{type:'multi', options: CLIENT_HIGHLIGHTS.map(h=>({value:h.value, label:h.label}))},
+        filterVal: row => row.item.highlight||'',
+        sortVal: row => CLIENT_HIGHLIGHTS.findIndex(h=>h.value===(row.item.highlight||'')),
+        type:'select', options: CLIENT_HIGHLIGHTS.map(h=>({value:h.value, label:h.label})),
+        get: row => row.item.highlight||'',
+        set: async (row, val) => { CLIENT_LIST[row.idx].highlight = val; await saveClientList(); },
+      },
+    ],
+    onAdd: async (values) => {
+      const name = (values.name||'').trim();
+      if(!name){ toast('Cần nhập tên Client'); return false; }
+      if(CLIENT_LIST.some(c=>c.name===name)){ toast('Tên Client này đã tồn tại'); return false; }
+      CLIENT_LIST.push({name, note: (values.note||'').trim(), highlight: values.highlight||''});
+      await saveClientList();
+      toast('Đã thêm Client');
+      renderClientList();
+    },
+    renderActions: row => {
+      const delBtn = el('button',{class:'rowbtn del'},['🗑️']);
       delBtn.addEventListener('click', async ()=>{
-        if(confirm(`Xoá Client "${c.name}"?`)){
-          CLIENT_LIST.splice(idx,1);
+        if(confirm(`Xoá Client "${row.item.name}"?`)){
+          CLIENT_LIST.splice(row.idx,1);
           await saveClientList();
           renderClientList();
         }
       });
-      listCard.appendChild(row);
-    });
-  }
-  root.appendChild(listCard);
+      return [delBtn];
+    },
+  });
+  root.appendChild(table);
 }
 
 /* ===================== DANH SÁCH ITEMS CODE TAB =====================
@@ -2922,52 +3260,12 @@ function renderClientList(){
    (thành phẩm) và RW (Rework), đúng theo cách nhà máy đang quản lý (xem
    ITEM_CODE_LIST/DEFAULT_ITEM_CODE_LIST). Không dùng Item Code làm khoá
    duy nhất tuyệt đối — dữ liệu thật cho thấy cùng 1 mã RW có thể lặp lại
-   với tên khác nhau, nên sửa/xoá luôn thao tác theo INDEX trong mảng
-   (giống hệt Danh sách Client), không theo mã. */
+   với tên khác nhau, nên sửa/xoá luôn thao tác theo INDEX trong mảng. */
 function renderItemCodeList(){
   const root = qs('#view-itemcodelist');
   root.innerHTML = '';
   root.appendChild(el('div',{class:'section-title'},['Danh sách Items Code']));
-  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},[`Bảng liên đới Item Code, Tên sản phẩm & Recipe — ${ITEM_CODE_LIST.length} dòng (mặc định nạp sẵn từ dữ liệu thực tế, có thể sửa/xuất/nhập Excel bên dưới).`]));
-
-  const editIdx = renderItemCodeList._editIdx;
-  const editing = (editIdx!=null) ? ITEM_CODE_LIST[editIdx] : null;
-
-  const formCard = el('div',{class:'card'},[
-    el('div',{class:'card-h'},[editing?'✏️ Sửa Item Code':'➕ Thêm Item Code', el('div',{class:'rule'})]),
-  ]);
-  const typeSel = el('select',{class:'inp'},[el('option',{value:'FGs'},['FGs (Thành phẩm)']),el('option',{value:'RW'},['RW (Rework)'])]);
-  if(editing) typeSel.value = editing.type;
-  const codeInp = el('input',{class:'inp', type:'text', placeholder:'VD: 10100001', value: editing?editing.itemCode:''},[]);
-  const nameInp = el('input',{class:'inp', type:'text', placeholder:'Tên sản phẩm', value: editing?editing.name:''},[]);
-  const recipeInp = el('input',{class:'inp', type:'text', placeholder:'VD: 405, L450, Semi-FGs...', value: editing?editing.recipe:''},[]);
-  formCard.appendChild(el('div',{class:'grid g2'},[
-    el('label',{class:'fld'},[el('span',{class:'lab'},['Loại']), typeSel]),
-    el('label',{class:'fld'},[el('span',{class:'lab'},['Item Code']), codeInp]),
-  ]));
-  formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Tên sản phẩm']), nameInp]));
-  formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Recipe']), recipeInp]));
-  const btnRow = el('div',{class:'row', style:'margin-top:12px;'},[
-    el('button',{class:'btn teal sm'},[editing?'💾 Lưu thay đổi':'➕ Thêm']),
-  ]);
-  if(editing) btnRow.appendChild(el('button',{class:'btn ghost sm'},['Huỷ']));
-  formCard.appendChild(btnRow);
-  root.appendChild(formCard);
-  const formBtns = qsa('button', btnRow);
-  formBtns[0].addEventListener('click', async ()=>{
-    const itemCode = codeInp.value.trim(), name = nameInp.value.trim();
-    if(!itemCode && !name){ toast('Cần nhập ít nhất Item Code hoặc Tên sản phẩm'); return; }
-    const obj = {type: typeSel.value, itemCode, name, recipe: recipeInp.value.trim()};
-    if(!editing && itemCode && ITEM_CODE_LIST.some(i=>i.type===obj.type && i.itemCode===itemCode)){
-      if(!confirm(`Mã ${itemCode} (${obj.type}) đã tồn tại (dữ liệu thật cho phép trùng mã khác tên) — vẫn thêm dòng mới?`)) return;
-    }
-    if(editing) ITEM_CODE_LIST[editIdx] = obj; else ITEM_CODE_LIST.push(obj);
-    await saveItemCodeList();
-    toast(editing ? 'Đã lưu thay đổi' : 'Đã thêm Item Code');
-    renderItemCodeList._editIdx = null;
-    renderItemCodeList();
-  });
-  if(editing) formBtns[1].addEventListener('click', ()=>{ renderItemCodeList._editIdx=null; renderItemCodeList(); });
+  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},[`Bảng liên đới Item Code, Tên sản phẩm & Recipe — ${ITEM_CODE_LIST.length} dòng (mặc định nạp sẵn từ dữ liệu thực tế). Lọc/sắp xếp theo từng cột, sửa trực tiếp trong bảng, hoặc thêm dòng mới ở hàng đầu tiên.`]));
 
   const xlsCard = el('div',{class:'card'},[
     el('div',{class:'card-h'},['Xuất template / Nhập / Xuất Excel', el('div',{class:'rule'})]),
@@ -2981,9 +3279,9 @@ function renderItemCodeList(){
     ]),
   ]);
   root.appendChild(xlsCard);
-  const XLS_HEADERS = ['Loại (FGs/RW)','Item Code','Tên sản phẩm','Recipe'];
+  const ITEMCODE_XLS_HEADERS = ['Loại (FGs/RW)','Item Code','Tên sản phẩm','Recipe'];
   qs('#btnItemCodeTemplate', xlsCard).addEventListener('click', ()=>{
-    const xml = buildTableExcelXml('Items Code Template', XLS_HEADERS, [
+    const xml = buildTableExcelXml('Items Code Template', ITEMCODE_XLS_HEADERS, [
       ['FGs', 'VD: 10100001', 'VD: Freeze Dried Instant Coffee FD 4000 25kg', 'VD: 400'],
       ['RW', 'VD: 11100010', 'VD: Rework Freeze Dried Instant Coffee FD 4000 25kg', 'VD: 400'],
     ]);
@@ -2991,7 +3289,7 @@ function renderItemCodeList(){
   });
   qs('#btnItemCodeExportXls', xlsCard).addEventListener('click', ()=>{
     const rows = ITEM_CODE_LIST.map(i=>[i.type, i.itemCode||'', i.name||'', i.recipe||'']);
-    const xml = buildTableExcelXml('Danh sách Items Code', XLS_HEADERS, rows);
+    const xml = buildTableExcelXml('Danh sách Items Code', ITEMCODE_XLS_HEADERS, rows);
     downloadBlob(new Blob([xml],{type:'application/vnd.ms-excel'}), `Shiftly_ItemsCode_List_${todayStr()}.xls`);
   });
   qs('#itemCodeXlsInput', xlsCard).addEventListener('change', async e=>{
@@ -3018,58 +3316,61 @@ function renderItemCodeList(){
     renderItemCodeList();
   });
 
-  const filterCard = el('div',{class:'card'},[]);
-  const searchInp = el('input',{class:'inp', type:'text', placeholder:'Tìm theo Item Code / Tên sản phẩm / Recipe...', value: renderItemCodeList._search||''},[]);
-  const typeFilterSel = el('select',{class:'inp', style:'max-width:220px;'},[
-    el('option',{value:''},['Tất cả loại']), el('option',{value:'FGs'},['Chỉ FGs']), el('option',{value:'RW'},['Chỉ RW']),
-  ]);
-  typeFilterSel.value = renderItemCodeList._typeFilter||'';
-  filterCard.appendChild(el('div',{class:'grid g2'},[
-    el('label',{class:'fld'},[el('span',{class:'lab'},['Tìm kiếm']), searchInp]),
-    el('label',{class:'fld'},[el('span',{class:'lab'},['Lọc theo loại']), typeFilterSel]),
-  ]));
-  root.appendChild(filterCard);
-  searchInp.addEventListener('input', ()=>{ renderItemCodeList._search = searchInp.value; renderList(); });
-  typeFilterSel.addEventListener('change', ()=>{ renderItemCodeList._typeFilter = typeFilterSel.value; renderList(); });
-
-  const listCard = el('div',{class:'card'},[]);
-  root.appendChild(listCard);
-  function renderList(){
-    const q = (renderItemCodeList._search||'').trim().toLowerCase();
-    const tf = renderItemCodeList._typeFilter||'';
-    const filtered = ITEM_CODE_LIST
-      .map((item,idx)=>({item,idx}))
-      .filter(({item})=> !tf || item.type===tf)
-      .filter(({item})=> !q || [item.itemCode,item.name,item.recipe].some(v=>(v||'').toLowerCase().includes(q)));
-    listCard.innerHTML = '';
-    listCard.appendChild(el('div',{class:'card-h'},[`Danh sách (${filtered.length}/${ITEM_CODE_LIST.length})`, el('div',{class:'rule'})]));
-    if(filtered.length===0){
-      listCard.appendChild(el('div',{class:'sub'},['Không có Item Code nào khớp.']));
-      return;
-    }
-    filtered.forEach(({item,idx})=>{
-      const row = el('div',{class:'specfield'},[
-        el('span',{class:'typetag'},[item.type]),
-        el('div',{class:'fi'},[
-          el('b',{},[item.itemCode || '(chưa có mã)']),
-          el('span',{},[`${item.name||'—'}${item.recipe?' · Recipe '+item.recipe:''}`]),
-        ]),
-        el('button',{class:'btn ghost sm'},['✏️']),
-        el('button',{class:'btn danger sm'},['🗑️']),
-      ]);
-      const [editBtn, delBtn] = qsa('button', row);
-      editBtn.addEventListener('click', ()=>{ renderItemCodeList._editIdx = idx; renderItemCodeList(); });
+  renderItemCodeList._table = renderItemCodeList._table || {filters:{}, sort:{key:null,dir:null}};
+  const table = buildEditableTable({
+    state: renderItemCodeList._table,
+    rows: ITEM_CODE_LIST.map((item,idx)=>({item, idx})),
+    emptyText: 'Không có Item Code nào khớp bộ lọc.',
+    columns: [
+      {
+        key:'type', label:'Loại', sortable:true,
+        filter:{type:'multi', options:[{value:'FGs',label:'FGs (Thành phẩm)'},{value:'RW',label:'RW (Rework)'}]},
+        filterVal: row=>row.item.type, sortVal: row=>row.item.type,
+        type:'select', options:[{value:'FGs',label:'FGs'},{value:'RW',label:'RW'}],
+        get: row=>row.item.type,
+        set: async (row, val) => { row.item.type = val; await saveItemCodeList(); },
+      },
+      {
+        key:'itemCode', label:'Item Code', sortable:true, filter:'text', type:'text',
+        get: row=>row.item.itemCode||'', addPlaceholder:'VD: 10100001',
+        set: async (row, val) => { row.item.itemCode = val; await saveItemCodeList(); },
+      },
+      {
+        key:'name', label:'Tên sản phẩm', sortable:true, filter:'text', type:'text',
+        get: row=>row.item.name||'', addPlaceholder:'Tên sản phẩm',
+        set: async (row, val) => { row.item.name = val; await saveItemCodeList(); },
+      },
+      {
+        key:'recipe', label:'Recipe', sortable:true, filter:'text', type:'text',
+        get: row=>row.item.recipe||'', addPlaceholder:'VD: 405, L450, Semi-FGs...',
+        set: async (row, val) => { row.item.recipe = val; await saveItemCodeList(); },
+      },
+    ],
+    onAdd: async (values) => {
+      const type = values.type==='RW' ? 'RW' : 'FGs';
+      const itemCode = (values.itemCode||'').trim(), name = (values.name||'').trim(), recipe = (values.recipe||'').trim();
+      if(!itemCode && !name){ toast('Cần nhập ít nhất Item Code hoặc Tên sản phẩm'); return false; }
+      if(itemCode && ITEM_CODE_LIST.some(i=>i.type===type && i.itemCode===itemCode)){
+        if(!confirm(`Mã ${itemCode} (${type}) đã tồn tại (dữ liệu thật cho phép trùng mã khác tên) — vẫn thêm dòng mới?`)) return false;
+      }
+      ITEM_CODE_LIST.push({type, itemCode, name, recipe});
+      await saveItemCodeList();
+      toast('Đã thêm Item Code');
+      renderItemCodeList();
+    },
+    renderActions: row => {
+      const delBtn = el('button',{class:'rowbtn del'},['🗑️']);
       delBtn.addEventListener('click', async ()=>{
-        if(confirm(`Xoá dòng "${item.itemCode||item.name}"?`)){
-          ITEM_CODE_LIST.splice(idx,1);
+        if(confirm(`Xoá dòng "${row.item.itemCode||row.item.name}"?`)){
+          ITEM_CODE_LIST.splice(row.idx,1);
           await saveItemCodeList();
           renderItemCodeList();
         }
       });
-      listCard.appendChild(row);
-    });
-  }
-  renderList();
+      return [delBtn];
+    },
+  });
+  root.appendChild(table);
 }
 
 /* ===================== DATA LOG TAB ===================== */
@@ -3132,100 +3433,6 @@ async function renderDataLog(){
   }
   filterBtn.addEventListener('click', draw);
   draw();
-}
-
-function renderTrace(){
-  const root = qs('#view-trace');
-  root.innerHTML = '';
-  root.appendChild(el('div',{class:'section-title'},['Truy xuất dữ liệu']));
-  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},['Tìm theo mã PO (bao gồm cả PO đã đóng và đang nhập liệu — chọn từ gợi ý hoặc nhập tay), theo Ca, và/hoặc theo khoảng ngày.']));
-
-  const card = el('div',{class:'card'},[]);
-  const poAC = renderAutocomplete(renderTrace._prefillPO||'', allPOsEverUsed(), 'Chọn hoặc nhập mã PO');
-  const shiftSel = el('select',{class:'inp'},[]);
-  shiftSel.appendChild(el('option',{value:''},['— Tất cả ca —']));
-  ['1','2','3'].forEach(v=>shiftSel.appendChild(el('option',{value:v},[`Ca ${v}`])));
-  const fromInp = el('input',{class:'inp', type:'date'},[]);
-  const toInp = el('input',{class:'inp', type:'date'},[]);
-  card.appendChild(el('div',{class:'grid g2'},[
-    el('label',{class:'fld'},[el('span',{class:'lab'},['Mã PO']), poAC.node]),
-    el('label',{class:'fld'},[el('span',{class:'lab'},['Ca']), shiftSel]),
-  ]));
-  card.appendChild(el('div',{class:'grid g2', style:'margin-top:10px;'},[
-    el('label',{class:'fld'},[el('span',{class:'lab'},['Từ ngày']), fromInp]),
-    el('label',{class:'fld'},[el('span',{class:'lab'},['Đến ngày']), toInp]),
-  ]));
-  const searchBtn = el('button',{class:'btn teal', style:'margin-top:14px;'},['🔎 Tìm kiếm']);
-  card.appendChild(searchBtn);
-  root.appendChild(card);
-
-  const resultBox = el('div',{},[]);
-  root.appendChild(resultBox);
-
-  function runSearch(){
-    const poQ = poAC.getValue();
-    const shiftQ = shiftSel.value;
-    const fromV = fromInp.value, toV = toInp.value;
-    if(!poQ && !shiftQ && !fromV && !toV){ toast('Nhập ít nhất 1 điều kiện tìm kiếm'); return; }
-    const matches = allCheckpoints.filter(rec=>{
-      if(rec.section==='META') return false;
-      if(fromV && rec.date < fromV) return false;
-      if(toV && rec.date > toV) return false;
-      if(shiftQ && rec.shift !== shiftQ) return false;
-      if(poQ && !matchPO(rec, poQ)) return false;
-      return true;
-    });
-    matches.sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
-    resultBox.innerHTML = '';
-    const summaryRow = el('div',{class:'row', style:'margin:14px 0 8px;align-items:center;'},[
-      el('div',{class:'sub', style:'margin:0;flex:1;'},[`Tìm thấy ${matches.length} điểm kiểm tra khớp điều kiện.`]),
-    ]);
-    if(matches.length>0){
-      const xlsBtn = el('button',{class:'btn ghost sm'},['📊 Xuất Excel kết quả']);
-      xlsBtn.addEventListener('click', async ()=>{
-        const xml = buildExcelXml(matches);
-        const file = new File([xml], `Truyxuat_${todayStr()}_${matches.length}.xls`, {type:'application/vnd.ms-excel'});
-        await exportFileToPreferredLocation(file, {title:'Truy xuất Shiftly', fallbackMsg:`Đã tải Excel (${matches.length} dòng) về máy`});
-      });
-      summaryRow.appendChild(xlsBtn);
-    }
-    resultBox.appendChild(summaryRow);
-    if(matches.length===0) return;
-    const wrap = el('div',{class:'card tablescroll'},[]);
-    const table = el('table',{class:'datatable'},[]);
-    table.innerHTML = '<thead><tr><th>Ngày</th><th>Ca</th><th>Công đoạn</th><th>QC</th><th>PO</th><th>Trạng thái PO</th><th></th></tr></thead>';
-    const tbody = el('tbody',{},[]);
-    matches.forEach(rec=>{
-      const closed = rec.po && isPOClosed(rec.po);
-      const secName = sectionById(rec.section) ? sectionById(rec.section).name : rec.section;
-      const viewBtn = el('button',{class:'mini'},['👁 Xem']);
-      viewBtn.addEventListener('click', ()=>{ showTab('table'); renderTable._mode='list'; renderTable(); renderDetail(rec.key); });
-      const editBtn = el('button',{class:'mini'},['✎ Sửa']);
-      editBtn.addEventListener('click', ()=>{
-        if(closed){
-          const ok = promptPasswordOK(`PO "${rec.po}" đã đóng. Nhập mật khẩu để Force sửa dữ liệu:`);
-          if(!ok) return;
-        }
-        renderInputForm._date = rec.date; renderInputForm._shift = rec.shift;
-        renderInputForm._editKey = rec.key; renderInputForm._addOpen = false; renderInputForm._draft = null;
-        showTab('input'); renderInputForm();
-      });
-      tbody.appendChild(el('tr',{},[
-        el('td',{},[fmtDateVN(rec.date)]), el('td',{},[rec.shift]), el('td',{},[secName]), el('td',{},[rec.technician||'—']),
-        el('td',{},[rec.po||'—']),
-        el('td',{},[rec.po ? (closed?'✅ Đã đóng':'⏳ Đang nhập') : '—']),
-        el('td',{},[viewBtn, editBtn]),
-      ]));
-    });
-    table.appendChild(tbody);
-    wrap.appendChild(table);
-    resultBox.appendChild(wrap);
-  }
-  searchBtn.addEventListener('click', runSearch);
-  if(renderTrace._prefillPO){
-    renderTrace._prefillPO = null;
-    runSearch();
-  }
 }
 
 /* ===================== REPORT TAB (image export) ===================== */
@@ -5112,8 +5319,8 @@ function renderGuide(){
     <p>Khi bấm "Lưu công đoạn" mà còn chỉ tiêu chưa nhập, app sẽ hỏi xác nhận trước ("Còn X/Y chỉ tiêu chưa nhập, vẫn lưu?") — không chặn, chỉ nhắc để tránh bỏ sót ngoài ý muốn.</p>
     <h4>13. Đồng bộ cấu hình Specs giữa nhiều tablet</h4>
     <p>Nếu công ty dùng nhiều tablet, chỉnh Specs xong ở 1 máy → vào tab <b>Specs</b> → "Xuất cấu hình Specs (JSON)" → chia sẻ file này sang các máy khác → ở máy nhận, vào tab Specs → "Nhập cấu hình Specs (JSON)" → chọn file. File này chỉ chứa danh sách chỉ tiêu &amp; giới hạn, không chứa dữ liệu ca nên an toàn khi đồng bộ.</p>
-    <h4>14. Tab Truy xuất — tìm theo PO / theo Ca / theo ngày</h4>
-    <p>Nhập mã PO (chọn từ gợi ý hoặc gõ tay), chọn Ca, và/hoặc khoảng ngày rồi bấm Tìm kiếm. Mỗi PO giờ gắn thẳng với 1 điểm kiểm tra (1 Công đoạn cụ thể) nên kết quả cho biết ngay PO đó ở công đoạn nào, ca nào — bấm 👁 Xem để mở chi tiết, ✎ Sửa để chỉnh sửa (nếu PO đã đóng sẽ hỏi mật khẩu Force), hoặc "📊 Xuất Excel kết quả" để tải về.</p>
+    <h4>14. Truy xuất dữ liệu — lọc ngay trong tab Dữ liệu</h4>
+    <p>Tab "Truy xuất" riêng đã được gộp vào tab <b>Dữ liệu</b> (ở chế độ "📋 Danh sách ca") — thẻ "🔎 Truy xuất — lọc theo PO/Ca/khoảng ngày" ngay phía trên bảng cho lọc theo mã PO (chọn từ gợi ý hoặc gõ tay), Ca, và/hoặc khoảng ngày; bảng bên dưới tự cập nhật ngay khi đổi bộ lọc (không cần bấm nút tìm kiếm), kèm nút "✕ Xoá bộ lọc" và "📊 Xuất Excel kết quả" cho đúng phần đang lọc. Vẫn dùng chung các nút 👁/✎/🗑 sẵn có của bảng — ✎ Sửa 1 điểm kiểm tra thuộc PO đã đóng sẽ hỏi mật khẩu Force như trước.</p>
     <h4>15. Sắp xếp lại thứ tự chỉ tiêu (Specs)</h4>
     <p>Mỗi chỉ tiêu trong tab Specs có 2 nút ▲ ▼ để di chuyển lên/xuống trong danh sách của công đoạn đó — thứ tự này cũng là thứ tự hiển thị ở tab Nhập liệu.</p>
     <h4>16. Báo cáo theo PO (tab Báo cáo)</h4>
@@ -5141,7 +5348,7 @@ function renderGuide(){
     <h4>26. Recipe & Client là thuộc tính của từng điểm kiểm tra</h4>
     <p>Recipe và Client giờ chọn trực tiếp khi tạo/sửa điểm kiểm tra (cùng chỗ với PO, QC) — không còn là 1 chỉ tiêu riêng trong danh sách Specs của từng công đoạn.</p>
     <h4>27. Sửa dữ liệu: cho phép đổi mã PO</h4>
-    <p>Khi bấm "✎ Sửa" 1 điểm kiểm tra đã có (từ tab Dữ liệu hoặc Truy xuất), ô Mã PO giờ sửa được trực tiếp (Công đoạn vẫn giữ nguyên, không đổi được). Nếu đổi sang mã PO đã có sẵn 1 điểm kiểm tra khác trùng Công đoạn/Ca/Ngày, app sẽ hỏi xác nhận trước khi ghi đè.</p>
+    <p>Khi bấm "✎ Sửa" 1 điểm kiểm tra đã có (từ tab Dữ liệu), ô Mã PO giờ sửa được trực tiếp (Công đoạn vẫn giữ nguyên, không đổi được). Nếu đổi sang mã PO đã có sẵn 1 điểm kiểm tra khác trùng Công đoạn/Ca/Ngày, app sẽ hỏi xác nhận trước khi ghi đè.</p>
     <h4>28. Tab Data Log</h4>
     <p>Ghi lại toàn bộ lịch sử thay đổi dữ liệu: mỗi lần bấm "Lưu điểm kiểm tra", app tự so sánh giá trị cũ và mới của từng chỉ tiêu, chỉ ghi log những gì thực sự thay đổi — kèm thời gian, Ca, PO, công đoạn, QC. Lọc theo ngày hoặc theo PO để tra cứu nhanh.</p>
     <h4>29. Ảnh đính kèm hiển thị ngay trong Báo cáo</h4>
