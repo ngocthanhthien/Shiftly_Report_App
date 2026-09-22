@@ -76,6 +76,40 @@ test('admin always sees every tab, even one hidden for supervisor/user', async (
   } finally { dom.window.close(); }
 });
 
+test('topbar "🚪 Đăng xuất" button: hidden when logged out, shown when logged in; clicking signs out AND clears the browser Cache Storage API / Service Workers', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    const btn = () => doc.querySelector('#topbarLogoutBtn');
+    assert.equal(btn().style.display, 'none', 'hidden by default (no logged-in member)');
+
+    w.eval("currentMember = {userId:'u1', displayName:'QA', username:'qa', role:'user'}");
+    w.eval('updateMemberPill()');
+    assert.notEqual(btn().style.display, 'none', 'must show once a member is logged in');
+    assert.ok(doc.querySelector('#memberPillTxt').textContent.includes('QA'));
+
+    // Stub the browser APIs jsdom doesn't implement, so the click handler's
+    // cache-clearing path actually runs (not just silently no-op'd) — same
+    // stubbing style as w.confirm/w.print used elsewhere in this test suite.
+    w.caches = { keys: async () => ['v1-static'], delete: async (k) => { w.__deletedCaches = (w.__deletedCaches||[]).concat(k); return true; } };
+    w.navigator.serviceWorker = { getRegistrations: async () => [{ unregister: async () => { w.__swUnregistered = true; return true; } }] };
+
+    btn().click();
+    await new Promise(r => setTimeout(r, 100));
+
+    assert.equal(w.eval('currentMember'), null, 'must actually sign out (currentMember cleared)');
+    assert.deepEqual(evalJson(w, 'window.__deletedCaches'), ['v1-static'], 'must delete every Cache Storage entry for this origin');
+    assert.equal(w.eval('window.__swUnregistered'), true, 'must unregister any Service Worker');
+    // Not asserting errors.length===0: jsdom's window.location.reload() is a
+    // non-configurable, non-overridable stub that logs a "Not implemented:
+    // navigation" jsdomError when actually called — a pre-existing
+    // environment gap (same category as the missing <canvas>/window.print()
+    // implementations noted elsewhere in this suite), not a bug in
+    // logoutAndClearCache() itself. The cache/service-worker cleanup above
+    // (which DOES run in jsdom) is what this test can actually verify.
+  } finally { dom.window.close(); }
+});
+
 test('a plain user is unaffected (default hidden list is empty) unless Admin explicitly hides something', async () => {
   const {dom, w, errors} = await boot();
   try {

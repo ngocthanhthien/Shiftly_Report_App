@@ -354,6 +354,7 @@ svg.chart{width:100%;height:auto;display:block;}
     <div class="brand"><span class="dot"></span><div><b>Shiftly Report ☁️</b><small>ILD Coffee Vietnam — Online</small></div></div>
     <div class="spacer"></div>
     <div class="netpill off" id="memberPill" style="display:none;margin-right:8px;"><span class="ind"></span><span id="memberPillTxt"></span></div>
+    <button class="netpill" id="topbarLogoutBtn" style="display:none;margin-right:8px;" type="button" title="Đăng xuất và xoá bộ nhớ cache trình duyệt cho trang này"><span class="ind" style="background:var(--fail);"></span><span>🚪 Đăng xuất</span></button>
     <div class="netpill off" id="linkPill"><span class="ind"></span><span id="linkPillTxt">Chưa liên kết file</span></div>
   </div>
   <div class="tabs" role="tablist">
@@ -1713,14 +1714,16 @@ async function currentAccessToken(){
   catch(e){ return null; }
 }
 function updateMemberPill(){
-  const pill = qs('#memberPill'), txt = qs('#memberPillTxt');
+  const pill = qs('#memberPill'), txt = qs('#memberPillTxt'), logoutBtn = qs('#topbarLogoutBtn');
   if(!pill || !txt) return;
   if(currentMember){
     pill.style.display = '';
     pill.classList.remove('off');
     txt.textContent = `👤 ${currentMember.displayName || currentMember.username || ''} (${currentMember.role==='admin'?'Admin':'User'})`;
+    if(logoutBtn) logoutBtn.style.display = '';
   } else {
     pill.style.display = 'none';
+    if(logoutBtn) logoutBtn.style.display = 'none';
   }
 }
 function showApp(){
@@ -1747,6 +1750,34 @@ async function signOutCloud(silent){
   const sb = ensureSupabaseClient();
   if(sb) try{ await sb.auth.signOut(); }catch(e){}
   if(!silent) showLoginGate();
+}
+// Nút "🚪 Đăng xuất" ở góc topbar (khác nút cùng tên trong tab Cài đặt: nút
+// này CÒN xoá bộ nhớ cache trình duyệt của trang). Chỉ xoá đúng CacheStorage
+// (Cache API) + huỷ đăng ký mọi Service Worker của origin này — đây là toàn
+// bộ phần "cache trang web" mà JS thật sự có quyền xoá được (trình duyệt
+// không cấp API nào để trang tự xoá bộ nhớ đệm HTTP đĩa của chính nó, kể cả
+// Ctrl+Shift+R vẫn là hành động NGƯỜI DÙNG, không phải JS). CỐ Ý KHÔNG đụng
+// tới IndexedDB (toàn bộ dữ liệu QC thật) hay localStorage khác — đăng xuất
+// không được phép xoá dữ liệu đã nhập, chỉ xoá cache. Tải lại trang sau khi
+// xong để chắc chắn lần mở kế tiếp lấy đúng bản mới nhất từ server.
+async function clearBrowserCaches(){
+  try{
+    if(window.caches && caches.keys){
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k=>caches.delete(k)));
+    }
+  }catch(e){ console.error('clear caches failed', e); }
+  try{
+    if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r=>r.unregister()));
+    }
+  }catch(e){ console.error('unregister service workers failed', e); }
+}
+async function logoutAndClearCache(){
+  await signOutCloud();
+  await clearBrowserCaches();
+  location.reload();
 }
 // Runs after a successful signInWithPassword AND on every app boot when a
 // persisted session already exists — always re-verifies against the server
@@ -1893,6 +1924,7 @@ function showTab(name){
   if(name!=='settings' && name!=='guide' && cloudConfigured() && Date.now()-lastWake>20000) wakeSync();
 }
 qsa('.tab').forEach(t => t.addEventListener('click', ()=>showTab(t.dataset.tab)));
+qs('#topbarLogoutBtn').addEventListener('click', logoutAndClearCache);
 
 /* ===================== TAB LAYOUT & PER-ROLE VISIBILITY =====================
    Admin-configurable: reorder the tab bar, and hide individual tabs for the
@@ -6315,7 +6347,7 @@ function renderGuide(){
     <h4>1. Đồng bộ Supabase (tuỳ chọn, khuyên bật để dùng nhiều thiết bị)</h4>
     <p>Đây là bản Online của Shiftly Report — dữ liệu luôn được lưu trước trong chính máy đang dùng (IndexedDB), giống hệt bản offline gốc, nên mất mạng vẫn nhập liệu bình thường. Muốn nhiều tablet/máy tính cùng thấy chung 1 bộ dữ liệu, vào tab <b>Cài đặt</b> → mục "☁️ Đồng bộ Supabase" → nhập <b>Supabase URL</b> và <b>Anon public key</b> (do người triển khai app cung cấp — xem <code>supabase/README.md</code> trong mã nguồn) → "💾 Lưu cấu hình". Sau đó app sẽ yêu cầu <b>đăng nhập</b> (tài khoản do Admin tạo trong tab Cài đặt → "👥 Quản lý tài khoản") — mỗi người dùng riêng, đăng nhập xong app tự đẩy/kéo dữ liệu, không cần thao tác thêm.</p>
     <h4>1b. Đăng nhập & quản lý tài khoản</h4>
-    <p>Khi đã cấu hình Đồng bộ Supabase, app yêu cầu đăng nhập trước khi vào — có 3 loại tài khoản: <b>Admin</b> (toàn quyền, đăng nhập bằng email + mật khẩu), <b>Nhân viên/User</b> (nhập liệu bình thường, đăng nhập bằng tên đăng nhập + mật khẩu), và <b>Giám sát/Quản lý</b> (chỉ xem — Báo cáo, Truy xuất, Thống kê, Dữ liệu... — không nhập/sửa được dữ liệu; cũng đăng nhập bằng tên đăng nhập + mật khẩu). Chỉ Admin thấy mục "👥 Quản lý tài khoản" trong tab Cài đặt để tạo tài khoản mới, đổi vai trò (kể cả đổi qua lại giữa 3 vai trò), hoặc vô hiệu hóa một tài khoản (người bị vô hiệu hóa không đăng nhập được nữa, kể cả trên thiết bị đang mở sẵn — lần gọi đồng bộ tiếp theo sẽ bị từ chối và quay lại màn hình đăng nhập). Tài khoản Admin đầu tiên phải được tạo thủ công 1 lần trong Supabase Dashboard — xem <code>supabase/README.md</code>. Nếu chưa cấu hình Đồng bộ Supabase, app dùng bình thường không cần đăng nhập gì cả (y hệt trước đây).</p>
+    <p>Khi đã cấu hình Đồng bộ Supabase, app yêu cầu đăng nhập trước khi vào — có 3 loại tài khoản: <b>Admin</b> (toàn quyền, đăng nhập bằng email + mật khẩu), <b>Nhân viên/User</b> (nhập liệu bình thường, đăng nhập bằng tên đăng nhập + mật khẩu), và <b>Giám sát/Quản lý</b> (chỉ xem — Báo cáo, Truy xuất, Thống kê, Dữ liệu... — không nhập/sửa được dữ liệu; cũng đăng nhập bằng tên đăng nhập + mật khẩu). Chỉ Admin thấy mục "👥 Quản lý tài khoản" trong tab Cài đặt để tạo tài khoản mới, đổi vai trò (kể cả đổi qua lại giữa 3 vai trò), hoặc vô hiệu hóa một tài khoản (người bị vô hiệu hóa không đăng nhập được nữa, kể cả trên thiết bị đang mở sẵn — lần gọi đồng bộ tiếp theo sẽ bị từ chối và quay lại màn hình đăng nhập). Tài khoản Admin đầu tiên phải được tạo thủ công 1 lần trong Supabase Dashboard — xem <code>supabase/README.md</code>. Nếu chưa cấu hình Đồng bộ Supabase, app dùng bình thường không cần đăng nhập gì cả (y hệt trước đây). Khi đã đăng nhập, góc phải thanh trên cùng (mọi tab) hiện tên tài khoản kèm nút <b>"🚪 Đăng xuất"</b> — bấm vào sẽ đăng xuất VÀ tự xoá bộ nhớ cache trình duyệt của trang (Cache Storage/Service Worker nếu có), rồi tải lại trang; dữ liệu đã nhập trong máy (IndexedDB) không hề bị đụng tới. Tab Cài đặt vẫn còn nút "🚪 Đăng xuất" riêng (chỉ đăng xuất, không xoá cache) cho ai quen dùng chỗ cũ.</p>
     <h4>1c. Admin tuỳ chỉnh thứ tự & ẩn/hiện Tab theo vai trò</h4>
     <p>Ở tab Cài đặt, mục "🗂️ Sắp xếp &amp; Ẩn/hiện Tab" (chỉ Admin thấy) cho phép đổi thứ tự hiện ở thanh tab trên cùng (nút ▲▼, áp dụng chung cho mọi thiết bị/mọi người sau khi bấm Lưu), và chọn ẩn riêng từng tab với vai trò Nhân viên và/hoặc Giám sát/Quản lý — VD ẩn tab Specs với Nhân viên nếu không muốn họ tự sửa chỉ tiêu. Admin luôn thấy đủ mọi tab bất kể cấu hình này. Tab Cài đặt không bao giờ ẩn được (đây là nơi duy nhất có nút đăng xuất/ngắt kết nối, ẩn đi sẽ nhốt luôn tài khoản đó). Mặc định, vai trò Giám sát/Quản lý bị ẩn sẵn tab Nhập liệu.</p>
     <h4>2. Nhập liệu theo Điểm kiểm tra</h4>
