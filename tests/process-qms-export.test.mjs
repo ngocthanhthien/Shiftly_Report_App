@@ -106,6 +106,45 @@ test('buildProcessQmsPrintHtml: same grouping/columns as the Excel builder, rend
   } finally { dom.window.close(); }
 });
 
+test('buildProcessQmsExcelXml/buildProcessQmsPrintHtml: an optional `gantt` param adds a Process x Date x Shift Gantt (sheet/table) matching the same data as the interactive preview; omitted by default', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    w.eval(`ITEM_CODE_LIST = [{type:'FGs', itemCode:'12000056', name:'Coffee FDR2 452', recipe:'452'}];`);
+    const roa1 = w.blankCheckpoint('2026-07-22', '1', 'ROA', '612600069', 'QA');
+    roa1.itemCode = '12000056'; roa1.recipe = '452'; roa1.fields = {};
+    const roa2 = w.blankCheckpoint('2026-07-22', '3', 'ROA', '612600069', 'QA');
+    roa2.fields = {}; roa2.fields[w.eval('ISSUE_PAIRS_KEY')] = [{issue: 'Cà rang bị cháy', action: 'Mix 10% vào PO 69'}];
+    await w.idbPut('shifts', roa1); await w.idbPut('shifts', roa2);
+    await w.refreshCache();
+    const matches = w.eval('allCheckpoints');
+
+    // Without `gantt` (Theo ca's call path, unchanged) -> no Gantt sheet/table at all.
+    const xmlNoGantt = w.eval('buildProcessQmsExcelXml(allCheckpoints)');
+    assert.ok(!xmlNoGantt.includes('ss:Name="Gantt"'), 'no gantt param -> no extra worksheet');
+    const htmlNoGantt = w.eval('buildProcessQmsPrintHtml(allCheckpoints)');
+    assert.ok(!htmlNoGantt.includes('PO Production Timeline'), 'no gantt param -> no Gantt table');
+
+    // With `gantt` (Theo PO's call path) -> both formats carry the Gantt.
+    const xml = w.eval(`buildProcessQmsExcelXml(allCheckpoints, {poLabel:'612600069', matches:${JSON.stringify(matches)}})`);
+    assert.ok(xml.includes('<Worksheet ss:Name="Gantt">'), 'Excel must gain a dedicated "Gantt" worksheet');
+    assert.ok(xml.includes('>12000056<'), 'Item Code must appear in the Gantt sheet header');
+    assert.ok(xml.includes('>ROASTING<'), 'Process label (English Gantt label) must appear');
+    assert.ok(xml.includes('ss:StyleID="ganttBar"'), 'the Gantt bar cell must use the teal bar style');
+    assert.ok(xml.includes('>Cà rang bị cháy<'), 'Issue text must be carried into the Gantt sheet, in its own cell');
+    assert.ok(xml.includes('>Mix 10% vào PO 69<'), 'Action text must be carried into the Gantt sheet');
+    assert.ok(xml.includes('ss:Name="Data Export"'), 'the existing QMS "Data Export" sheet must still be present alongside Gantt');
+
+    const html = w.eval(`buildProcessQmsPrintHtml(allCheckpoints, false, {poLabel:'612600069', matches:${JSON.stringify(matches)}})`);
+    assert.ok(html.includes('PO Production Timeline'), 'PDF must gain a Gantt table');
+    assert.ok(html.includes('class="ganttbar"'), 'the Gantt bar cell must render with the bar class');
+    assert.ok(html.includes('>ROASTING<'));
+    assert.ok(html.includes('Cà rang bị cháy') && html.includes('Mix 10% vào PO 69'));
+    // The Gantt table must come BEFORE the existing QMS table in the printed page.
+    assert.ok(html.indexOf('PO Production Timeline') < html.indexOf('Xuất dữ liệu ('), 'Gantt must render before the QMS data table');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
 test('Báo cáo tab: template export is scoped to the selected Date+Shift+Process, never the whole dataset', async () => {
   const {dom, w, errors} = await boot();
   try {

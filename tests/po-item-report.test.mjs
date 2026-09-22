@@ -598,3 +598,44 @@ test('Báo cáo tab: "📄 PDF theo mẫu" prints Landscape when triggered from 
     // Not asserting errors.length===0 — see the canvas-measurement note above.
   } finally { dom.window.close(); }
 });
+
+test('Báo cáo tab: "Excel theo mẫu" and "PDF theo mẫu" both include the Gantt when triggered from Theo PO, but NOT from Theo ca (unchanged there)', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    await seedPOGanttData(w);
+    w.eval(`SCHEMA.find(s=>s.id==='ROA').fields.find(f=>f.id==='ROA_R6E').isQMS = true;`);
+    w.print = () => {};
+    w.showTab('report');
+    await new Promise(r => setTimeout(r, 80));
+
+    // Theo ca (default mode): neither export must contain the Gantt.
+    w.eval('window.__capturedFile = null;');
+    w.eval('window.exportFileToPreferredLocation = async (file) => { window.__capturedFile = file; };');
+    doc.querySelector('#btnRepQmsXlsx').click();
+    await new Promise(r => setTimeout(r, 100));
+    const xlsxShiftContent = await w.eval('window.__capturedFile.text()');
+    assert.ok(!xlsxShiftContent.includes('ss:Name="Gantt"'), 'Theo ca Excel export must NOT gain a Gantt worksheet');
+    doc.querySelector('#btnRepQmsPdf').click();
+    await new Promise(r => setTimeout(r, 120));
+    assert.ok(!doc.querySelector('#printArea').innerHTML.includes('PO Production Timeline'), 'Theo ca PDF export must NOT gain a Gantt table');
+
+    // Theo PO: both exports must include the Gantt, scoped to this exact PO.
+    doSearchPO(doc, w, '612600069');
+    await new Promise(r => setTimeout(r, 150));
+    w.eval('window.__capturedFile = null;');
+    doc.querySelector('#btnRepQmsXlsx').click();
+    await new Promise(r => setTimeout(r, 100));
+    const xlsxPoContent = await w.eval('window.__capturedFile.text()');
+    assert.ok(xlsxPoContent.includes('ss:Name="Gantt"'), 'Theo PO Excel export must gain the Gantt worksheet');
+    assert.ok(xlsxPoContent.includes('>612600069<'), 'the Gantt sheet must show the searched PO');
+    assert.ok(xlsxPoContent.includes('>ROASTING<') && xlsxPoContent.includes('>EXTRACTION<'), 'Process rows must reflect this PO\'s actual data');
+
+    doc.querySelector('#btnRepQmsPdf').click();
+    await new Promise(r => setTimeout(r, 120));
+    const printedHtml = doc.querySelector('#printArea').innerHTML;
+    assert.ok(printedHtml.includes('PO Production Timeline'), 'Theo PO PDF export must gain the Gantt table');
+    assert.ok(printedHtml.includes('>612600069<'));
+    // Not asserting errors.length===0 — see the canvas-measurement note above.
+  } finally { dom.window.close(); }
+});

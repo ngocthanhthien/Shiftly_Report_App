@@ -395,20 +395,23 @@ svg.chart{width:100%;height:auto;display:block;}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ===================== DATA SCHEMA ===================== */
-const DEFAULT_SCHEMA = [{"id": "ROA", "name": "Rang (ROA)", "fields": [{"id": "ROA_R5C", "label": "Temp. Roasting (℃):", "type": "number"}, {"id": "ROA_R5E", "label": "Moisture: 4.0 - 5.0%", "type": "boolean"}, {"id": "ROA_R6C", "label": "Roasting time (s):", "type": "number"}, {"id": "ROA_R6E", "label": "Color: 45 ± 2", "type": "number", "hardMin": 43.0, "hardMax": 47.0}, {"id": "ROA_R7C", "label": "Quenching (L): 87 - 89L", "type": "number", "hardMin": 87.0, "hardMax": 89.0}, {"id": "ROA_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "EXT", "name": "Trích ly (EXT)", "fields": [{"id": "EXT_R10C", "label": "Cylcle time (mins): 17 - 22", "type": "number", "hardMin": 17.0, "hardMax": 22.0}, {"id": "EXT_R10E", "label": "TC VG2: 9.98 - 11.23%", "type": "number", "hardMin": 9.98, "hardMax": 11.23}, {"id": "EXT_R11C", "label": "Dewatering (L): Max 300", "type": "number", "hardMax": 300.0}, {"id": "EXT_R11E", "label": "TC Conilon: 10.4 - 11.70%", "type": "number", "hardMin": 10.4, "hardMax": 11.7}, {"id": "EXT_R12C", "label": "Temp. PE (℃): 130 - 131", "type": "number", "hardMin": 130.0, "hardMax": 131.0}, {"id": "EXT_R12E", "label": "TC Decaf: 9.04 - 10.40%", "type": "number", "hardMin": 9.04, "hardMax": 10.4}, {"id": "EXT_R13C", "label": "Press. Flash PE (bara): 600 - 1000", "type": "number", "hardMin": 600.0, "hardMax": 1000.0}, {"id": "EXT_R13E", "label": "Cupping (B26600)", "type": "boolean"}, {"id": "EXT_R14C", "label": "Temp. SE (℃): 190 - 191", "type": "number", "hardMin": 190.0, "hardMax": 191.0}, {"id": "EXT_R15C", "label": "Press. Flash SE (bara): 500 - 1000", "type": "number", "hardMin": 500.0, "hardMax": 1000.0}, {"id": "EXT_R16C", "label": "DOF: 5.5 - 5.7", "type": "number", "hardMin": 5.5, "hardMax": 5.7}, {"id": "EXT_R17C", "label": "Coarse/ Fine (kg)", "type": "number"}, {"id": "EXT_CLEAN_18", "label": "Flushing", "type": "boolean"}, {"id": "EXT_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "EVA", "name": "Cô đặc (EVA)", "fields": [{"id": "EVA_R21C", "label": "Clarifier CIP (hour): 8 - 12", "type": "boolean"}, {"id": "EVA_R21E", "label": "Outlet thick clarifier max Grade 1", "type": "boolean"}, {"id": "EVA_R22C", "label": "MainEvap CIP (hour): 24 - 32", "type": "boolean"}, {"id": "EVA_R22E", "label": "Sediment (S2) max Grade 1.5", "type": "boolean"}, {"id": "EVA_R23C", "label": "Flow.Clarifier (L/h): 4500 - 5000", "type": "number", "hardMin": 4500.0, "hardMax": 5000.0}, {"id": "EVA_R23E", "label": "4.8 < pH < 5.3", "type": "number", "hardMin": 4.8, "hardMax": 5.3}, {"id": "EVA_R24C", "label": "Temp. Set tank 1 (℃): 50 - 65", "type": "number", "hardMin": 50.0, "hardMax": 65.0}, {"id": "EVA_R24E", "label": "Cupping (set tank 3)", "type": "boolean"}, {"id": "EVA_R25C", "label": "Temp. Set tank 2 (℃): 15 - 18", "type": "number", "hardMin": 15.0, "hardMax": 18.0}, {"id": "EVA_R25E", "label": "TS: 47-48.5% (Normal Density)\nTS: 46 - 47% (Low Density)", "type": "number", "hardMin": 47.0, "hardMax": 48.5}, {"id": "EVA_R26C", "label": "Temp. Set tank 3 (℃): 18 - 20", "type": "number", "hardMin": 18.0, "hardMax": 20.0}, {"id": "EVA_CLEAN_27", "label": "Flushing/ CIP", "type": "boolean"}, {"id": "EVA_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FD", "name": "Sấy thăng hoa (FD)", "fields": [{"id": "FD_R41C", "label": "Speed of belt (meters/mins): 2.4 - 3.2", "type": "number", "hardMin": 2.4, "hardMax": 3.2}, {"id": "FD_R42C", "label": "Temp. belt (℃): -16 => -18", "type": "number", "hardMin": -18.0, "hardMax": -16.0}, {"id": "FD_R43C", "label": "Temp. Ante room 4 (℃): Max 5", "type": "number", "hardMax": 5.0}, {"id": "FD_R44C", "label": "Time cycle tray (s): 26.8 - 27.0", "type": "number", "hardMin": 26.8, "hardMax": 27.0}, {"id": "FD_R45C", "label": "Filling tray (kg): 11.9 - 12.1", "type": "number", "hardMin": 11.9, "hardMax": 12.1}, {"id": "FD_R46C", "label": "Vaccum in conrad (mbar): 0.3 - 0.5", "type": "number", "hardMin": 0.3, "hardMax": 0.5}, {"id": "FD_R47C", "label": "Temp. zone   9 (℃): 120 - 138", "type": "number", "hardMin": 120.0, "hardMax": 138.0}, {"id": "FD_R48C", "label": "Temp. zone 10 (℃):   90 - 100", "type": "number", "hardMin": 90.0, "hardMax": 100.0}, {"id": "FD_R49C", "label": "Temp. zone 11 (℃):   65 -   75", "type": "number", "hardMin": 65.0, "hardMax": 75.0}, {"id": "FD_R50C", "label": "Temp. FGs at Discharge ( ℃): 42", "type": "number"}, {"id": "FD_R51C", "label": "Temprature at Discharge Room ( ℃): 23±3", "type": "number", "hardMin": 20.0, "hardMax": 26.0}, {"id": "FD_R52C", "label": "Humidity at Discharge Room (%RH): ≤ 55", "type": "number", "hardMax": 55.0}, {"id": "FD_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FP", "name": "Đóng gói (F&P)", "fields": [{"id": "FP_R55C", "label": "Oil Flow (g/h):  \n- 338 ≤  Normal ≤ 400 \n- 994 ≤  Low Density ≤ 1330", "type": "boolean"}, {"id": "FP_R56E", "label": "Không phát hiện 2 màu", "type": "boolean"}, {"id": "FP_R57E", "label": "Không phát hiện lump \n(sủi/ dầu/ melt)", "type": "boolean"}, {"id": "FP_R58C", "label": "Filling time: \nBox: 1m08s-1m12s\nBigbag: 19-20mins", "type": "text"}, {"id": "FP_R58E", "label": "Không phát hiện bụi bề mặt", "type": "boolean"}, {"id": "FP_R59E", "label": "Không phát hiện bụi sau shaking", "type": "boolean"}, {"id": "FP_R60E", "label": "Không phát hiện hạt lớn bất thường", "type": "boolean"}, {"id": "FP_R61C", "label": "Temprature at F&P ( ℃): 23±3\nHumidity at F&P (%RH): ≤ 55\nPressure at F&P (Pa): 6.0 - 7.0", "type": "boolean"}, {"id": "FP_R62E", "label": "Không phát hiện lủng bao Liner PE", "type": "boolean"}, {"id": "FP_R63E", "label": "Không phát hiện lủng thùng carton", "type": "boolean"}, {"id": "FP_R64C", "label": "Sealing: \nTemp: 190 - 195 ℃\nSpeed: 645-652 Hz", "type": "boolean"}, {"id": "FP_R64E", "label": "Không phát hiện lủng bao bigbag", "type": "boolean"}, {"id": "FP_R65E", "label": "Không phát hiện FB sau khi lồng bao", "type": "boolean"}, {"id": "FP_R66E", "label": "Artwork as standard", "type": "boolean"}, {"id": "FP_NETWEIGHT", "label": "Netweight (kg)/box: 25.00 - 25.04", "type": "boolean"}, {"id": "FP_DENSITY", "label": "Density: 220-240g/L", "type": "boolean"}, {"id": "FP_MOISTURE", "label": "Moisture: Max 3.00%", "type": "boolean"}, {"id": "FP_PH", "label": "pH: 4.80 - 5.10", "type": "boolean"}, {"id": "FP_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "REWORK", "name": "Tái chế (Rework)", "fields": [{"id": "RW_DRYMIX", "label": "Dry Mix (kg)", "type": "number"}, {"id": "RW_WETMIX", "label": "Wet Mix (kg)", "type": "number"}, {"id": "RW_PCT", "label": "% RW", "type": "number"}, {"id": "RW_DEFECT", "label": "Defect", "type": "select", "options": ["2 Color", "Out Color", "Out Moisture", "Out Density", "Out Sediment", "Lump oil", "Dust"]}, {"id": "RW_TEMP90", "label": "Temperature ≥ 90°C", "type": "boolean"}, {"id": "RW_KIEMLOCVAI", "label": "Kiểm lọc vải", "type": "boolean"}, {"id": "RW_FLOWRATE", "label": "Flowrate: 3000-3500 L/h", "type": "boolean"}, {"id": "RW_TYLERW", "label": "Tỷ lệ RW: Theo Matrix RW", "type": "boolean"}, {"id": "REWORK_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "META", "name": "Tổng kết ca", "fields": [{"id": "INFO_ISSUE", "label": "Information/ Issue", "type": "textarea"}, {"id": "HANDOVER", "label": "Handover", "type": "textarea"}]}];
+const DEFAULT_SCHEMA = [{"id": "ROA", "name": "Rang (ROA)", "fields": [{"id": "ROA_R5C", "label": "Temp. Roasting (℃):", "type": "number"}, {"id": "ROA_R5E", "label": "Moisture: 4.0 - 5.0%", "type": "boolean"}, {"id": "ROA_R6C", "label": "Roasting time (s):", "type": "number"}, {"id": "ROA_R6E", "label": "Color: 45 ± 2", "type": "number", "hardMin": 43.0, "hardMax": 47.0}, {"id": "ROA_R7C", "label": "Quenching (L): 87 - 89L", "type": "number", "hardMin": 87.0, "hardMax": 89.0}, {"id": "ROA_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "EXT", "name": "Trích ly (EXT)", "fields": [{"id": "EXT_R10C", "label": "Cylcle time (mins): 17 - 22", "type": "number", "hardMin": 17.0, "hardMax": 22.0}, {"id": "EXT_R10E", "label": "TC VG2: 9.98 - 11.23%", "type": "number", "hardMin": 9.98, "hardMax": 11.23}, {"id": "EXT_R11C", "label": "Dewatering (L): Max 300", "type": "number", "hardMax": 300.0}, {"id": "EXT_R11E", "label": "TC Conilon: 10.4 - 11.70%", "type": "number", "hardMin": 10.4, "hardMax": 11.7}, {"id": "EXT_R12C", "label": "Temp. PE (℃): 130 - 131", "type": "number", "hardMin": 130.0, "hardMax": 131.0}, {"id": "EXT_R12E", "label": "TC Decaf: 9.04 - 10.40%", "type": "number", "hardMin": 9.04, "hardMax": 10.4}, {"id": "EXT_R13C", "label": "Press. Flash PE (bara): 600 - 1000", "type": "number", "hardMin": 600.0, "hardMax": 1000.0}, {"id": "EXT_R13E", "label": "Cupping (B26600)", "type": "boolean"}, {"id": "EXT_R14C", "label": "Temp. SE (℃): 190 - 191", "type": "number", "hardMin": 190.0, "hardMax": 191.0}, {"id": "EXT_R15C", "label": "Press. Flash SE (bara): 500 - 1000", "type": "number", "hardMin": 500.0, "hardMax": 1000.0}, {"id": "EXT_R16C", "label": "DOF: 5.5 - 5.7", "type": "number", "hardMin": 5.5, "hardMax": 5.7}, {"id": "EXT_R17C", "label": "Coarse/ Fine (kg)", "type": "number"}, {"id": "EXT_CLEAN_18", "label": "Flushing", "type": "boolean"}, {"id": "EXT_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "EVA", "name": "Cô đặc (EVA)", "fields": [{"id": "EVA_R21C", "label": "Clarifier CIP (hour): 8 - 12", "type": "boolean"}, {"id": "EVA_R21E", "label": "Outlet thick clarifier max Grade 1", "type": "boolean"}, {"id": "EVA_R22C", "label": "MainEvap CIP (hour): 24 - 32", "type": "boolean"}, {"id": "EVA_R22E", "label": "Sediment (S2) max Grade 1.5", "type": "boolean"}, {"id": "EVA_R23C", "label": "Flow.Clarifier (L/h): 4500 - 5000", "type": "number", "hardMin": 4500.0, "hardMax": 5000.0}, {"id": "EVA_R23E", "label": "4.8 < pH < 5.3", "type": "number", "hardMin": 4.8, "hardMax": 5.3}, {"id": "EVA_R24C", "label": "Temp. Set tank 1 (℃): 50 - 65", "type": "number", "hardMin": 50.0, "hardMax": 65.0}, {"id": "EVA_R24E", "label": "Cupping (set tank 3)", "type": "boolean"}, {"id": "EVA_R25C", "label": "Temp. Set tank 2 (℃): 15 - 18", "type": "number", "hardMin": 15.0, "hardMax": 18.0}, {"id": "EVA_R25E", "label": "TS: 47-48.5% (Normal Density)\nTS: 46 - 47% (Low Density)", "type": "number", "hardMin": 47.0, "hardMax": 48.5}, {"id": "EVA_R26C", "label": "Temp. Set tank 3 (℃): 18 - 20", "type": "number", "hardMin": 18.0, "hardMax": 20.0}, {"id": "EVA_CLEAN_27", "label": "Flushing/ CIP", "type": "boolean"}, {"id": "EVA_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FD", "name": "Sấy thăng hoa (FD)", "fields": [{"id": "FD_R41C", "label": "Speed of belt (meters/mins): 2.4 - 3.2", "type": "number", "hardMin": 2.4, "hardMax": 3.2}, {"id": "FD_R42C", "label": "Temp. belt (℃): -16 => -18", "type": "number", "hardMin": -18.0, "hardMax": -16.0}, {"id": "FD_R43C", "label": "Temp. Ante room 4 (℃): Max 5", "type": "number", "hardMax": 5.0}, {"id": "FD_R44C", "label": "Time cycle tray (s): 26.8 - 27.0", "type": "number", "hardMin": 26.8, "hardMax": 27.0}, {"id": "FD_R45C", "label": "Filling tray (kg): 11.9 - 12.1", "type": "number", "hardMin": 11.9, "hardMax": 12.1}, {"id": "FD_R46C", "label": "Vaccum in conrad (mbar): 0.3 - 0.5", "type": "number", "hardMin": 0.3, "hardMax": 0.5}, {"id": "FD_R47C", "label": "Temp. zone   9 (℃): 120 - 138", "type": "number", "hardMin": 120.0, "hardMax": 138.0}, {"id": "FD_R48C", "label": "Temp. zone 10 (℃):   90 - 100", "type": "number", "hardMin": 90.0, "hardMax": 100.0}, {"id": "FD_R49C", "label": "Temp. zone 11 (℃):   65 -   75", "type": "number", "hardMin": 65.0, "hardMax": 75.0}, {"id": "FD_R50C", "label": "Temp. FGs at Discharge ( ℃): 42", "type": "number"}, {"id": "FD_R51C", "label": "Temprature at Discharge Room ( ℃): 23±3", "type": "number", "hardMin": 20.0, "hardMax": 26.0}, {"id": "FD_R52C", "label": "Humidity at Discharge Room (%RH): ≤ 55", "type": "number", "hardMax": 55.0}, {"id": "FD_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FP", "name": "Đóng gói (F&P)", "fields": [{"id": "FP_R55C", "label": "Oil Flow (g/h):  \n- 338 ≤  Normal ≤ 400 \n- 994 ≤  Low Density ≤ 1330", "type": "boolean"}, {"id": "FP_R56E", "label": "Không phát hiện 2 màu", "type": "boolean"}, {"id": "FP_R57E", "label": "Không phát hiện lump \n(sủi/ dầu/ melt)", "type": "boolean"}, {"id": "FP_R58C", "label": "Filling time: \nBox: 1m08s-1m12s\nBigbag: 19-20mins", "type": "text"}, {"id": "FP_R58E", "label": "Không phát hiện bụi bề mặt", "type": "boolean"}, {"id": "FP_R59E", "label": "Không phát hiện bụi sau shaking", "type": "boolean"}, {"id": "FP_R60E", "label": "Không phát hiện hạt lớn bất thường", "type": "boolean"}, {"id": "FP_R61C", "label": "Temprature at F&P ( ℃): 23±3\nHumidity at F&P (%RH): ≤ 55\nPressure at F&P (Pa): 6.0 - 7.0", "type": "boolean"}, {"id": "FP_R62E", "label": "Không phát hiện lủng bao Liner PE", "type": "boolean"}, {"id": "FP_R63E", "label": "Không phát hiện lủng thùng carton", "type": "boolean"}, {"id": "FP_R64C", "label": "Sealing: \nTemp: 190 - 195 ℃\nSpeed: 645-652 Hz", "type": "boolean"}, {"id": "FP_R64E", "label": "Không phát hiện lủng bao bigbag", "type": "boolean"}, {"id": "FP_R65E", "label": "Không phát hiện FB sau khi lồng bao", "type": "boolean"}, {"id": "FP_R66E", "label": "Artwork as standard", "type": "boolean"}, {"id": "FP_NETWEIGHT", "label": "Netweight (kg)/box: 25.00 - 25.04", "type": "boolean"}, {"id": "FP_DENSITY", "label": "Density: 220-240g/L", "type": "boolean"}, {"id": "FP_MOISTURE", "label": "Moisture: Max 3.00%", "type": "boolean"}, {"id": "FP_PH", "label": "pH: 4.80 - 5.10", "type": "boolean"}, {"id": "FP_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "META", "name": "Tổng kết ca", "fields": [{"id": "INFO_ISSUE", "label": "Information/ Issue", "type": "textarea"}, {"id": "HANDOVER", "label": "Handover", "type": "textarea"}]}];
 let SCHEMA = JSON.parse(JSON.stringify(DEFAULT_SCHEMA));
-const DEFECT_OPTIONS = ["2 Color", "Out Color", "Out Moisture", "Out Density", "Out Sediment", "Lump oil", "Dust"];
 function stageIds(){ return SCHEMA.map(s => s.id); }
 // Công đoạn cho phép chọn khi tạo MỚI 1 điểm kiểm tra (tab Nhập liệu). CHỦ
-// Ý tách riêng khỏi SCHEMA/stageIds(): REWORK/META vẫn còn đầy đủ định nghĩa
-// + dữ liệu lịch sử trong SCHEMA (đọc/sửa/xuất báo cáo bình thường), chỉ
+// Ý tách riêng khỏi SCHEMA/stageIds(): META vẫn còn đầy đủ định nghĩa +
+// dữ liệu lịch sử trong SCHEMA (đọc/sửa/xuất báo cáo bình thường), chỉ
 // KHÔNG còn hiện ra làm lựa chọn khi bắt đầu 1 điểm kiểm tra mới nữa.
-// "Tạo bọt (Foaming)" đã bị XOÁ HẲN khỏi DEFAULT_SCHEMA/SCHEMA theo yêu cầu
-// (không còn là 1 công đoạn hợp lệ ở bất kỳ đâu trong app) — checkpoint
-// FOAMING đã lưu TỪ TRƯỚC vẫn còn nguyên trong IndexedDB/Supabase, chỉ
-// không còn hiển thị đẹp được nữa (sectionById('FOAMING') trả về undefined,
-// những chỗ đã tự dự phòng bằng `sec?sec.name:cp.section` vẫn hoạt động,
-// chỉ hiện mã thô "FOAMING" thay vì tên tiếng Việt).
+// "Tạo bọt (Foaming)" và "Tái chế (Rework)" đã bị XOÁ HẲN khỏi
+// DEFAULT_SCHEMA/SCHEMA theo yêu cầu (không còn là 1 công đoạn hợp lệ ở bất
+// kỳ đâu trong app, kể cả khi sửa dữ liệu lịch sử — khác với META, vốn chỉ
+// bị ẩn khỏi lựa chọn TẠO MỚI nhưng vẫn còn định nghĩa đầy đủ) — checkpoint
+// đã lưu TỪ TRƯỚC của 2 công đoạn này vẫn còn nguyên trong IndexedDB/
+// Supabase, chỉ không còn hiển thị đẹp được nữa (sectionById(...) trả về
+// undefined, những chỗ đã tự dự phòng bằng `sec?sec.name:cp.section` vẫn
+// hoạt động, chỉ hiện mã thô "FOAMING"/"REWORK" thay vì tên tiếng Việt).
+// Xem stripRemovedSections()/REMOVED_SECTION_IDS để biết cách 1 SCHEMA đã
+// lưu từ trước (còn 2 công đoạn này) được tự dọn khi nạp vào.
 const INPUT_PROCESS_OPTIONS = ['ROA','EXT','EVA','FD','FP'];
 
 /* Recompute CSV headers + header->field map from the CURRENT (possibly
@@ -1341,15 +1344,15 @@ async function queueMetaSync(key, value){
 function imgSrc(im){
   return (im && im.dataUrl) || '';
 }
-// Section id đã bị xoá HẲN khỏi DEFAULT_SCHEMA (hiện chỉ có FOAMING/"Tạo
-// bọt", theo yêu cầu người dùng) nhưng có thể vẫn còn tồn tại trong 1 bản
-// SCHEMA đã lưu TỪ TRƯỚC (IndexedDB của thiết bị này, hoặc đồng bộ về từ 1
-// thiết bị khác chưa cập nhật code mới) — vì SCHEMA đã lưu luôn được ưu
-// tiên hơn DEFAULT_SCHEMA. stripRemovedSections() dọn sạch mọi nơi 1 SCHEMA
-// được "nhận vào" (lúc khởi động lẫn lúc đồng bộ về) — trả về CHÍNH object
-// gốc (không tạo mảng mới) nếu không có gì cần dọn, để gọi nơi dùng có thể
-// so sánh `!==` mà biết có thực sự thay đổi hay không.
-const REMOVED_SECTION_IDS = ['FOAMING'];
+// Section id đã bị xoá HẲN khỏi DEFAULT_SCHEMA (hiện: FOAMING/"Tạo bọt",
+// REWORK/"Tái chế" — cả 2 theo yêu cầu người dùng) nhưng có thể vẫn còn tồn
+// tại trong 1 bản SCHEMA đã lưu TỪ TRƯỚC (IndexedDB của thiết bị này, hoặc
+// đồng bộ về từ 1 thiết bị khác chưa cập nhật code mới) — vì SCHEMA đã lưu
+// luôn được ưu tiên hơn DEFAULT_SCHEMA. stripRemovedSections() dọn sạch mọi
+// nơi 1 SCHEMA được "nhận vào" (lúc khởi động lẫn lúc đồng bộ về) — trả về
+// CHÍNH object gốc (không tạo mảng mới) nếu không có gì cần dọn, để gọi nơi
+// dùng có thể so sánh `!==` mà biết có thực sự thay đổi hay không.
+const REMOVED_SECTION_IDS = ['FOAMING', 'REWORK'];
 function stripRemovedSections(schemaArr){
   return schemaArr.some(s=>REMOVED_SECTION_IDS.includes(s.id)) ? schemaArr.filter(s=>!REMOVED_SECTION_IDS.includes(s.id)) : schemaArr;
 }
@@ -2123,10 +2126,10 @@ function renderInputForm(){
 
   // ---- Công đoạn (Process) — chỉ ROA/EXT/EVA/FD/FP khi tạo MỚI (mục 5).
   // Đang sửa 1 điểm kiểm tra cũ thì Công đoạn giữ nguyên (không đổi được),
-  // kể cả với REWORK/META lịch sử — vẫn hiển thị/sửa/xuất bình thường, chỉ
-  // không còn chọn được khi TẠO MỚI nữa. FOAMING đã bị xoá hẳn khỏi SCHEMA
-  // (không còn công đoạn hợp lệ nào tên FOAMING nữa, kể cả khi sửa dữ liệu
-  // cũ) — xem comment ở stageIds()/INPUT_PROCESS_OPTIONS phía trên. ----
+  // kể cả với META lịch sử — vẫn hiển thị/sửa/xuất bình thường, chỉ không
+  // còn chọn được khi TẠO MỚI nữa. FOAMING và REWORK đã bị xoá hẳn khỏi
+  // SCHEMA (không còn công đoạn hợp lệ nào 2 tên này nữa, kể cả khi sửa dữ
+  // liệu cũ) — xem comment ở stageIds()/INPUT_PROCESS_OPTIONS phía trên. ----
   let secId;
   if(editingCp){
     secId = editingCp.section;
@@ -4465,8 +4468,8 @@ async function buildAllShiftsReportSVG(dateVal, qmsOnly){
 // Thứ tự ưu tiên hiển thị Process trên PO Production Timeline (mục 3) — chỉ
 // những Công đoạn THỰC SỰ có checkpoint mới xuất hiện. Nhãn tiếng Anh dùng
 // riêng cho Gantt (mục 1/3), khác tên tiếng Việt của section trong SCHEMA.
-const PROCESS_TIMELINE_ORDER = ['ROA','EXT','EVA','FD','FP','REWORK'];
-const GANTT_PROCESS_LABELS = {ROA:'ROASTING', EXT:'EXTRACTION', EVA:'EVAPORATION', FD:'FREEZE DRYING', FP:'FILLING & PACKING', REWORK:'REWORK'};
+const PROCESS_TIMELINE_ORDER = ['ROA','EXT','EVA','FD','FP'];
+const GANTT_PROCESS_LABELS = {ROA:'ROASTING', EXT:'EXTRACTION', EVA:'EVAPORATION', FD:'FREEZE DRYING', FP:'FILLING & PACKING'};
 function nextDateISO(iso){
   const d = new Date(iso+'T00:00:00');
   d.setDate(d.getDate()+1);
@@ -4514,6 +4517,33 @@ function ganttCellText(cp, sec, kind){
     const v = (kind==='issue' ? p.issue : p.action) || '';
     return pairs.length>1 ? `${i+1}. ${v}` : v;
   }).join('\n');
+}
+// Dữ liệu nền dùng CHUNG cho mọi cách "vẽ" Gantt của 1 PO (ảnh SVG xem
+// trước/PNG, bảng HTML tương tác, và giờ thêm Excel + PDF theo mẫu) — tính
+// 1 lần duy nhất từ đúng checkpoint thật, đảm bảo mọi định dạng xuất luôn
+// khớp nhau tuyệt đối (không lệch cột/khoảng chạy giữa các định dạng).
+function buildGanttBaseData(matches){
+  const relevant = matches.filter(cp=>cp.section!=='META');
+  const cols = buildPOGanttColumns(relevant);
+  const dateGroups = groupGanttColsByDate(cols);
+  const cpIndex = {};
+  relevant.forEach(cp=>{ cpIndex[cp.section+'|'+cp.date+'|'+cp.shift] = cp; });
+  const bySection = {};
+  relevant.forEach(cp=>{ (bySection[cp.section]=bySection[cp.section]||[]).push(cp); });
+  const presentSections = PROCESS_TIMELINE_ORDER.filter(id=>bySection[id] && bySection[id].length);
+  const withCode = relevant.find(cp=>cp.itemCode) || relevant[0];
+  const lookup = withCode && withCode.itemCode ? lookupItemByCode(withCode.itemCode) : {status:'not_found'};
+  const itemName = withCode && (lookup.status==='ok'||lookup.status==='missing_recipe') ? lookup.name : '';
+  const recipe = withCode ? (withCode.recipe || (lookup.status==='ok' ? lookup.recipe : '')) : '';
+  return { relevant, cols, dateGroups, cpIndex, bySection, presentSections, itemCode: withCode?(withCode.itemCode||''):'', itemName, recipe };
+}
+// Khoảng cột (index, 0-based) mà 1 Công đoạn thực sự có checkpoint — dùng để
+// vẽ thanh Gantt liên tục từ cột đầu tới cột cuối. Trả {startIdx:-1,
+// endIdx:-1} nếu Công đoạn đó không có checkpoint nào trong `cols`.
+function ganttProcessRange(cols, list){
+  let startIdx=-1, endIdx=-1;
+  cols.forEach((c,i)=>{ if(list.some(cp=>cp.date===c.date && cp.shift===c.shift)){ if(startIdx===-1) startIdx=i; endIdx=i; } });
+  return {startIdx, endIdx};
 }
 // PO Production Timeline dạng Gantt (mục 1-5): Header (Item Code/Item Name/
 // PO/Recipe) hiển thị 1 LẦN DUY NHẤT, rồi 1 lưới Process x Date x Shift LIÊN
@@ -4993,7 +5023,7 @@ function renderReport(){
       renderPOTimeline(previewWrap, q, matches, doSearch);
       const {svg,width,height} = await buildPOReportSVG(q, matches);
       currentGen = ()=>({svg,width,height, filename:`Shiftly_PO_${q}.png`,
-        checkpointList: matches, headerTitle:`ILD Coffee — Truy xuất PO ${q}` });
+        checkpointList: matches, headerTitle:`ILD Coffee — Truy xuất PO ${q}`, poQuery: q });
     }
     findBtn.addEventListener('click', doSearch);
   }
@@ -5021,15 +5051,21 @@ function renderReport(){
     const noQmsConfigured = SCHEMA.every(s=>!s.fields.some(f=>f.isQMS));
     if(noQmsConfigured && !confirm('Chưa có chỉ tiêu nào được đánh dấu "Xuất trong báo cáo QMS" ở tab Specs, nên file xuất ra sẽ chỉ có phần MAIN INFORMATION (Date/Shift/Process/Item Code/PO/ISSUES/ACTION), thiếu hẳn các cột QMS (Moisture, Color, %TC...). Vào tab Specs → sửa từng chỉ tiêu → tick "Xuất trong báo cáo QMS" trước rồi quay lại đây. Vẫn xuất luôn (chỉ có MAIN INFORMATION)?')) return;
     if(subset.length===0){ toast('Không có điểm kiểm tra nào khớp Ngày/Ca/Công đoạn đã chọn'); return; }
+    // Ở chế độ Theo PO, cả Excel lẫn PDF theo mẫu giờ có thêm 1 bảng Gantt
+    // Process x Date x Shift (giống hệt khung xem trước ở trên) — dùng lại
+    // đúng `subset` (đã lọc bỏ META) làm dữ liệu, không xuất thêm gì ngoài
+    // phạm vi đang xem. Theo ca không có khái niệm "PO đang xem" nên không
+    // có Gantt (giữ nguyên hành vi cũ).
+    const gantt = mode==='po' ? { poLabel: currentGen().poQuery || '', matches: subset } : null;
     if(kind==='xlsx'){
-      const file = new File([buildProcessQmsExcelXml(subset)], `Shiftly_ProcessQMS_${todayStr()}.xls`, {type:'application/vnd.ms-excel'});
+      const file = new File([buildProcessQmsExcelXml(subset, gantt)], `Shiftly_ProcessQMS_${todayStr()}.xls`, {type:'application/vnd.ms-excel'});
       await exportFileToPreferredLocation(file, {title:'Shiftly Process/QMS', fallbackMsg:`Đã tải Excel theo mẫu (${subset.length} điểm kiểm tra) về máy`});
     } else {
       // Bảng QMS ở chế độ Theo PO thường có nhiều cột hơn (PO có thể chạy
       // qua nhiều Công đoạn, mỗi Công đoạn 1 khối cột QMS riêng) — in khổ
       // ngang (Landscape) cho dễ đọc hơn khổ dọc mặc định. Theo ca giữ
       // nguyên khổ dọc như cũ (không đổi gì ở đó).
-      printReport(buildProcessQmsPrintHtml(subset, mode==='po'), `Shiftly_ProcessQMS_${todayStr()}`);
+      printReport(buildProcessQmsPrintHtml(subset, mode==='po', gantt), `Shiftly_ProcessQMS_${todayStr()}`);
     }
   }
   qmsXlsxBtn.addEventListener('click', ()=>exportQmsTemplate('xlsx'));
@@ -6327,7 +6363,7 @@ function renderGuide(){
     <h4>16. Báo cáo theo ca — Ngày + Ca độc lập, xem "Tất cả"</h4>
     <p>Chế độ <b>"Theo ca"</b> giờ tách thành 2 lựa chọn riêng: ô <b>Ngày</b> và ô <b>Ca</b> (Ca 1 / Ca 2 / Ca 3 / <b>Tất cả</b>) — mặc định trỏ sẵn tới Ngày+Ca gần nhất đang có dữ liệu, nhưng có thể tự chọn bất kỳ tổ hợp nào. Chọn <b>"Tất cả"</b> sẽ hiển thị lần lượt báo cáo Ca 1 → Ca 2 → Ca 3 của đúng Ngày đã chọn trong CÙNG 1 ảnh, mỗi ca phân tách rõ bằng 1 dải tiêu đề đậm màu; ca nào chưa có dữ liệu vẫn hiện, chỉ ghi "Chưa có dữ liệu". Trong mỗi công đoạn, Issue/Abnormal và Action giờ hiển thị <b>song song 2 cột trong cùng 1 khung</b> thay vì lẫn vào các chỉ tiêu khác, dễ thấy ngay Issue nào đi với Action nào.</p>
     <h4>16a. Báo cáo theo PO — Gantt Process x Date x Shift (tab Báo cáo)</h4>
-    <p>Chế độ <b>"Theo PO"</b>: nhập mã PO (cùng quy tắc định dạng với tab Nhập liệu — đúng 9 chữ số, hoặc SHUTDOWN, không phân biệt hoa/thường) → app dựng 1 bảng <b>Gantt</b> giống mẫu Excel "QUALITY & ACTIVITIES FOLLOW UP". Phần đầu chỉ hiện <b>ITEM CODE / ITEM NAME / PO / RECIPE</b> đúng 1 lần. Bên dưới là lưới: mỗi cột là 1 <b>Ngày + Ca</b>, sinh <b>LIÊN TỤC</b> từ checkpoint sớm nhất tới muộn nhất của PO (kể cả những Ca không có dữ liệu) để thanh Gantt thể hiện đúng khoảng chạy thật; mỗi Công đoạn thực sự có dữ liệu chiếm 3 hàng: thanh Gantt (kéo dài từ Ngày+Ca đầu tới cuối), rồi <b>Issues/Abnormal</b> và <b>Action</b> — nội dung nằm ĐÚNG ô Ngày+Ca của checkpoint phát sinh, không gộp chung. Bảng cuộn ngang được (<b>overflow-x: auto</b>), cột đầu ("Process/Information") cố định khi cuộn để luôn thấy tên công đoạn. <b>Mọi ô Issue/Action đều bấm được</b>, kể cả Ngày+Ca chưa từng ghi nhận gì (viền sáng lên khi rê chuột) — mở popup sửa/thêm mới ("✎ Sửa" cho cặp đã có, hoặc "+ Thêm Issue/Action" nếu ô đó còn trống) → 2 ô nhập → "💾 Lưu" — ghi thẳng vào đúng checkpoint (Ngày/Ca/Công đoạn/PO tương ứng, tự tạo mới nếu chưa từng có, không tạo báo cáo riêng), nên tab Nhập liệu và Data Log đều thấy thay đổi ngay lập tức, và thanh Gantt của Công đoạn đó tự nới rộng nếu Ngày+Ca vừa thêm nằm ngoài khoảng cũ. Ảnh PNG/Chia sẻ xuất ra từ chế độ này tự co giãn theo đúng số cột thật (không giới hạn độ rộng cố định như trước), luôn thấy đủ hết các cột bên phải; "📊 Excel theo mẫu"/"📄 PDF theo mẫu" (Process/QMS — xem mục 34) không đổi.</p>
+    <p>Chế độ <b>"Theo PO"</b>: nhập mã PO (cùng quy tắc định dạng với tab Nhập liệu — đúng 9 chữ số, hoặc SHUTDOWN, không phân biệt hoa/thường) → app dựng 1 bảng <b>Gantt</b> giống mẫu Excel "QUALITY & ACTIVITIES FOLLOW UP". Phần đầu chỉ hiện <b>ITEM CODE / ITEM NAME / PO / RECIPE</b> đúng 1 lần. Bên dưới là lưới: mỗi cột là 1 <b>Ngày + Ca</b>, sinh <b>LIÊN TỤC</b> từ checkpoint sớm nhất tới muộn nhất của PO (kể cả những Ca không có dữ liệu) để thanh Gantt thể hiện đúng khoảng chạy thật; mỗi Công đoạn thực sự có dữ liệu chiếm 3 hàng: thanh Gantt (kéo dài từ Ngày+Ca đầu tới cuối), rồi <b>Issues/Abnormal</b> và <b>Action</b> — nội dung nằm ĐÚNG ô Ngày+Ca của checkpoint phát sinh, không gộp chung. Bảng cuộn ngang được (<b>overflow-x: auto</b>), cột đầu ("Process/Information") cố định khi cuộn để luôn thấy tên công đoạn. <b>Mọi ô Issue/Action đều bấm được</b>, kể cả Ngày+Ca chưa từng ghi nhận gì (viền sáng lên khi rê chuột) — mở popup sửa/thêm mới ("✎ Sửa" cho cặp đã có, hoặc "+ Thêm Issue/Action" nếu ô đó còn trống) → 2 ô nhập → "💾 Lưu" — ghi thẳng vào đúng checkpoint (Ngày/Ca/Công đoạn/PO tương ứng, tự tạo mới nếu chưa từng có, không tạo báo cáo riêng), nên tab Nhập liệu và Data Log đều thấy thay đổi ngay lập tức, và thanh Gantt của Công đoạn đó tự nới rộng nếu Ngày+Ca vừa thêm nằm ngoài khoảng cũ. Ảnh PNG/Chia sẻ xuất ra từ chế độ này tự co giãn theo đúng số cột thật (không giới hạn độ rộng cố định như trước), luôn thấy đủ hết các cột bên phải. Ở chế độ Theo PO, <b>"📊 Excel theo mẫu"/"📄 PDF theo mẫu" (Process/QMS — xem mục 34) giờ có thêm chính bảng Gantt này</b> — Excel thêm 1 sheet "Gantt" riêng (trước sheet "Data Export" quen thuộc, thanh Gantt tô màu bằng ô gộp cột), PDF chèn thêm 1 bảng Gantt ngay đầu trang in (khổ ngang) trước bảng QMS — cả 2 đều dùng đúng dữ liệu PO đang xem, không xuất thêm gì ngoài phạm vi đó. Theo ca không có khái niệm "1 PO đang xem" nên 2 nút này ở đó vẫn giữ nguyên như cũ, không có Gantt.</p>
     <h4>16b. Ảnh đính kèm full chiều rộng + lọc chỉ tiêu QMS trong báo cáo ảnh (Theo ca)</h4>
     <p>Ảnh đính kèm trong báo cáo ảnh <b>Theo ca</b> (PNG/chia sẻ) hiển thị lớn — tối đa 2 ảnh/hàng, mỗi ảnh chia đều chiều rộng báo cáo; nếu lẻ 1 ảnh ở hàng cuối, ảnh đó tự kéo full chiều rộng thay vì để trống 1 nửa như trước. Ô <b>"Chỉ hiện chỉ tiêu QMS trong báo cáo ảnh"</b> (phía trên khung xem trước, chỉ hiện ở chế độ Theo ca) cho chuyển qua lại giữa 2 chế độ: bỏ tick (mặc định) hiện mọi chỉ tiêu đã nhập như trước giờ; tick vào chỉ còn các chỉ tiêu đã đánh dấu "Xuất trong báo cáo QMS" ở tab Specs (dùng chung đúng cấu hình với nút "Excel/PDF theo mẫu") — tiện khi cần báo cáo ảnh gọn, chỉ có số liệu QMS thay vì đầy đủ mọi Parameters đã nhập. Báo cáo <b>Theo PO</b> (Gantt, mục 16a) không hiện từng chỉ tiêu/ảnh đính kèm nữa — chỉ tập trung vào tiến độ Process theo thời gian và Issue/Action.</p>
     <h4>17. Định dạng ngày DD/MM/YYYY</h4>
@@ -6373,7 +6409,7 @@ function renderGuide(){
     <p>Quản lý bảng liên đới <b>Item Code ↔ Tên sản phẩm ↔ Recipe</b> — mỗi dòng gồm Loại (<b>FGs</b>: thành phẩm, hoặc <b>RW</b>: hàng tái chế/Rework — 2 dải mã riêng theo đúng cách nhà máy quản lý), Item Code, Tên sản phẩm, Recipe. Tab này đã có sẵn 524 dòng dữ liệu thật của nhà máy ngay từ đầu — không cần nhập hay import lại. Có thể thêm/sửa/xoá từng dòng trực tiếp, và tìm kiếm theo mã/tên/Recipe hoặc lọc riêng theo Loại (FGs/RW).</p>
     <p>Để cập nhật hàng loạt sau này: bấm <b>"⬇️ Tải template mẫu"</b> để có file Excel đúng định dạng, điền thêm dòng mới vào rồi bấm <b>"📥 Nhập từ Excel"</b> — dòng trùng cả Loại + Item Code + Tên sản phẩm sẽ tự bỏ qua (không tạo trùng lặp), dòng mới sẽ được thêm vào. Bấm <b>"⬆️ Xuất Excel"</b> để tải toàn bộ danh sách hiện tại ra file. Lưu ý: cũng như các tab danh sách khác (PO/Recipe/Client), file Excel ở đây dùng đúng định dạng ".xls" mà chính app này tự xuất ra — 1 file ".xlsx" gốc khác (vd tải trực tiếp từ Excel/Google Sheets) cần dán lại dữ liệu vào đúng file template trước khi nhập vào app.</p>
     <h4>37. Quy trình nhập liệu mới (kiểm soát chặt hơn)</h4>
-    <p>Tab Nhập liệu đi theo đúng thứ tự: <b>Ngày → Ca → QC → Công đoạn → Item Code → Tên sản phẩm/Recipe (tự động) → Mã PO → các chỉ tiêu công đoạn → Issue/Abnormal &amp; Action → Lưu</b>. Ca/QC/Công đoạn không còn tự chọn sẵn nữa — phải tự chọn (chưa chọn Ca thì cả tab chưa hiện gì, đúng ý "chưa có Ca thì chưa có gì để lưu"). Công đoạn khi TẠO MỚI chỉ còn 5 lựa chọn: Rang (ROA), Trích ly (EXT), Cô đặc (EVA), Sấy thăng hoa (FD), Đóng gói (F&amp;P) — Rework/Tổng kết ca không còn tạo mới được nhưng dữ liệu lịch sử vẫn xem/sửa/xuất báo cáo bình thường. <b>Tạo bọt (Foaming) đã bị xoá hẳn khỏi danh sách công đoạn của app</b> (không chỉ ẩn khi tạo mới) — checkpoint Foaming đã lưu từ trước vẫn còn nguyên trong dữ liệu, chỉ không còn hiển thị đẹp/xuất báo cáo được như các công đoạn khác nữa.</p>
+    <p>Tab Nhập liệu đi theo đúng thứ tự: <b>Ngày → Ca → QC → Công đoạn → Item Code → Tên sản phẩm/Recipe (tự động) → Mã PO → các chỉ tiêu công đoạn → Issue/Abnormal &amp; Action → Lưu</b>. Ca/QC/Công đoạn không còn tự chọn sẵn nữa — phải tự chọn (chưa chọn Ca thì cả tab chưa hiện gì, đúng ý "chưa có Ca thì chưa có gì để lưu"). Công đoạn khi TẠO MỚI chỉ còn 5 lựa chọn: Rang (ROA), Trích ly (EXT), Cô đặc (EVA), Sấy thăng hoa (FD), Đóng gói (F&amp;P) — Tổng kết ca (META) không còn tạo mới được nhưng dữ liệu lịch sử vẫn xem/sửa/xuất báo cáo bình thường. <b>Tạo bọt (Foaming) và Tái chế (Rework) đã bị xoá hẳn khỏi danh sách công đoạn của app</b> (không chỉ ẩn khi tạo mới) — checkpoint Foaming/Rework đã lưu từ trước vẫn còn nguyên trong dữ liệu, chỉ không còn hiển thị đẹp/xuất báo cáo được như các công đoạn khác nữa.</p>
     <p>Ô Item Code vừa gõ tay vừa <b>tìm/chọn từ danh sách có sẵn</b> (gõ vài số đầu sẽ hiện gợi ý các mã đã có trong Item Code Master, giống hệt cách chọn PO) — chọn xong hoặc rời khỏi ô đó (bấm sang ô khác), Tên sản phẩm và Recipe tự điền (chỉ đọc, không sửa tay) từ đúng dữ liệu tab Danh sách Items Code. Không tìm thấy mã, mã có nhiều bản ghi mâu thuẫn nhau, hoặc mã chưa có Recipe trong Item Code Master đều báo lỗi rõ ràng và <b>chặn lưu</b> cho tới khi sửa đúng (đúng 8 chữ số). Mã PO phải đúng 9 chữ số, hoặc gõ "SHUTDOWN" (không phân biệt hoa/thường, tự chuyển thành chữ hoa) — với 1 điểm kiểm tra MỚI, app kiểm tra ngay khi gõ: sai định dạng thì hiện cảnh báo và <b>chưa mở phần chỉ tiêu phía dưới</b> (không cần đợi tới lúc bấm Lưu mới biết sai). <b>Riêng PO = SHUTDOWN thì Item Code KHÔNG bắt buộc</b> (nhãn ô tự đổi thành "không bắt buộc") — vì ca dừng máy không gắn với 1 sản phẩm cụ thể nào; để trống vẫn lưu được bình thường (Recipe để trống theo), còn nếu vẫn gõ vào thì mã đó vẫn được kiểm tra/tra cứu như bình thường. 1 PO = 1 Item Code (mục dưới) cũng không áp dụng cho SHUTDOWN.</p>
     <p>Issue/Abnormal và Action giờ nhập theo từng CẶP dòng, bấm "+ Thêm Issue/Action" nếu cần nhiều dòng — dòng nào đã gõ Issue thì bắt buộc phải gõ Action tương ứng (và ngược lại), dòng để trống hoàn toàn thì bỏ qua, không chặn lưu. Dữ liệu vẫn tương thích ngược 100% với các báo cáo/Excel/QMS đã có (App tự ghép lại vào đúng ô "Issue/ Abnormal" quen thuộc khi lưu).</p>
   </div>`;
@@ -6555,10 +6591,57 @@ function processQmsSections(rows){
     sec, rows: rows.filter(r=>r.section===sec.id).sort((a,b)=>(a.date+a.shift+a.po).localeCompare(b.date+b.shift+b.po)),
   })).filter(g=>g.rows.length>0);
 }
-function buildProcessQmsExcelXml(rows){
+// Bảng Gantt Process x Date x Shift dạng SpreadsheetML — 1 sheet riêng
+// ("Gantt"), dùng CHUNG dữ liệu (buildGanttBaseData) với ảnh SVG/bảng HTML
+// tương tác ở tab Báo cáo nên luôn khớp nhau tuyệt đối. Thanh Gantt vẽ bằng
+// 1 ô ss:MergeAcross tô màu (style "ganttBar"), header đậm màu style
+// "ganttHdr" — cả 2 style được khai báo sẵn trong <Styles> của
+// buildProcessQmsExcelXml() (luôn có, không tốn thêm gì khi không dùng).
+function buildGanttExcelSheet(poLabel, base){
+  const {cols, dateGroups, cpIndex, bySection, presentSections} = base;
+  const plainCell = v => (v===undefined||v===null||v==='') ? '<Cell/>' : `<Cell><Data ss:Type="String">${xmlEscape(v)}</Data></Cell>`;
+  const hdrCell = (v, span) => `<Cell ss:StyleID="ganttHdr"${span>1?` ss:MergeAcross="${span-1}"`:''}><Data ss:Type="String">${xmlEscape(v)}</Data></Cell>`;
+  const emptyCells = n => '<Cell/>'.repeat(Math.max(0,n));
+  let xml = `<Worksheet ss:Name="Gantt"><Table>\n`;
+  xml += `<Row>${plainCell('ITEM CODE')}${plainCell(base.itemCode||'—')}</Row>\n`;
+  xml += `<Row>${plainCell('ITEM NAME')}${plainCell(base.itemName||'—')}</Row>\n`;
+  xml += `<Row>${plainCell('PO')}${plainCell(poLabel)}</Row>\n`;
+  xml += `<Row>${plainCell('RECIPE')}${plainCell(base.recipe||'—')}</Row>\n`;
+  xml += `<Row></Row>\n`;
+  if(cols.length===0){
+    xml += `<Row>${plainCell('— Không có dữ liệu nào cho PO này —')}</Row>\n</Table></Worksheet>`;
+    return xml;
+  }
+  xml += '<Row>' + hdrCell('Process / Information', 1) + dateGroups.map(g=>hdrCell(fmtDateExport(g.date), g.span)).join('') + '</Row>\n';
+  xml += '<Row>' + hdrCell('', 1) + cols.map(c=>hdrCell('Ca '+c.shift, 1)).join('') + '</Row>\n';
+  presentSections.forEach(id=>{
+    const sec = sectionById(id);
+    const {startIdx, endIdx} = ganttProcessRange(cols, bySection[id]);
+    xml += '<Row>' + hdrCell(GANTT_PROCESS_LABELS[id]||id, 1);
+    if(startIdx>=0){
+      xml += emptyCells(startIdx);
+      xml += `<Cell ss:StyleID="ganttBar"${(endIdx-startIdx)>0?` ss:MergeAcross="${endIdx-startIdx}"`:''}/>`;
+      xml += emptyCells(cols.length-1-endIdx);
+    } else {
+      xml += emptyCells(cols.length);
+    }
+    xml += '</Row>\n';
+    xml += '<Row>' + plainCell('Issues/Abnormal') + cols.map(c=>plainCell(ganttCellText(cpIndex[id+'|'+c.date+'|'+c.shift], sec, 'issue'))).join('') + '</Row>\n';
+    xml += '<Row>' + plainCell('Action') + cols.map(c=>plainCell(ganttCellText(cpIndex[id+'|'+c.date+'|'+c.shift], sec, 'action'))).join('') + '</Row>\n';
+  });
+  xml += `</Table></Worksheet>`;
+  return xml;
+}
+// gantt (tuỳ chọn, mặc định false/undefined — không đổi gì hành vi xuất từ
+// Theo ca): {poLabel, matches} — thêm 1 sheet "Gantt" trước sheet "Data
+// Export" hiện có, dựng từ buildGanttBaseData(matches).
+function buildProcessQmsExcelXml(rows, gantt){
   let xml = `<?xml version="1.0"?>\n<?mso-application progid="Excel.Sheet"?>\n`;
   xml += `<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n`;
-  xml += `<Styles><Style ss:ID="hdr"><Font ss:Bold="1"/><Interior ss:Color="#EEF1F6" ss:Pattern="Solid"/></Style></Styles>\n`;
+  xml += `<Styles><Style ss:ID="hdr"><Font ss:Bold="1"/><Interior ss:Color="#EEF1F6" ss:Pattern="Solid"/></Style>`;
+  xml += `<Style ss:ID="ganttHdr"><Font ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#0B1220" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center"/></Style>`;
+  xml += `<Style ss:ID="ganttBar"><Interior ss:Color="#0D9488" ss:Pattern="Solid"/></Style></Styles>\n`;
+  if(gantt) xml += buildGanttExcelSheet(gantt.poLabel, buildGanttBaseData(gantt.matches));
   xml += `<Worksheet ss:Name="Data Export"><Table>\n`;
   const strCell = v => (v===undefined||v===null||v==='') ? '<Cell/>' : `<Cell><Data ss:Type="String">${xmlEscape(v)}</Data></Cell>`;
   const numCell = v => (v===undefined||v===null||v==='') ? '<Cell/>' : `<Cell><Data ss:Type="Number">${Number(v)}</Data></Cell>`;
@@ -6585,12 +6668,45 @@ function buildProcessQmsExcelXml(rows){
   xml += `</Table></Worksheet></Workbook>`;
   return xml;
 }
+// Bảng Gantt dạng HTML tĩnh (không có nút bấm sửa — chỉ để in/PDF), giống
+// hệt cấu trúc bảng tương tác renderPOTimeline() nhưng dựng bằng chuỗi HTML
+// thay vì DOM, dùng chung buildGanttBaseData() nên luôn khớp bảng xem trước.
+function buildGanttPrintHtml(poLabel, base){
+  const {cols, dateGroups, cpIndex, bySection, presentSections} = base;
+  let html = `<h1>PO Production Timeline</h1>`;
+  html += `<table class="gantthdr"><tr><td><b>ITEM CODE</b></td><td>${escapeHtml(base.itemCode||'—')}</td></tr>`;
+  html += `<tr><td><b>ITEM NAME</b></td><td>${escapeHtml(base.itemName||'—')}</td></tr>`;
+  html += `<tr><td><b>PO</b></td><td>${escapeHtml(poLabel)}</td></tr>`;
+  html += `<tr><td><b>RECIPE</b></td><td>${escapeHtml(base.recipe||'—')}</td></tr></table>`;
+  if(cols.length===0){ html += '<p>— Không có dữ liệu nào cho PO này —</p>'; return html; }
+  html += '<table class="gantt"><thead><tr><th>Process / Information</th>';
+  dateGroups.forEach(g=>{ html += `<th colspan="${g.span}">${escapeHtml(fmtDateExport(g.date))}</th>`; });
+  html += '</tr><tr><th></th>';
+  cols.forEach(c=>{ html += `<th>Ca ${escapeHtml(c.shift)}</th>`; });
+  html += '</tr></thead><tbody>';
+  presentSections.forEach(id=>{
+    const sec = sectionById(id);
+    const {startIdx, endIdx} = ganttProcessRange(cols, bySection[id]);
+    html += `<tr><th class="ganttlbl">${escapeHtml(GANTT_PROCESS_LABELS[id]||id)}</th>`;
+    cols.forEach((c,i)=>{
+      if(i===startIdx) html += `<td colspan="${endIdx-startIdx+1}" class="ganttbar"></td>`;
+      else if(i>startIdx && i<=endIdx){ /* gộp vào ô colspan phía trên */ }
+      else html += '<td></td>';
+    });
+    html += '</tr>';
+    html += `<tr><th class="ganttlbl sub">Issues/Abnormal</th>` + cols.map(c=>`<td>${escapeHtml(ganttCellText(cpIndex[id+'|'+c.date+'|'+c.shift], sec, 'issue'))}</td>`).join('') + '</tr>';
+    html += `<tr><th class="ganttlbl sub">Action</th>` + cols.map(c=>`<td>${escapeHtml(ganttCellText(cpIndex[id+'|'+c.date+'|'+c.shift], sec, 'action'))}</td>`).join('') + '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
 // landscape (tuỳ chọn, mặc định false = giữ nguyên khổ dọc như trước): bật
 // khi bảng có nhiều cột hơn bình thường (VD: xuất từ chế độ Theo PO — PO có
 // thể chạy qua nhiều Công đoạn, mỗi Công đoạn 1 khối cột QMS riêng) — chỉ
 // đổi @page CSS cho lần in này, không ảnh hưởng cỡ giấy mặc định của trình
-// duyệt hay các bản in khác.
-function buildProcessQmsPrintHtml(rows, landscape){
+// duyệt hay các bản in khác. gantt (tuỳ chọn): {poLabel, matches} — chèn
+// thêm bảng Gantt (buildGanttPrintHtml) phía TRƯỚC bảng QMS hiện có.
+function buildProcessQmsPrintHtml(rows, landscape, gantt){
   const groups = processQmsSections(rows);
   let html = `<!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><title>Shiftly — Xuất dữ liệu theo mẫu</title>
 <style>
@@ -6600,9 +6716,14 @@ table{width:100%;border-collapse:collapse;margin:0 0 16px;}
 th,td{border:1px solid #94A3B8;padding:4px 6px;text-align:left;}
 th{background:#EEF1F6;font-weight:700;}
 .sectitle{font-weight:700;background:#0B1220;color:#fff;padding:5px 8px;margin:14px 0 6px;border-radius:4px;}
-@media print{ .sectitle,th{-webkit-print-color-adjust:exact;print-color-adjust:exact;} }
+table.gantthdr{width:auto;margin:0 0 14px;} table.gantthdr td{border:none;padding:2px 8px 2px 0;}
+table.gantt th{text-align:center;white-space:nowrap;} table.gantt td{text-align:center;}
+th.ganttlbl{text-align:left;background:#fff;font-weight:700;} th.ganttlbl.sub{font-weight:600;color:#64748B;font-size:9.5px;text-transform:uppercase;}
+td.ganttbar{background:#0D9488;}
+@media print{ .sectitle,th,td.ganttbar{-webkit-print-color-adjust:exact;print-color-adjust:exact;} }
 ${landscape ? '@page{size:landscape;}' : ''}
 </style></head><body>
+${gantt ? buildGanttPrintHtml(gantt.poLabel, buildGanttBaseData(gantt.matches)) : ''}
 <h1>ILD Coffee Vietnam — Xuất dữ liệu (${rows.length} điểm kiểm tra)</h1>`;
   if(groups.length===0) html += '<p>Không có dữ liệu phù hợp.</p>';
   groups.forEach(({sec, rows:secRows})=>{

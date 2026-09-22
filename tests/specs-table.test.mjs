@@ -322,7 +322,7 @@ test('filter by Loại (multi-select), by Bắt buộc, and text-filter by Tên 
   } finally { dom.window.close(); }
 });
 
-test('historical/default SCHEMA (real ROA/REWORK sections) still renders correctly as tables; FOAMING was removed entirely', async () => {
+test('historical/default SCHEMA (real ROA section) still renders correctly as a table; FOAMING and REWORK were both removed entirely', async () => {
   const {dom, w, errors} = await boot();
   try {
     const doc = w.document;
@@ -330,25 +330,28 @@ test('historical/default SCHEMA (real ROA/REWORK sections) still renders correct
     const card = sectionCard(doc, 'Rang (ROA)');
     assert.ok(card, 'the real default ROA section must render');
     assert.ok(dataRows(card).length > 0);
-    const reworkCard = sectionCard(doc, 'Tái chế (Rework)');
-    assert.ok(reworkCard, 'REWORK section must still be manageable in Specs');
-    // "Tạo bọt (Foaming)" was fully removed from SCHEMA at the user's
-    // request — it must no longer appear anywhere in Specs.
+    // "Tạo bọt (Foaming)" and "Tái chế (Rework)" were both fully removed
+    // from SCHEMA at the user's request — neither must appear in Specs.
     assert.equal(sectionCard(doc, 'Tạo bọt (Foaming)'), undefined, 'FOAMING must no longer render as a Specs section');
+    assert.equal(sectionCard(doc, 'Tái chế (Rework)'), undefined, 'REWORK must no longer render as a Specs section');
     assert.equal(w.eval("sectionById('FOAMING')"), undefined);
+    assert.equal(w.eval("sectionById('REWORK')"), undefined);
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
 
 // ===================== Migration: an ALREADY-PERSISTED SCHEMA (from before
-// FOAMING was removed) must also get cleaned up, not just fresh devices =====
-// DEFAULT_SCHEMA no longer contains FOAMING, but a device that already
-// booted before this change has it saved in IndexedDB (meta.schema) — and
-// init() prefers that saved SCHEMA over DEFAULT_SCHEMA. Both call sites that
-// adopt a SCHEMA value (init() on boot, applyRemoteMeta() on a Supabase
-// pull) route through stripRemovedSections(), tested directly here.
-function withFoaming(sections) {
-  return [...sections, {id:'FOAMING', name:'Tạo bọt (Foaming)', fields:[{id:'FOAMING_ISSUE', label:'Issue/ Abnormal', type:'textarea'}]}];
+// FOAMING/REWORK were removed) must also get cleaned up, not just fresh
+// devices ===== DEFAULT_SCHEMA no longer contains either, but a device that
+// already booted before this change has them saved in IndexedDB
+// (meta.schema) — and init() prefers that saved SCHEMA over DEFAULT_SCHEMA.
+// Both call sites that adopt a SCHEMA value (init() on boot, applyRemoteMeta()
+// on a Supabase pull) route through stripRemovedSections(), tested directly here.
+function withRemovedSections(sections) {
+  return [...sections,
+    {id:'FOAMING', name:'Tạo bọt (Foaming)', fields:[{id:'FOAMING_ISSUE', label:'Issue/ Abnormal', type:'textarea'}]},
+    {id:'REWORK', name:'Tái chế (Rework)', fields:[{id:'REWORK_ISSUE', label:'Issue/ Abnormal', type:'textarea'}]},
+  ];
 }
 async function bootWithSeededSchema(seedSchemaArr) {
   const errors = [];
@@ -397,47 +400,50 @@ async function bootWithSeededSchema(seedSchemaArr) {
   return {dom, w, errors};
 }
 
-test('stripRemovedSections(): drops FOAMING and returns the SAME array reference when nothing needed removing', async () => {
+test('stripRemovedSections(): drops FOAMING and REWORK together and returns the SAME array reference when nothing needed removing', async () => {
   const {dom, w, errors} = await boot();
   try {
-    const withF = w.eval(`(() => { const s = sectionById('ROA'); return [s, {id:'FOAMING', name:'Tạo bọt (Foaming)', fields:[]}]; })()`);
-    const ids = JSON.parse(w.eval(`JSON.stringify(stripRemovedSections(${JSON.stringify(withF)}).map(s=>s.id))`));
-    assert.deepEqual(ids, ['ROA']);
-    // No FOAMING present -> must return the exact same array object (used
-    // by both call sites to decide whether a re-save/re-sync is needed).
+    const withBoth = w.eval(`(() => { const s = sectionById('ROA'); return [s, {id:'FOAMING', name:'Tạo bọt (Foaming)', fields:[]}, {id:'REWORK', name:'Tái chế (Rework)', fields:[]}]; })()`);
+    const ids = JSON.parse(w.eval(`JSON.stringify(stripRemovedSections(${JSON.stringify(withBoth)}).map(s=>s.id))`));
+    assert.deepEqual(ids, ['ROA'], 'both removed ids must be dropped in 1 pass, unrelated sections untouched');
+    // Neither present -> must return the exact same array object (used by
+    // both call sites to decide whether a re-save/re-sync is needed).
     const unchanged = w.eval(`(() => { const arr = [sectionById('ROA')]; return stripRemovedSections(arr) === arr; })()`);
     assert.equal(unchanged, true);
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
 
-test('init(): a SCHEMA already persisted in IndexedDB from BEFORE the removal (still containing FOAMING) gets cleaned up on boot, not just fresh devices', async () => {
-  const seed = withFoaming([{id: 'ROA', name: 'Rang (ROA)', fields: [{id: 'ROA_TEST', label: 'Test field', type: 'number'}]}]);
+test('init(): a SCHEMA already persisted in IndexedDB from BEFORE the removal (still containing FOAMING and REWORK) gets cleaned up on boot, not just fresh devices', async () => {
+  const seed = withRemovedSections([{id: 'ROA', name: 'Rang (ROA)', fields: [{id: 'ROA_TEST', label: 'Test field', type: 'number'}]}]);
   const {dom, w, errors} = await bootWithSeededSchema(seed);
   try {
     const doc = w.document;
     const ids = w.eval('SCHEMA.map(s=>s.id)');
     assert.ok(!ids.includes('FOAMING'), 'FOAMING must be stripped from an already-persisted SCHEMA at boot, not just DEFAULT_SCHEMA');
+    assert.ok(!ids.includes('REWORK'), 'REWORK must be stripped too, in the same pass');
     assert.ok(ids.includes('ROA'), 'the rest of the persisted SCHEMA (ROA) must survive untouched');
 
     w.showTab('specs');
     assert.equal(sectionCard(doc, 'Tạo bọt (Foaming)'), undefined, 'Specs must not show FOAMING even on a device that had it persisted before');
+    assert.equal(sectionCard(doc, 'Tái chế (Rework)'), undefined, 'Specs must not show REWORK even on a device that had it persisted before');
 
     // The cleanup must have been WRITTEN BACK to IndexedDB (not just held in
     // memory) so it stays gone across reloads, not reappear on next boot.
     const persisted = JSON.parse(await w.eval(`idbGet('meta','schema').then(r=>JSON.stringify(r.value.map(s=>s.id)))`));
-    assert.ok(!persisted.includes('FOAMING'), 'the cleaned SCHEMA must be persisted back to IndexedDB, not just in-memory');
+    assert.ok(!persisted.includes('FOAMING') && !persisted.includes('REWORK'), 'the cleaned SCHEMA must be persisted back to IndexedDB, not just in-memory');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
 
-test('applyRemoteMeta(\'schema\', ...): a schema pulled from Supabase that still contains FOAMING (from a not-yet-updated device) gets cleaned on arrival', async () => {
+test('applyRemoteMeta(\'schema\', ...): a schema pulled from Supabase that still contains FOAMING/REWORK (from a not-yet-updated device) gets cleaned on arrival', async () => {
   const {dom, w, errors} = await boot();
   try {
-    const incoming = w.eval(`(() => { const s = sectionById('EXT'); return [s, {id:'FOAMING', name:'Tạo bọt (Foaming)', fields:[]}]; })()`);
+    const incoming = w.eval(`(() => { const s = sectionById('EXT'); return [s, {id:'FOAMING', name:'Tạo bọt (Foaming)', fields:[]}, {id:'REWORK', name:'Tái chế (Rework)', fields:[]}]; })()`);
     w.eval(`applyRemoteMeta('schema', ${JSON.stringify(incoming)})`);
     const ids = w.eval('SCHEMA.map(s=>s.id)');
     assert.ok(!ids.includes('FOAMING'), 'a remotely-synced schema still carrying FOAMING must be cleaned on arrival');
+    assert.ok(!ids.includes('REWORK'), 'REWORK must be cleaned too');
     assert.ok(ids.includes('EXT'));
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
