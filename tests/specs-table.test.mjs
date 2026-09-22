@@ -340,6 +340,109 @@ test('historical/default SCHEMA (real ROA/REWORK sections) still renders correct
   } finally { dom.window.close(); }
 });
 
+// ===================== Migration: an ALREADY-PERSISTED SCHEMA (from before
+// FOAMING was removed) must also get cleaned up, not just fresh devices =====
+// DEFAULT_SCHEMA no longer contains FOAMING, but a device that already
+// booted before this change has it saved in IndexedDB (meta.schema) — and
+// init() prefers that saved SCHEMA over DEFAULT_SCHEMA. Both call sites that
+// adopt a SCHEMA value (init() on boot, applyRemoteMeta() on a Supabase
+// pull) route through stripRemovedSections(), tested directly here.
+function withFoaming(sections) {
+  return [...sections, {id:'FOAMING', name:'Tạo bọt (Foaming)', fields:[{id:'FOAMING_ISSUE', label:'Issue/ Abnormal', type:'textarea'}]}];
+}
+async function bootWithSeededSchema(seedSchemaArr) {
+  const errors = [];
+  const vc = new VirtualConsole();
+  vc.on('jsdomError', e => errors.push(e.message));
+  const factory = new IDBFactory();
+  // Pre-seed the EXACT database the app itself opens (mirrors idbOpen() in
+  // index.html: name 'shiftly_db', version 4, stores shifts/meta/logs/outbox)
+  // so init() sees this schema as ALREADY PERSISTED — the same code path a
+  // real pre-existing device hits, not the fresh-empty-IndexedDB path every
+  // other test in this repo exercises.
+  await new Promise((resolve, reject) => {
+    const req = factory.open('shiftly_db', 4);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      const shiftsStore = db.createObjectStore('shifts', {keyPath: 'key'});
+      shiftsStore.createIndex('by_date', 'date');
+      shiftsStore.createIndex('by_po', 'po');
+      db.createObjectStore('meta', {keyPath: 'k'});
+      db.createObjectStore('logs', {keyPath: 'id', autoIncrement: true});
+      db.createObjectStore('outbox', {keyPath: 'id', autoIncrement: true});
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction('meta', 'readwrite');
+      tx.objectStore('meta').put({k: 'schema', value: seedSchemaArr});
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+    req.onerror = () => reject(req.error);
+  });
+
+  const dom = new JSDOM(html, {
+    url: 'https://shiftly-report-app.example.workers.dev',
+    runScripts: 'dangerously',
+    pretendToBeVisual: true,
+    virtualConsole: vc,
+    beforeParse(w) {
+      w.indexedDB = factory;
+      w.fetch = async () => { throw new Error('network disabled in test'); };
+    },
+  });
+  const w = dom.window;
+  for (let i = 0; i < 100 && !w.eval('typeof DB !== "undefined" && DB !== null'); i++) await new Promise(r => setTimeout(r, 10));
+  await new Promise(r => setTimeout(r, 80)); // let the async init()/saveSchema() migration settle
+  return {dom, w, errors};
+}
+
+test('stripRemovedSections(): drops FOAMING and returns the SAME array reference when nothing needed removing', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const withF = w.eval(`(() => { const s = sectionById('ROA'); return [s, {id:'FOAMING', name:'Tạo bọt (Foaming)', fields:[]}]; })()`);
+    const ids = JSON.parse(w.eval(`JSON.stringify(stripRemovedSections(${JSON.stringify(withF)}).map(s=>s.id))`));
+    assert.deepEqual(ids, ['ROA']);
+    // No FOAMING present -> must return the exact same array object (used
+    // by both call sites to decide whether a re-save/re-sync is needed).
+    const unchanged = w.eval(`(() => { const arr = [sectionById('ROA')]; return stripRemovedSections(arr) === arr; })()`);
+    assert.equal(unchanged, true);
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('init(): a SCHEMA already persisted in IndexedDB from BEFORE the removal (still containing FOAMING) gets cleaned up on boot, not just fresh devices', async () => {
+  const seed = withFoaming([{id: 'ROA', name: 'Rang (ROA)', fields: [{id: 'ROA_TEST', label: 'Test field', type: 'number'}]}]);
+  const {dom, w, errors} = await bootWithSeededSchema(seed);
+  try {
+    const doc = w.document;
+    const ids = w.eval('SCHEMA.map(s=>s.id)');
+    assert.ok(!ids.includes('FOAMING'), 'FOAMING must be stripped from an already-persisted SCHEMA at boot, not just DEFAULT_SCHEMA');
+    assert.ok(ids.includes('ROA'), 'the rest of the persisted SCHEMA (ROA) must survive untouched');
+
+    w.showTab('specs');
+    assert.equal(sectionCard(doc, 'Tạo bọt (Foaming)'), undefined, 'Specs must not show FOAMING even on a device that had it persisted before');
+
+    // The cleanup must have been WRITTEN BACK to IndexedDB (not just held in
+    // memory) so it stays gone across reloads, not reappear on next boot.
+    const persisted = JSON.parse(await w.eval(`idbGet('meta','schema').then(r=>JSON.stringify(r.value.map(s=>s.id)))`));
+    assert.ok(!persisted.includes('FOAMING'), 'the cleaned SCHEMA must be persisted back to IndexedDB, not just in-memory');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('applyRemoteMeta(\'schema\', ...): a schema pulled from Supabase that still contains FOAMING (from a not-yet-updated device) gets cleaned on arrival', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const incoming = w.eval(`(() => { const s = sectionById('EXT'); return [s, {id:'FOAMING', name:'Tạo bọt (Foaming)', fields:[]}]; })()`);
+    w.eval(`applyRemoteMeta('schema', ${JSON.stringify(incoming)})`);
+    const ids = w.eval('SCHEMA.map(s=>s.id)');
+    assert.ok(!ids.includes('FOAMING'), 'a remotely-synced schema still carrying FOAMING must be cleaned on arrival');
+    assert.ok(ids.includes('EXT'));
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
 test('"Hiển thị trong báo cáo QMS" defaults to unchecked for every chỉ tiêu on a fresh device (isQMS auto-seeding removed)', async () => {
   const {dom, w, errors} = await boot();
   try {

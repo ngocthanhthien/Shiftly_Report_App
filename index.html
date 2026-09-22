@@ -1341,8 +1341,25 @@ async function queueMetaSync(key, value){
 function imgSrc(im){
   return (im && im.dataUrl) || '';
 }
+// Section id đã bị xoá HẲN khỏi DEFAULT_SCHEMA (hiện chỉ có FOAMING/"Tạo
+// bọt", theo yêu cầu người dùng) nhưng có thể vẫn còn tồn tại trong 1 bản
+// SCHEMA đã lưu TỪ TRƯỚC (IndexedDB của thiết bị này, hoặc đồng bộ về từ 1
+// thiết bị khác chưa cập nhật code mới) — vì SCHEMA đã lưu luôn được ưu
+// tiên hơn DEFAULT_SCHEMA. stripRemovedSections() dọn sạch mọi nơi 1 SCHEMA
+// được "nhận vào" (lúc khởi động lẫn lúc đồng bộ về) — trả về CHÍNH object
+// gốc (không tạo mảng mới) nếu không có gì cần dọn, để gọi nơi dùng có thể
+// so sánh `!==` mà biết có thực sự thay đổi hay không.
+const REMOVED_SECTION_IDS = ['FOAMING'];
+function stripRemovedSections(schemaArr){
+  return schemaArr.some(s=>REMOVED_SECTION_IDS.includes(s.id)) ? schemaArr.filter(s=>!REMOVED_SECTION_IDS.includes(s.id)) : schemaArr;
+}
 function applyRemoteMeta(key, value){
-  if(key==='schema' && Array.isArray(value) && value.length){ SCHEMA = value; idbPut('meta', {k:'schema', value: SCHEMA}); if(!stageIds().includes(currentStage)) currentStage = stageIds()[0]; }
+  if(key==='schema' && Array.isArray(value) && value.length){
+    SCHEMA = stripRemovedSections(value);
+    idbPut('meta', {k:'schema', value: SCHEMA});
+    if(SCHEMA!==value) saveSchema(); // đẩy lại bản đã dọn lên server, tự chữa cho các thiết bị khác
+    if(!stageIds().includes(currentStage)) currentStage = stageIds()[0];
+  }
   else if(key==='poList' && Array.isArray(value)){ PO_LIST = value; idbPut('meta', {k:'poList', value: PO_LIST}); }
   else if(key==='clientList' && Array.isArray(value)){ CLIENT_LIST = value; idbPut('meta', {k:'clientList', value: CLIENT_LIST}); }
   else if(key==='itemCodeList' && Array.isArray(value)){ ITEM_CODE_LIST = value; idbPut('meta', {k:'itemCodeList', value: ITEM_CODE_LIST}); }
@@ -6593,6 +6610,12 @@ function renderAll(){
       migrated = true;
     }
   }));
+  // Dọn các công đoạn đã bị xoá hẳn (hiện: FOAMING) khỏi 1 SCHEMA đã lưu từ
+  // trước — xem comment ở stripRemovedSections(). Checkpoint FOAMING đã lưu
+  // KHÔNG bị đụng tới, chỉ không còn là 1 công đoạn hợp lệ trong
+  // Specs/Báo cáo/Thống kê/Gantt nữa.
+  const cleanedSchema = stripRemovedSections(SCHEMA);
+  if(cleanedSchema !== SCHEMA){ SCHEMA = cleanedSchema; migrated = true; }
   if(migrated) await saveSchema();
   if(!stageIds().includes(currentStage)) currentStage = stageIds()[0];
   const metaPoClosures = await idbGet('meta','poClosures');
