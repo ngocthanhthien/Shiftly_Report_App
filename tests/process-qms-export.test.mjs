@@ -98,6 +98,10 @@ test('buildProcessQmsPrintHtml: same grouping/columns as the Excel builder, rend
     assert.ok(out.includes('<table>'), 'must render an actual HTML table');
     assert.ok(out.includes('05/01/2026'));
     assert.ok(out.includes('>5<') || out.includes('>5</td>'), 'the QMS numeric value must appear');
+    // No 2nd arg (or false) -> unchanged, portrait default (no @page override).
+    assert.ok(!out.includes('@page'), 'must stay portrait (browser default) unless landscape is explicitly requested');
+    const landscapeOut = w.eval('buildProcessQmsPrintHtml(allCheckpoints, true)');
+    assert.ok(landscapeOut.includes('@page{size:landscape;}'), 'landscape=true must force @page landscape for this print only');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });

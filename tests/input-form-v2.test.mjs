@@ -268,7 +268,7 @@ test('Save is blocked with a clear message when QC, Item Code, or PO are invalid
   } finally { dom.window.close(); }
 });
 
-test('PO = SHUTDOWN (any case) is accepted, but Item Code is still mandatory', async () => {
+test('PO = SHUTDOWN (any case): Item Code is now OPTIONAL (bypassed) when left blank, but still validated normally if the user does type one', async () => {
   const {dom, w, errors} = await boot();
   try {
     const doc = w.document;
@@ -277,23 +277,53 @@ test('PO = SHUTDOWN (any case) is accepted, but Item Code is still mandatory', a
     driveToNewCheckpointForm(doc, w, {po: 'shutdown'});
     await new Promise(r => setTimeout(r, 50));
 
+    // Label must reflect that Item Code is not required for this PO.
+    assert.match(doc.querySelector('#view-input').textContent, /Item Code \(không bắt buộc — PO là SHUTDOWN\)/);
+
     const qcSelect = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.textContent.includes('Chọn QC')));
     qcSelect.value = [...qcSelect.options].find(o => o.value).value;
     qcSelect.dispatchEvent(new w.Event('change'));
 
-    // Item Code still blank -> SHUTDOWN alone must not be enough to save.
+    // Item Code left BLANK -> must now save fine (bypassed for SHUTDOWN).
     [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Lưu điểm kiểm tra')).click();
-    assert.equal(w.eval('allCheckpoints.length'), 0, 'PO=SHUTDOWN does not exempt Item Code from being required');
-
-    const itemCodeInp = doc.querySelector('#view-input input[placeholder="VD: 11000011"]');
-    itemCodeInp.value = '11000011';
-    itemCodeInp.dispatchEvent(new w.Event('blur'));
     await new Promise(r => setTimeout(r, 50));
+    assert.equal(w.eval('allCheckpoints.length'), 1, 'PO=SHUTDOWN with a blank Item Code must save');
+    assert.equal(w.eval('allCheckpoints[0].po'), 'SHUTDOWN', 'lowercase "shutdown" must be normalized to SHUTDOWN');
+    assert.equal(w.eval('allCheckpoints[0].itemCode'), '', 'Item Code must be saved empty, not forced/guessed');
+    assert.equal(w.eval('allCheckpoints[0].recipe'), '', 'Recipe must be empty too — no Item Code to look it up from');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
 
+test('PO = SHUTDOWN: if the user DOES type an Item Code anyway, it is still validated (format/lookup) and used for Recipe as normal', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    w.confirm = () => true;
+    w.eval(`ITEM_CODE_LIST = [{type:'FGs', itemCode:'11000011', name:'Test Product', recipe:'452'}];`);
+    driveToNewCheckpointForm(doc, w, {shift: '1', process: 'EXT', po: 'SHUTDOWN'});
+    await new Promise(r => setTimeout(r, 50));
+    const qcSelect = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.textContent.includes('Chọn QC')));
+    qcSelect.value = [...qcSelect.options].find(o => o.value).value;
+    qcSelect.dispatchEvent(new w.Event('change'));
+
+    // An invalid Item Code (not in the Master) must still block Save, even though PO=SHUTDOWN.
+    const itemCodeInp = () => doc.querySelector('#view-input input[placeholder="VD: 11000011"]');
+    itemCodeInp().value = '99999999';
+    itemCodeInp().dispatchEvent(new w.Event('blur'));
+    await new Promise(r => setTimeout(r, 50));
+    [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Lưu điểm kiểm tra')).click();
+    assert.match(doc.querySelector('#toast').textContent, /không tồn tại|Master/i, 'typing an unknown Item Code must still be validated normally, not silently accepted');
+    assert.equal(w.eval('allCheckpoints.length'), 0);
+
+    // A valid Item Code must save with Recipe auto-filled, same as any other PO.
+    itemCodeInp().value = '11000011';
+    itemCodeInp().dispatchEvent(new w.Event('blur'));
+    await new Promise(r => setTimeout(r, 50));
     [...doc.querySelectorAll('#view-input button')].find(b => b.textContent.includes('Lưu điểm kiểm tra')).click();
     await new Promise(r => setTimeout(r, 50));
     assert.equal(w.eval('allCheckpoints.length'), 1);
-    assert.equal(w.eval('allCheckpoints[0].po'), 'SHUTDOWN', 'lowercase "shutdown" must be normalized to SHUTDOWN');
+    assert.equal(w.eval('allCheckpoints[0].itemCode'), '11000011');
     assert.equal(w.eval('allCheckpoints[0].recipe'), '452', 'Recipe must be auto-filled from the Item Code Master lookup');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }

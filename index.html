@@ -2163,8 +2163,17 @@ function renderInputForm(){
     }
   }
 
+  // PO = SHUTDOWN không gắn với 1 sản phẩm/Item Code cụ thể nào (ca dừng
+  // máy, không sản xuất) — biết trước giá trị PO (dù ô PO nằm SAU Item Code
+  // trong form) để bỏ bắt buộc Item Code khi PO là SHUTDOWN. Với checkpoint
+  // đang Sửa, PO đã biết ngay (editingCp.po); với checkpoint mới, PO là
+  // state đã gõ trước đó (renderInputForm._newPO), nếu có.
+  const poForItemCodeGate = (editingCp ? editingCp.po : (renderInputForm._newPO||'')).trim();
+  const isShutdownEarly = /^shutdown$/i.test(poForItemCodeGate);
   // ---- Item Code (gõ tay 8 số HOẶC tìm/chọn từ danh sách có sẵn — Item
-  // Code Master, giống hệt kiểu tìm PO) -> Item Name + Recipe (TỰ ĐỘNG, chỉ đọc) ----
+  // Code Master, giống hệt kiểu tìm PO) -> Item Name + Recipe (TỰ ĐỘNG, chỉ
+  // đọc). KHÔNG bắt buộc khi PO là SHUTDOWN (không có sản phẩm để gắn Item
+  // Code) — nếu vẫn gõ vào, vẫn được tra cứu/kiểm tra bình thường. ----
   const itemCodeVal0 = editingCp ? (editingCp.itemCode||'') : (renderInputForm._newItemCode||'');
   // commit() bên trong renderAutocomplete tự fire cả lúc blur LẪN lúc bấm
   // chọn 1 gợi ý — cùng đi qua captureDraft()+re-render, same safety net as
@@ -2177,7 +2186,7 @@ function renderInputForm(){
     if(editingCp) editingCp.itemCode = v.trim(); else renderInputForm._newItemCode = v.trim();
     renderInputForm();
   });
-  formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Item Code *']), itemCodeAC.node]));
+  formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},[isShutdownEarly ? 'Item Code (không bắt buộc — PO là SHUTDOWN)' : 'Item Code *']), itemCodeAC.node]));
 
   const lookup = lookupItemByCode(itemCodeVal0);
   const readonlyStyle = 'background:#F1F5F9;color:var(--muted);cursor:not-allowed;';
@@ -2206,11 +2215,16 @@ function renderInputForm(){
       // 1 PO = 1 Item Code: nếu PO này đã từng được lưu với 1 Item Code ở
       // checkpoint khác (bất kỳ Công đoạn nào), ưu tiên auto-fill đúng Item
       // Code đó — Item Name/Recipe sẽ tự cập nhật theo Item Code Master ở
-      // lần render kế tiếp (logic tra cứu sẵn có, không đổi gì thêm).
-      const existingCode = findItemCodeForPO(v, null);
-      if(existingCode && existingCode !== renderInputForm._newItemCode){
-        renderInputForm._newItemCode = existingCode;
-        toast(`PO này đã dùng Item Code ${existingCode} trước đó — đã tự điền.`);
+      // lần render kế tiếp (logic tra cứu sẵn có, không đổi gì thêm). Bỏ qua
+      // hẳn khi PO là SHUTDOWN — Item Code không bắt buộc/không có ý nghĩa
+      // gắn với 1 lần dừng máy, không nên tự điền theo checkpoint SHUTDOWN
+      // khác (nhiều checkpoint SHUTDOWN khác nhau không liên quan gì nhau).
+      if(!/^shutdown$/i.test(v.trim())){
+        const existingCode = findItemCodeForPO(v, null);
+        if(existingCode && existingCode !== renderInputForm._newItemCode){
+          renderInputForm._newItemCode = existingCode;
+          toast(`PO này đã dùng Item Code ${existingCode} trước đó — đã tự điền.`);
+        }
       }
       renderInputForm();
     });
@@ -2378,12 +2392,6 @@ function renderInputForm(){
     // ---- Validate BẮT BUỘC — sai thì KHÔNG lưu, không hỏi "vẫn lưu?" ----
     if(!qcSel.value){ toast('Vui lòng chọn QC.'); return; }
     if(!secId){ toast('Vui lòng chọn Công đoạn.'); return; }
-    const itemCodeVal = itemCodeAC.getValue();
-    if(!/^\d{8}$/.test(itemCodeVal)){ toast('Item Code phải gồm đúng 8 chữ số.'); return; }
-    const lookupResult = lookupItemByCode(itemCodeVal);
-    if(lookupResult.status==='not_found'){ toast('Item Code không tồn tại trong Item Code Master.'); return; }
-    if(lookupResult.status==='ambiguous'){ toast('Item Code này có nhiều bản ghi khác nhau trong Item Code Master — cần làm sạch dữ liệu trước khi lưu.'); return; }
-    if(lookupResult.status==='missing_recipe'){ toast('Item Code Master chưa có Recipe cho mã này.'); return; }
     const poRaw = poAC.getValue().trim();
     const poVal = /^shutdown$/i.test(poRaw) ? 'SHUTDOWN' : poRaw;
     if(!poVal){ toast('Vui lòng nhập mã PO.'); return; }
@@ -2391,13 +2399,29 @@ function renderInputForm(){
     // áp dụng lên checkpoint lịch sử đang Sửa, để không chặn sửa dữ liệu cũ
     // đã lưu trước khi quy tắc này tồn tại (yêu cầu nghiệp vụ rõ ràng).
     if(!editingCp && poVal!=='SHUTDOWN' && !/^\d{9}$/.test(poVal)){ toast('Mã PO phải gồm đúng 9 chữ số, hoặc là SHUTDOWN.'); return; }
+    const itemCodeVal = itemCodeAC.getValue();
+    // PO = SHUTDOWN: Item Code KHÔNG bắt buộc (không gắn với 1 sản phẩm cụ
+    // thể nào — ca dừng máy, không sản xuất). Nếu để trống, bỏ qua hẳn bước
+    // tra cứu/Recipe. Nếu người dùng vẫn gõ vào, vẫn kiểm tra đúng như bình
+    // thường (không âm thầm chấp nhận 1 mã sai định dạng/không tồn tại).
+    let lookupResult = {status:'not_found'};
+    if(poVal!=='SHUTDOWN' || itemCodeVal){
+      if(!/^\d{8}$/.test(itemCodeVal)){ toast('Item Code phải gồm đúng 8 chữ số.'); return; }
+      lookupResult = lookupItemByCode(itemCodeVal);
+      if(lookupResult.status==='not_found'){ toast('Item Code không tồn tại trong Item Code Master.'); return; }
+      if(lookupResult.status==='ambiguous'){ toast('Item Code này có nhiều bản ghi khác nhau trong Item Code Master — cần làm sạch dữ liệu trước khi lưu.'); return; }
+      if(lookupResult.status==='missing_recipe'){ toast('Item Code Master chưa có Recipe cho mã này.'); return; }
+    }
     // 1 PO = 1 Item Code: chặn Lưu nếu PO này đã từng dùng 1 Item Code khác
-    // ở 1 checkpoint khác (áp dụng cho cả thêm mới lẫn sửa, vì đây là ràng
-    // buộc toàn vẹn dữ liệu đi tới — không có ngoại lệ lịch sử được yêu cầu).
-    const conflictItemCode = findItemCodeForPO(poVal, cp.key);
-    if(conflictItemCode && conflictItemCode !== itemCodeVal){
-      toast(`PO ${poVal} đã được lưu với Item Code ${conflictItemCode} trước đó — không thể dùng Item Code khác cho cùng PO.`);
-      return;
+    // ở 1 checkpoint khác (áp dụng cho cả thêm mới lẫn sửa). KHÔNG áp dụng
+    // cho SHUTDOWN — đây không phải 1 PO sản xuất thật, nhiều checkpoint
+    // SHUTDOWN khác nhau (khác ngày/ca) không liên quan gì tới nhau.
+    if(poVal!=='SHUTDOWN'){
+      const conflictItemCode = findItemCodeForPO(poVal, cp.key);
+      if(conflictItemCode && conflictItemCode !== itemCodeVal){
+        toast(`PO ${poVal} đã được lưu với Item Code ${conflictItemCode} trước đó — không thể dùng Item Code khác cho cùng PO.`);
+        return;
+      }
     }
     for(let i=0;i<issueRowEls.length;i++){
       const issueTxt = issueRowEls[i].issueInp.value.trim();
@@ -2448,7 +2472,7 @@ function renderInputForm(){
     syncIssueActionToLegacyFields(cp, sec);
     cp.technician = qcSel.value;
     cp.itemCode = itemCodeVal;
-    cp.recipe = lookupResult.recipe;
+    cp.recipe = lookupResult.status==='ok' ? lookupResult.recipe : '';
     cp.client = clientSel.value;
     cp.date = dateVal; cp.shift = shiftVal; cp.section = secId; cp.po = poVal;
     cp.key = newKeyCandidate;
@@ -4698,11 +4722,20 @@ function buildIssueActionEditableList(sec, cp, onEdited){
       } else {
         const editBtn = el('button',{class:'btn ghost sm', type:'button'},['✎ Sửa']);
         editBtn.addEventListener('click', ()=>{ editIdx=idx; draw(); });
+        const delBtn = el('button',{class:'btn danger sm', type:'button'},['🗑️ Xoá']);
+        delBtn.addEventListener('click', async ()=>{
+          if(!confirm('Xoá cặp Issue/Action này? Không thể hoàn tác.')) return;
+          const before = {issue:p.issue||'', action:p.action||''};
+          const allPairs = getIssueActionPairs(cp, sec);
+          allPairs.splice(idx,1);
+          await persistPairs(allPairs, `Issue/Action #${idx+1} (xoá)`, before, null);
+          if(onEdited) onEdited(); else draw();
+        });
         wrap.appendChild(el('div',{class:'grid g2', style:'margin-bottom:6px;'},[
           el('div',{},[el('div',{class:'sub', style:'margin:0 0 2px;font-weight:700;'},['Issue/Abnormal']), el('div',{style:'font-size:13px;white-space:pre-wrap;'},[p.issue||'—'])]),
           el('div',{},[el('div',{class:'sub', style:'margin:0 0 2px;font-weight:700;'},['Action']), el('div',{style:'font-size:13px;white-space:pre-wrap;'},[p.action||'—'])]),
         ]));
-        wrap.appendChild(el('div',{class:'row', style:'margin-bottom:10px;'},[editBtn]));
+        wrap.appendChild(el('div',{class:'row', style:'margin-bottom:10px;'},[editBtn, delBtn]));
       }
     });
     if(editIdx==='new'){
@@ -4992,7 +5025,11 @@ function renderReport(){
       const file = new File([buildProcessQmsExcelXml(subset)], `Shiftly_ProcessQMS_${todayStr()}.xls`, {type:'application/vnd.ms-excel'});
       await exportFileToPreferredLocation(file, {title:'Shiftly Process/QMS', fallbackMsg:`Đã tải Excel theo mẫu (${subset.length} điểm kiểm tra) về máy`});
     } else {
-      printReport(buildProcessQmsPrintHtml(subset), `Shiftly_ProcessQMS_${todayStr()}`);
+      // Bảng QMS ở chế độ Theo PO thường có nhiều cột hơn (PO có thể chạy
+      // qua nhiều Công đoạn, mỗi Công đoạn 1 khối cột QMS riêng) — in khổ
+      // ngang (Landscape) cho dễ đọc hơn khổ dọc mặc định. Theo ca giữ
+      // nguyên khổ dọc như cũ (không đổi gì ở đó).
+      printReport(buildProcessQmsPrintHtml(subset, mode==='po'), `Shiftly_ProcessQMS_${todayStr()}`);
     }
   }
   qmsXlsxBtn.addEventListener('click', ()=>exportQmsTemplate('xlsx'));
@@ -6337,7 +6374,7 @@ function renderGuide(){
     <p>Để cập nhật hàng loạt sau này: bấm <b>"⬇️ Tải template mẫu"</b> để có file Excel đúng định dạng, điền thêm dòng mới vào rồi bấm <b>"📥 Nhập từ Excel"</b> — dòng trùng cả Loại + Item Code + Tên sản phẩm sẽ tự bỏ qua (không tạo trùng lặp), dòng mới sẽ được thêm vào. Bấm <b>"⬆️ Xuất Excel"</b> để tải toàn bộ danh sách hiện tại ra file. Lưu ý: cũng như các tab danh sách khác (PO/Recipe/Client), file Excel ở đây dùng đúng định dạng ".xls" mà chính app này tự xuất ra — 1 file ".xlsx" gốc khác (vd tải trực tiếp từ Excel/Google Sheets) cần dán lại dữ liệu vào đúng file template trước khi nhập vào app.</p>
     <h4>37. Quy trình nhập liệu mới (kiểm soát chặt hơn)</h4>
     <p>Tab Nhập liệu đi theo đúng thứ tự: <b>Ngày → Ca → QC → Công đoạn → Item Code → Tên sản phẩm/Recipe (tự động) → Mã PO → các chỉ tiêu công đoạn → Issue/Abnormal &amp; Action → Lưu</b>. Ca/QC/Công đoạn không còn tự chọn sẵn nữa — phải tự chọn (chưa chọn Ca thì cả tab chưa hiện gì, đúng ý "chưa có Ca thì chưa có gì để lưu"). Công đoạn khi TẠO MỚI chỉ còn 5 lựa chọn: Rang (ROA), Trích ly (EXT), Cô đặc (EVA), Sấy thăng hoa (FD), Đóng gói (F&amp;P) — Rework/Tổng kết ca không còn tạo mới được nhưng dữ liệu lịch sử vẫn xem/sửa/xuất báo cáo bình thường. <b>Tạo bọt (Foaming) đã bị xoá hẳn khỏi danh sách công đoạn của app</b> (không chỉ ẩn khi tạo mới) — checkpoint Foaming đã lưu từ trước vẫn còn nguyên trong dữ liệu, chỉ không còn hiển thị đẹp/xuất báo cáo được như các công đoạn khác nữa.</p>
-    <p>Ô Item Code vừa gõ tay vừa <b>tìm/chọn từ danh sách có sẵn</b> (gõ vài số đầu sẽ hiện gợi ý các mã đã có trong Item Code Master, giống hệt cách chọn PO) — chọn xong hoặc rời khỏi ô đó (bấm sang ô khác), Tên sản phẩm và Recipe tự điền (chỉ đọc, không sửa tay) từ đúng dữ liệu tab Danh sách Items Code. Không tìm thấy mã, mã có nhiều bản ghi mâu thuẫn nhau, hoặc mã chưa có Recipe trong Item Code Master đều báo lỗi rõ ràng và <b>chặn lưu</b> cho tới khi sửa đúng (đúng 8 chữ số). Mã PO phải đúng 9 chữ số, hoặc gõ "SHUTDOWN" (không phân biệt hoa/thường, tự chuyển thành chữ hoa) — với 1 điểm kiểm tra MỚI, app kiểm tra ngay khi gõ: sai định dạng thì hiện cảnh báo và <b>chưa mở phần chỉ tiêu phía dưới</b> (không cần đợi tới lúc bấm Lưu mới biết sai).</p>
+    <p>Ô Item Code vừa gõ tay vừa <b>tìm/chọn từ danh sách có sẵn</b> (gõ vài số đầu sẽ hiện gợi ý các mã đã có trong Item Code Master, giống hệt cách chọn PO) — chọn xong hoặc rời khỏi ô đó (bấm sang ô khác), Tên sản phẩm và Recipe tự điền (chỉ đọc, không sửa tay) từ đúng dữ liệu tab Danh sách Items Code. Không tìm thấy mã, mã có nhiều bản ghi mâu thuẫn nhau, hoặc mã chưa có Recipe trong Item Code Master đều báo lỗi rõ ràng và <b>chặn lưu</b> cho tới khi sửa đúng (đúng 8 chữ số). Mã PO phải đúng 9 chữ số, hoặc gõ "SHUTDOWN" (không phân biệt hoa/thường, tự chuyển thành chữ hoa) — với 1 điểm kiểm tra MỚI, app kiểm tra ngay khi gõ: sai định dạng thì hiện cảnh báo và <b>chưa mở phần chỉ tiêu phía dưới</b> (không cần đợi tới lúc bấm Lưu mới biết sai). <b>Riêng PO = SHUTDOWN thì Item Code KHÔNG bắt buộc</b> (nhãn ô tự đổi thành "không bắt buộc") — vì ca dừng máy không gắn với 1 sản phẩm cụ thể nào; để trống vẫn lưu được bình thường (Recipe để trống theo), còn nếu vẫn gõ vào thì mã đó vẫn được kiểm tra/tra cứu như bình thường. 1 PO = 1 Item Code (mục dưới) cũng không áp dụng cho SHUTDOWN.</p>
     <p>Issue/Abnormal và Action giờ nhập theo từng CẶP dòng, bấm "+ Thêm Issue/Action" nếu cần nhiều dòng — dòng nào đã gõ Issue thì bắt buộc phải gõ Action tương ứng (và ngược lại), dòng để trống hoàn toàn thì bỏ qua, không chặn lưu. Dữ liệu vẫn tương thích ngược 100% với các báo cáo/Excel/QMS đã có (App tự ghép lại vào đúng ô "Issue/ Abnormal" quen thuộc khi lưu).</p>
   </div>`;
 }
@@ -6548,7 +6585,12 @@ function buildProcessQmsExcelXml(rows){
   xml += `</Table></Worksheet></Workbook>`;
   return xml;
 }
-function buildProcessQmsPrintHtml(rows){
+// landscape (tuỳ chọn, mặc định false = giữ nguyên khổ dọc như trước): bật
+// khi bảng có nhiều cột hơn bình thường (VD: xuất từ chế độ Theo PO — PO có
+// thể chạy qua nhiều Công đoạn, mỗi Công đoạn 1 khối cột QMS riêng) — chỉ
+// đổi @page CSS cho lần in này, không ảnh hưởng cỡ giấy mặc định của trình
+// duyệt hay các bản in khác.
+function buildProcessQmsPrintHtml(rows, landscape){
   const groups = processQmsSections(rows);
   let html = `<!DOCTYPE html><html lang="vi"><head><meta charset="UTF-8"><title>Shiftly — Xuất dữ liệu theo mẫu</title>
 <style>
@@ -6559,6 +6601,7 @@ th,td{border:1px solid #94A3B8;padding:4px 6px;text-align:left;}
 th{background:#EEF1F6;font-weight:700;}
 .sectitle{font-weight:700;background:#0B1220;color:#fff;padding:5px 8px;margin:14px 0 6px;border-radius:4px;}
 @media print{ .sectitle,th{-webkit-print-color-adjust:exact;print-color-adjust:exact;} }
+${landscape ? '@page{size:landscape;}' : ''}
 </style></head><body>
 <h1>ILD Coffee Vietnam — Xuất dữ liệu (${rows.length} điểm kiểm tra)</h1>`;
   if(groups.length===0) html += '<p>Không có dữ liệu phù hợp.</p>';

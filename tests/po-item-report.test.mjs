@@ -191,6 +191,47 @@ test('1 PO = 1 Item Code: reusing an existing PO auto-fills its Item Code; savin
   } finally { dom.window.close(); }
 });
 
+test('1 PO = 1 Item Code does NOT apply to SHUTDOWN: different checkpoints sharing PO=SHUTDOWN with different (or blank) Item Codes are never blocked, and typing SHUTDOWN never triggers the auto-fill', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    w.eval(`ITEM_CODE_LIST = [
+      {type:'FGs', itemCode:'11000011', name:'Product A', recipe:'452'},
+      {type:'FGs', itemCode:'22000022', name:'Product B', recipe:'400'},
+    ];`);
+    w.confirm = () => true; // chỉ tiêu grid left blank on purpose throughout
+
+    // 1st SHUTDOWN checkpoint, Item Code 11000011.
+    driveToNewCheckpointForm(doc, w, {shift: '1', process: 'ROA', po: 'SHUTDOWN'});
+    await new Promise(r => setTimeout(r, 50));
+    await fillQcAndItemCode(doc, w, {itemCode: '11000011'});
+    saveBtnOf(doc).click();
+    await new Promise(r => setTimeout(r, 50));
+    assert.equal(w.eval('allCheckpoints.length'), 1);
+
+    // 2nd SHUTDOWN checkpoint, different process, DIFFERENT Item Code -> must NOT auto-fill and must NOT be blocked (unlike a real PO).
+    driveToNewCheckpointForm(doc, w, {shift: '1', process: 'EXT', po: 'SHUTDOWN'});
+    await new Promise(r => setTimeout(r, 80));
+    assert.equal(itemCodeInputOf(doc).value, '', 'Item Code must NOT auto-fill from another SHUTDOWN checkpoint');
+    assert.doesNotMatch(toastTextOf(doc), /tự điền/, 'no auto-fill toast for SHUTDOWN');
+    await fillQcAndItemCode(doc, w, {itemCode: '22000022'});
+    saveBtnOf(doc).click();
+    await new Promise(r => setTimeout(r, 50));
+    assert.equal(w.eval('allCheckpoints.length'), 2, 'a different Item Code on another SHUTDOWN checkpoint must NOT be blocked as a conflict');
+
+    // 3rd SHUTDOWN checkpoint, Item Code left BLANK entirely -> must save fine too.
+    driveToNewCheckpointForm(doc, w, {shift: '1', process: 'EVA', po: 'SHUTDOWN'});
+    await new Promise(r => setTimeout(r, 80));
+    const qcSelect3 = [...doc.querySelectorAll('#view-input select')].find(s => [...s.options].some(o => o.textContent.includes('Chọn QC')));
+    qcSelect3.value = [...qcSelect3.options].find(o => o.value).value;
+    qcSelect3.dispatchEvent(new w.Event('change'));
+    saveBtnOf(doc).click();
+    await new Promise(r => setTimeout(r, 50));
+    assert.equal(w.eval('allCheckpoints.length'), 3, 'a blank Item Code on a SHUTDOWN checkpoint must save fine even when other SHUTDOWN checkpoints already have Item Codes');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
 // ===================== 2) Report tab "Theo ca": Date + Ca controls, "Tất cả" =====================
 
 test('Báo cáo tab (Theo ca): Ngày và Ca là 2 control độc lập; chọn "Tất cả" hiển thị Ca 1 -> 2 -> 3 phân tách, ca trống hiện "Chưa có dữ liệu"', async () => {
@@ -484,6 +525,76 @@ test('Báo cáo tab (Theo PO): ô Gantt CHƯA có checkpoint vẫn bấm đượ
     assert.deepEqual(ganttBarRowInfo(doc, 'ROASTING'), {startIdx:0, endIdx:5}, 'ROA bar must extend once a checkpoint exists at column 5');
     const roaIssueRowAfter = ganttTextRow(doc, 'ROASTING', 'Issues/Abnormal');
     assert.equal([...roaIssueRowAfter.children].slice(1)[5].textContent.trim(), 'Cà rang bị cháy');
+    // Not asserting errors.length===0 — see the canvas-measurement note above.
+  } finally { dom.window.close(); }
+});
+
+test('Báo cáo tab (Theo PO): nút "🗑️ Xoá" trong modal sửa Issue/Action xoá đúng cặp đó khỏi checkpoint gốc, hỏi xác nhận trước, Gantt cập nhật ngay', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    await seedPOGanttData(w);
+    w.showTab('report');
+    await new Promise(r => setTimeout(r, 80));
+    doSearchPO(doc, w, '612600069');
+    await new Promise(r => setTimeout(r, 150));
+
+    const evaIssueRow = ganttTextRow(doc, 'EVAPORATION', 'Issues/Abnormal');
+    const cell = [...evaIssueRow.children].slice(1)[6]; // 24/07 Ca1 — the seeded EVA checkpoint carrying 1 Issue/Action pair
+    assert.equal(cell.textContent.trim(), 'Sediment high');
+    cell.click();
+    const modal = doc.querySelector('.modal-card');
+    assert.ok(modal, 'clicking the cell must open the edit modal');
+    const delBtn = [...modal.querySelectorAll('button')].find(b => b.textContent.includes('🗑️ Xoá'));
+    assert.ok(delBtn, 'a "🗑️ Xoá" button must exist next to "✎ Sửa" for an existing pair');
+
+    // Declining the confirm() dialog must NOT delete anything.
+    w.confirm = () => false;
+    delBtn.click();
+    await new Promise(r => setTimeout(r, 80));
+    let cpNow = evalJson(w, "allCheckpoints.find(c=>c.section==='EVA' && c.po==='612600069' && c.date==='2026-07-24')");
+    assert.deepEqual(cpNow.fields[w.eval('ISSUE_PAIRS_KEY')], [{issue:'Sediment high', action:'Check centrifuge'}], 'cancelling the confirm dialog must leave the pair untouched');
+    assert.ok(doc.querySelector('.modal-card'), 'the modal must stay open when the delete is cancelled');
+
+    // Confirming must delete the pair and write straight back to the checkpoint.
+    w.confirm = () => true;
+    delBtn.click();
+    await new Promise(r => setTimeout(r, 150));
+    assert.ok(!doc.querySelector('.modal-card'), 'the modal must close after a confirmed delete (same as a save)');
+    cpNow = evalJson(w, "allCheckpoints.find(c=>c.section==='EVA' && c.po==='612600069' && c.date==='2026-07-24')");
+    assert.deepEqual(cpNow.fields[w.eval('ISSUE_PAIRS_KEY')], [], 'the pair must be removed from the checkpoint, no separate Report record');
+    assert.equal(cpNow.fields.EVA_ISSUE, '', 'the legacy EVA_ISSUE field must be cleared too (syncIssueActionToLegacyFields)');
+
+    // The Gantt cell for that column must now be empty.
+    const evaIssueRowAfter = ganttTextRow(doc, 'EVAPORATION', 'Issues/Abnormal');
+    assert.equal([...evaIssueRowAfter.children].slice(1)[6].textContent.trim(), '');
+    // Not asserting errors.length===0 — see the canvas-measurement note above.
+  } finally { dom.window.close(); }
+});
+
+test('Báo cáo tab: "📄 PDF theo mẫu" prints Landscape when triggered from Theo PO, but stays Portrait (unchanged) from Theo ca', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    await seedPOGanttData(w);
+    w.eval(`SCHEMA.find(s=>s.id==='ROA').fields.find(f=>f.id==='ROA_R6E').isQMS = true;`);
+    w.print = () => {}; // jsdom has no window.print(); stub it like other tests stub window.confirm
+    w.showTab('report');
+    await new Promise(r => setTimeout(r, 80));
+
+    // Theo ca (default mode) must be unaffected — still Portrait (no @page).
+    const pdfBtnShift = doc.querySelector('#btnRepQmsPdf');
+    pdfBtnShift.click();
+    await new Promise(r => setTimeout(r, 120));
+    assert.ok(!doc.querySelector('#printArea').innerHTML.includes('@page'), 'Theo ca must keep printing Portrait (unchanged behavior)');
+
+    // Theo PO must print Landscape.
+    doSearchPO(doc, w, '612600069');
+    await new Promise(r => setTimeout(r, 150));
+    const pdfBtnPo = doc.querySelector('#btnRepQmsPdf');
+    pdfBtnPo.click();
+    await new Promise(r => setTimeout(r, 120));
+    assert.ok(doc.querySelector('#printArea').innerHTML.includes('@page{size:landscape;}'), 'Theo PO must print Landscape');
     // Not asserting errors.length===0 — see the canvas-measurement note above.
   } finally { dom.window.close(); }
 });
