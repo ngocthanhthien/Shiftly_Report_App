@@ -661,6 +661,19 @@ function allKnownItemCodes(){
   return [...new Set(ITEM_CODE_LIST.map(i=>String(i.itemCode||'').trim()).filter(Boolean))].sort();
 }
 
+// 1 PO chỉ được gắn với đúng 1 Item Code (quy tắc nghiệp vụ) — soi lại
+// CHÍNH allCheckpoints hiện có (không tạo master/database PO<->ItemCode mới)
+// để tìm Item Code đã dùng cho PO này ở bất kỳ checkpoint nào khác (mọi
+// Công đoạn). Dùng để (a) auto-fill Item Code khi người dùng nhập 1 PO đã
+// tồn tại, và (b) chặn Lưu nếu Item Code gõ vào khác với Item Code đã dùng
+// trước đó cho cùng PO.
+function findItemCodeForPO(po, excludeKey){
+  const norm = String(po||'').trim();
+  if(!norm) return '';
+  const match = allCheckpoints.find(r=>r.po===norm && r.key!==excludeKey && r.itemCode);
+  return match ? match.itemCode : '';
+}
+
 // Recipe không còn là 1 danh sách quản lý riêng — mọi mã Recipe hợp lệ đến
 // từ Item Code Master (cùng nguồn với lookupItemByCode()). Dùng để gợi ý
 // trong ô "Ghi đè theo Recipe" (Specs tab).
@@ -2135,7 +2148,20 @@ function renderInputForm(){
     formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Mã PO *']), poAC.node]));
   } else {
     const poVal0 = renderInputForm._newPO || '';
-    poAC = renderAutocomplete(poVal0, allKnownPOs(), 'VD: 712600111 hoặc SHUTDOWN', (v)=>{ captureDraft(); renderInputForm._newPO=v; renderInputForm(); });
+    poAC = renderAutocomplete(poVal0, allKnownPOs(), 'VD: 712600111 hoặc SHUTDOWN', (v)=>{
+      captureDraft();
+      renderInputForm._newPO=v;
+      // 1 PO = 1 Item Code: nếu PO này đã từng được lưu với 1 Item Code ở
+      // checkpoint khác (bất kỳ Công đoạn nào), ưu tiên auto-fill đúng Item
+      // Code đó — Item Name/Recipe sẽ tự cập nhật theo Item Code Master ở
+      // lần render kế tiếp (logic tra cứu sẵn có, không đổi gì thêm).
+      const existingCode = findItemCodeForPO(v, null);
+      if(existingCode && existingCode !== renderInputForm._newItemCode){
+        renderInputForm._newItemCode = existingCode;
+        toast(`PO này đã dùng Item Code ${existingCode} trước đó — đã tự điền.`);
+      }
+      renderInputForm();
+    });
     formCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Mã PO *']), poAC.node]));
     if(!poVal0){
       formCard.appendChild(el('p',{class:'sub', style:'margin:10px 0 0;'},['Nhập/chọn mã PO để tiếp tục nhập chỉ tiêu.']));
@@ -2309,7 +2335,18 @@ function renderInputForm(){
     const poRaw = poAC.getValue().trim();
     const poVal = /^shutdown$/i.test(poRaw) ? 'SHUTDOWN' : poRaw;
     if(!poVal){ toast('Vui lòng nhập mã PO.'); return; }
-    if(poVal!=='SHUTDOWN' && !/^\d{9}$/.test(poVal)){ toast('Mã PO phải gồm đúng 9 chữ số, hoặc là SHUTDOWN.'); return; }
+    // Định dạng PO (9 chữ số hoặc SHUTDOWN) chỉ bắt buộc khi TẠO MỚI — không
+    // áp dụng lên checkpoint lịch sử đang Sửa, để không chặn sửa dữ liệu cũ
+    // đã lưu trước khi quy tắc này tồn tại (yêu cầu nghiệp vụ rõ ràng).
+    if(!editingCp && poVal!=='SHUTDOWN' && !/^\d{9}$/.test(poVal)){ toast('Mã PO phải gồm đúng 9 chữ số, hoặc là SHUTDOWN.'); return; }
+    // 1 PO = 1 Item Code: chặn Lưu nếu PO này đã từng dùng 1 Item Code khác
+    // ở 1 checkpoint khác (áp dụng cho cả thêm mới lẫn sửa, vì đây là ràng
+    // buộc toàn vẹn dữ liệu đi tới — không có ngoại lệ lịch sử được yêu cầu).
+    const conflictItemCode = findItemCodeForPO(poVal, cp.key);
+    if(conflictItemCode && conflictItemCode !== itemCodeVal){
+      toast(`PO ${poVal} đã được lưu với Item Code ${conflictItemCode} trước đó — không thể dùng Item Code khác cho cùng PO.`);
+      return;
+    }
     for(let i=0;i<issueRowEls.length;i++){
       const issueTxt = issueRowEls[i].issueInp.value.trim();
       const actionTxt = issueRowEls[i].actionInp.value.trim();
@@ -3788,7 +3825,7 @@ function renderLinesToSVG(lines, W){
   const M = 20;
   const FONT = 11.5;
   const ctx = getMeasureCtx(FONT);
-  const H_TITLE=26, H_SUB=17, H_SECTION=21, H_ROW=16, H_WRAP=13.5, H_EMPTY=15, H_GAP=5, H_BAR=36, H_FOOTER=18;
+  const H_TITLE=26, H_SUB=17, H_SECTION=21, H_ROW=16, H_WRAP=13.5, H_EMPTY=15, H_GAP=5, H_BAR=36, H_FOOTER=18, H_SHIFTDIV=30;
   // Ảnh đính kèm giờ kéo theo chiều rộng báo cáo thay vì thumbnail nhỏ cố
   // định: tối đa 2 ảnh/hàng, mỗi ảnh chia đều chiều rộng còn lại; hàng cuối
   // chỉ còn 1 ảnh (số lẻ) thì ảnh đó kéo full chiều rộng luôn.
@@ -3834,14 +3871,28 @@ function renderLinesToSVG(lines, W){
       }
     } else {
       flushPending();
-      let h;
+      let h; let extra = {};
       if(l.t==='images'){
         const rows = Math.ceil(l.thumbs.length / IMG_PER_ROW);
         h = 16 + rows*(IMG_ROW_H+IMG_GAP) + (l.total>l.thumbs.length ? 14 : 0);
+      } else if(l.t==='issueaction'){
+        // Issue/Abnormal & Action hiển thị SONG SONG (2 cột) theo từng cặp,
+        // trong 1 khung riêng — thay vì đi qua cơ chế 'row' chung, để giữ rõ
+        // mối liên hệ Issue -> Action ngay cả khi có nhiều cặp trong 1
+        // checkpoint. Độ cao mỗi cặp phụ thuộc số dòng chữ sau khi wrap.
+        const pairs = l.pairs || [];
+        const iaMeta = pairs.map(p=>{
+          const issueLines = wrapText(p.issue||'—', colW-16, FONT-0.5, ctx);
+          const actionLines = wrapText(p.action||'—', colW-16, FONT-0.5, ctx);
+          const lineCount = Math.max(issueLines.length, actionLines.length, 1);
+          return {issueLines, actionLines, blockH: 16 + lineCount*13 + 10};
+        });
+        h = 6 + iaMeta.reduce((s,m)=>s+m.blockH, 0);
+        extra = {iaMeta};
       } else {
-        h = l.t==='title'?H_TITLE : l.t==='sub'?H_SUB : l.t==='section'?H_SECTION : l.t==='empty'?H_EMPTY : l.t==='gap'?H_GAP : l.t==='bar'?H_BAR : l.t==='footer'?H_FOOTER : 0;
+        h = l.t==='title'?H_TITLE : l.t==='sub'?H_SUB : l.t==='section'?H_SECTION : l.t==='empty'?H_EMPTY : l.t==='gap'?H_GAP : l.t==='bar'?H_BAR : l.t==='footer'?H_FOOTER : l.t==='shiftdivider'?H_SHIFTDIV : 0;
       }
-      pushEntry(Object.assign({}, l, {h}));
+      pushEntry(Object.assign({}, l, {h}, extra));
     }
   });
   flushPending();
@@ -3931,6 +3982,29 @@ function renderLinesToSVG(lines, W){
     else if(p.t==='footer'){
       svg += `<rect x="${M}" y="${y}" width="${W-2*M}" height="1" fill="#E2E8F0"/>`;
       svg += `<text x="${W-M}" y="${y+14}" font-size="9" fill="#94A3B8" text-anchor="end">${escapeXml(p.text)}</text>`;
+    }
+    else if(p.t==='shiftdivider'){
+      svg += `<rect x="${M}" y="${y}" width="${W-2*M}" height="22" rx="6" fill="#0B1220"/>`;
+      svg += `<text x="${M+10}" y="${y+15}" font-size="12.5" font-weight="700" fill="#ffffff">${escapeXml(p.text)}</text>`;
+    }
+    else if(p.t==='issueaction'){
+      // Issue/Abnormal (trái) và Action (phải) song song trong cùng 1 khung,
+      // theo từng cặp — dễ nhận biết mối liên hệ Issue -> Action.
+      let iy = y + 4;
+      const leftX = M+10, rightX = M+colW+colGap+10;
+      (p.iaMeta||[]).forEach((m, idx)=>{
+        svg += `<rect x="${M}" y="${iy-2}" width="${W-2*M}" height="${m.blockH-4}" rx="6" fill="#FFF7ED" stroke="#FCD34D" stroke-width="1"/>`;
+        svg += `<text x="${leftX}" y="${iy+11}" font-size="10" font-weight="700" fill="#B45309">Issue/Abnormal${p.iaMeta.length>1?' #'+(idx+1):''}</text>`;
+        svg += `<text x="${rightX}" y="${iy+11}" font-size="10" font-weight="700" fill="#B45309">Action</text>`;
+        let ly = iy + 11 + 13;
+        const maxLines = Math.max(m.issueLines.length, m.actionLines.length);
+        for(let li=0; li<maxLines; li++){
+          if(m.issueLines[li]) svg += `<text x="${leftX}" y="${ly}" font-size="11" fill="#0F172A">${escapeXml(m.issueLines[li])}</text>`;
+          if(m.actionLines[li]) svg += `<text x="${rightX}" y="${ly}" font-size="11" fill="#0F172A">${escapeXml(m.actionLines[li])}</text>`;
+          ly += 13;
+        }
+        iy += m.blockH;
+      });
     }
   });
   svg += `</svg>`;
@@ -4222,12 +4296,42 @@ async function buildImagesLineForCheckpoint(cp){
 // "Xuất theo mẫu Process/QMS", cho phép báo cáo ảnh gọn lại chỉ còn số liệu
 // QMS thay vì mọi Parameters đã nhập. Mặc định false = giữ nguyên hành vi
 // cũ (hiện mọi chỉ tiêu có giá trị).
-async function buildReportSVG(dateVal, shiftVal, qmsOnly){
-  const W = 760;
+// Trả về mảng 'lines' cho 1 checkpoint: chỉ tiêu thường (loại trừ field
+// "<Section>_ISSUE"/"_ACTION", vốn có khối riêng bên dưới) rồi tới khối
+// Issue/Abnormal & Action song song (nếu có) — dùng chung cho cả báo cáo
+// Theo ca và PO Production Timeline để không lặp code/không lệch hành vi.
+function buildCheckpointFieldLines(sec, cp, qmsOnly){
+  const {issueId, actionId} = findIssueActionFieldIds(sec);
+  const rows = [];
+  sec.fields.filter(f=>f.id!==issueId && f.id!==actionId).forEach(f=>{
+    if(qmsOnly && !f.isQMS) return;
+    const v = cp.fields[f.id];
+    if(v===undefined||v===null||v==='') return;
+    let disp, color='#0F172A';
+    if(f.type==='boolean'){ disp = boolDisp(f, v); color = v?'#15803D':'#B91C1C'; }
+    else if(f.type==='number'){ const ok=inSpec(f,v); disp=String(v); color= ok===false?'#B91C1C':ok===true?'#15803D':'#0F172A'; }
+    else disp = String(v).replace(/\n/g,' / ');
+    rows.push({label: (qmsOnly && f.qmsLabel) || f.label.split('\n')[0], disp, color});
+  });
+  // Issue/Action luôn hiển thị (không phụ thuộc qmsOnly) — đây là thông tin
+  // bất thường/xử lý, không phải 1 "chỉ tiêu QMS" nên không hợp lý để lọc
+  // theo cờ isQMS như các field đo lường khác.
+  const pairs = getIssueActionPairs(cp, sec).filter(p=>p.issue||p.action);
+  const out = [];
+  if(rows.length===0 && pairs.length===0){
+    out.push({t:'empty', text:'— Không có dữ liệu —'});
+  } else {
+    rows.forEach(r=>out.push({t:'row', label:r.label, disp:r.disp, color:r.color}));
+  }
+  if(pairs.length>0) out.push({t:'issueaction', pairs});
+  return out;
+}
+// Phần "thân" báo cáo cho 1 tập checkpoint của đúng 1 ca (Bàn giao ca +
+// từng công đoạn theo đúng thứ tự SCHEMA) — KHÔNG gồm title/sub/footer, để
+// dùng lại được cho cả báo cáo 1 ca (buildReportSVG) lẫn báo cáo "Tất cả
+// các ca" (buildAllShiftsReportSVG, lặp lại khối này 3 lần).
+async function buildShiftBodyLines(cps, qmsOnly){
   const lines = [];
-  lines.push({t:'title', text:'ILD COFFEE VIETNAM — SHIFTLY REPORT'});
-  lines.push({t:'sub', text:`Ngày ${fmtDateVN(dateVal)}  ·  Ca ${shiftVal}`});
-  const cps = checkpointsFor(dateVal, shiftVal);
   const stats = computeReportStats(cps);
   if(stats.total>0) lines.push({t:'bar', stats});
   lines.push({t:'gap'});
@@ -4246,54 +4350,97 @@ async function buildReportSVG(dateVal, shiftVal, qmsOnly){
     if(secCps.length===0) continue;
     for(const cp of secCps){
       lines.push({t:'section', text:`${sec.name} — PO ${cp.po||'—'}${cp.recipe?' · Recipe '+cp.recipe:''} (QC: ${cp.technician||'—'})`});
-      const rows = [];
-      sec.fields.filter(f=>!qmsOnly || f.isQMS).forEach(f=>{
-        const v = cp.fields[f.id];
-        if(v===undefined||v===null||v==='') return;
-        let disp, color='#0F172A';
-        if(f.type==='boolean'){ disp = boolDisp(f, v); color = v?'#15803D':'#B91C1C'; }
-        else if(f.type==='number'){ const ok=inSpec(f,v); disp=String(v); color= ok===false?'#B91C1C':ok===true?'#15803D':'#0F172A'; }
-        else disp = String(v).replace(/\n/g,' / ');
-        rows.push({label: (qmsOnly && f.qmsLabel) || f.label.split('\n')[0], disp, color});
-      });
-      if(rows.length===0) lines.push({t:'empty', text:'— Không có dữ liệu —'});
-      else rows.forEach(r=>lines.push({t:'row', label:r.label, disp:r.disp, color:r.color}));
+      lines.push(...buildCheckpointFieldLines(sec, cp, qmsOnly));
       const imgLine = await buildImagesLineForCheckpoint(cp);
       if(imgLine) lines.push(imgLine);
       lines.push({t:'gap'});
     }
   }
   if(cps.length===0) lines.push({t:'empty', text:'— Chưa có dữ liệu nào cho ca này —'});
+  return lines;
+}
+async function buildReportSVG(dateVal, shiftVal, qmsOnly){
+  const W = 760;
+  let lines = [
+    {t:'title', text:'ILD COFFEE VIETNAM — SHIFTLY REPORT'},
+    {t:'sub', text:`Ngày ${fmtDateVN(dateVal)}  ·  Ca ${shiftVal}`},
+  ];
+  lines = lines.concat(await buildShiftBodyLines(checkpointsFor(dateVal, shiftVal), qmsOnly));
   lines.push({t:'footer', text:`Xuất lúc: ${fmtDateTimeVN(Date.now())}`});
   return renderLinesToSVG(lines, W);
 }
+// "Tất cả" (chế độ Theo ca): lần lượt Ca 1 -> 2 -> 3 của đúng 1 ngày, phân
+// tách rõ bằng 1 dải màu đậm (t:'shiftdivider') trước mỗi ca; ca không có
+// dữ liệu vẫn hiện dải + dòng "Chưa có dữ liệu..." (từ buildShiftBodyLines)
+// thay vì bị bỏ qua hoàn toàn.
+async function buildAllShiftsReportSVG(dateVal, qmsOnly){
+  const W = 760;
+  let lines = [
+    {t:'title', text:'ILD COFFEE VIETNAM — SHIFTLY REPORT'},
+    {t:'sub', text:`Ngày ${fmtDateVN(dateVal)}  ·  Tất cả các ca`},
+  ];
+  for(const s of ['1','2','3']){
+    lines.push({t:'shiftdivider', text:`CA ${s}`});
+    lines = lines.concat(await buildShiftBodyLines(checkpointsFor(dateVal, s), qmsOnly));
+  }
+  lines.push({t:'footer', text:`Xuất lúc: ${fmtDateTimeVN(Date.now())}`});
+  return renderLinesToSVG(lines, W);
+}
+// Thứ tự ưu tiên hiển thị Process trên PO Production Timeline (mục 4) — chỉ
+// những Công đoạn THỰC SỰ có checkpoint mới xuất hiện.
+const PROCESS_TIMELINE_ORDER = ['ROA','EXT','EVA','FOAMING','FD','FP','REWORK'];
+// PO Production Timeline: Header (PO/Item Code/Item Name/Recipe) hiển thị 1
+// LẦN DUY NHẤT — không lặp lại trong từng Process như bản "Truy xuất theo
+// PO" cũ — theo sau là bảng tóm tắt Date+Shift đầu/cuối mỗi Process, rồi
+// chi tiết từng checkpoint (chỉ tiêu + Issue/Action) theo đúng thứ tự
+// Process -> thời gian.
 async function buildPOReportSVG(poQuery, matches, qmsOnly){
   const W = 760;
+  const relevant = matches.filter(cp=>cp.section!=='META');
   const lines = [];
-  lines.push({t:'title', text:'ILD COFFEE VIETNAM — TRUY XUẤT THEO PO'});
-  lines.push({t:'sub', text:`Mã PO: ${poQuery}  ·  ${matches.length} điểm kiểm tra liên quan`});
+  lines.push({t:'title', text:'ILD COFFEE VIETNAM — PO PRODUCTION TIMELINE'});
+  lines.push({t:'sub', text:`Mã PO: ${poQuery}  ·  ${relevant.length} điểm kiểm tra liên quan`});
+  const withCode = relevant.find(cp=>cp.itemCode) || relevant[0];
+  if(withCode){
+    const lookup = withCode.itemCode ? lookupItemByCode(withCode.itemCode) : {status:'not_found'};
+    const itemName = (lookup.status==='ok'||lookup.status==='missing_recipe') ? lookup.name : '';
+    const recipeVal = withCode.recipe || (lookup.status==='ok' ? lookup.recipe : '');
+    lines.push({t:'row', label:'Item Code', disp: withCode.itemCode||'—', color:'#0F172A'});
+    lines.push({t:'row', label:'Item Name', disp: itemName||'—', color:'#0F172A'});
+    lines.push({t:'row', label:'Recipe', disp: recipeVal||'—', color:'#0F172A'});
+  }
+  lines.push({t:'gap'});
   const stats = computeReportStats(matches);
   if(stats.total>0) lines.push({t:'bar', stats});
   lines.push({t:'gap'});
-  for(const cp of matches){
-    const sec = sectionById(cp.section);
-    lines.push({t:'section', text:`${sec?sec.name:cp.section} — Ca ${cp.shift} ${fmtDateVN(cp.date)}${cp.recipe?' · Recipe '+cp.recipe:''} (QC: ${cp.technician||'—'})`});
-    const rows = [];
-    (sec?sec.fields:[]).filter(f=>!qmsOnly || f.isQMS).forEach(f=>{
-      const v = cp.fields[f.id];
-      if(v===undefined||v===null||v==='') return;
-      let disp, color='#0F172A';
-      if(f.type==='boolean'){ disp = boolDisp(f, v); color = v?'#15803D':'#B91C1C'; }
-      else if(f.type==='number'){ const ok=inSpec(f,v); disp=String(v); color= ok===false?'#B91C1C':ok===true?'#15803D':'#0F172A'; }
-      else disp = String(v).replace(/\n/g,' / ');
-      rows.push({label: (qmsOnly && f.qmsLabel) || f.label.split('\n')[0], disp, color});
+
+  const bySection = {};
+  relevant.forEach(cp=>{ (bySection[cp.section]=bySection[cp.section]||[]).push(cp); });
+  const presentSections = PROCESS_TIMELINE_ORDER.filter(id=>bySection[id] && bySection[id].length);
+  if(presentSections.length){
+    lines.push({t:'section', text:'Process Timeline'});
+    presentSections.forEach(id=>{
+      const list = bySection[id].slice().sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
+      const first = list[0], last = list[list.length-1];
+      const sec = sectionById(id);
+      const range = (first===last) ? `${fmtDateVN(first.date)} Ca ${first.shift}` : `${fmtDateVN(first.date)} Ca ${first.shift} → ${fmtDateVN(last.date)} Ca ${last.shift}`;
+      lines.push({t:'row', label: sec?sec.name:id, disp: range, color:'#0F172A'});
     });
-    if(rows.length===0) lines.push({t:'empty', text:'— Không có dữ liệu —'});
-    else rows.forEach(r=>lines.push({t:'row', label:r.label, disp:r.disp, color:r.color}));
-    const imgLine = await buildImagesLineForCheckpoint(cp);
-    if(imgLine) lines.push(imgLine);
     lines.push({t:'gap'});
   }
+
+  for(const id of presentSections){
+    const sec = sectionById(id);
+    const list = bySection[id].slice().sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
+    for(const cp of list){
+      lines.push({t:'section', text:`${sec.name} — Ca ${cp.shift} ${fmtDateVN(cp.date)} (QC: ${cp.technician||'—'})`});
+      lines.push(...buildCheckpointFieldLines(sec, cp, qmsOnly));
+      const imgLine = await buildImagesLineForCheckpoint(cp);
+      if(imgLine) lines.push(imgLine);
+      lines.push({t:'gap'});
+    }
+  }
+  if(relevant.length===0) lines.push({t:'empty', text:'— Không có dữ liệu nào cho PO này —'});
   lines.push({t:'footer', text:`Xuất lúc: ${fmtDateTimeVN(Date.now())}`});
   return renderLinesToSVG(lines, W);
 }
@@ -4318,6 +4465,152 @@ function svgToPngBlob(svgString, width, height, scale){
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('SVG image load failed')); };
     img.src = url;
+  });
+}
+/* ===================== PO PRODUCTION TIMELINE (xem trước tương tác) =====
+   Bản xem trước HTML (không phải SVG) cho chế độ "Theo PO" ở tab Báo cáo —
+   dùng DOM thật (không phải ảnh tĩnh) vì cần nút "✎ Sửa" cho Issue/Action
+   ngay tại chỗ. Ảnh xuất (PNG/Chia sẻ) vẫn qua buildPOReportSVG như cũ;
+   2 đường render này dùng CHUNG 1 nguồn dữ liệu (checkpoint gốc qua
+   getIssueActionPairs/ITEM_CODE_LIST) nên luôn khớp nhau, chỉ khác cách vẽ. */
+function buildIssueActionEditableList(sec, cp, onEdited){
+  const wrap = el('div',{},[]);
+  let editIdx = null;
+  function draw(){
+    wrap.innerHTML = '';
+    const pairs = getIssueActionPairs(cp, sec);
+    if(pairs.length===0){
+      wrap.appendChild(el('div',{class:'sub', style:'margin:4px 0;'},['Không có Issue/Action nào được ghi nhận.']));
+      return;
+    }
+    pairs.forEach((p, idx)=>{
+      if(editIdx===idx){
+        const issueTa = el('textarea',{class:'inp', rows:'2'},[]); issueTa.value = p.issue||'';
+        const actionTa = el('textarea',{class:'inp', rows:'2'},[]); actionTa.value = p.action||'';
+        const saveBtn = el('button',{class:'btn teal sm', type:'button'},['💾 Lưu']);
+        const cancelBtn = el('button',{class:'btn ghost sm', type:'button'},['✕ Huỷ']);
+        saveBtn.addEventListener('click', async ()=>{
+          const newIssue = issueTa.value.trim(), newAction = actionTa.value.trim();
+          if(newIssue && !newAction){ toast('Cần nhập Action.'); return; }
+          if(!newIssue && newAction){ toast('Cần nhập Issue/Abnormal.'); return; }
+          const before = {issue:p.issue||'', action:p.action||''};
+          const allPairs = getIssueActionPairs(cp, sec);
+          allPairs[idx] = {issue:newIssue, action:newAction};
+          cp.fields = cp.fields || {};
+          cp.fields[ISSUE_PAIRS_KEY] = allPairs.filter(x=>x.issue||x.action);
+          // Ghi ngược vào field "<Section>_ISSUE"/"_ACTION" cũ — cơ chế sẵn
+          // có từ Input Form — để mọi nơi khác (Data Log, xuất Process/QMS,
+          // báo cáo) tiếp tục đọc đúng, không cần sửa gì thêm.
+          syncIssueActionToLegacyFields(cp, sec);
+          cp.updatedAt = new Date().toISOString();
+          await idbPut('shifts', cp);
+          await refreshCache();
+          await persistAll();
+          await logChange({ date:cp.date, shift:cp.shift, po:cp.po, section:sec.name, technician:cp.technician||'',
+            changes:[{fieldId:'ISSUE_ACTION', label:`Issue/Action #${idx+1}`, from:before, to:{issue:newIssue, action:newAction}}] });
+          toast('Đã lưu Issue/Action');
+          editIdx = null;
+          if(onEdited) onEdited(); else draw();
+        });
+        cancelBtn.addEventListener('click', ()=>{ editIdx=null; draw(); });
+        wrap.appendChild(el('div',{class:'grid g2', style:'margin-bottom:6px;'},[issueTa, actionTa]));
+        wrap.appendChild(el('div',{class:'row', style:'margin-bottom:10px;'},[saveBtn, cancelBtn]));
+      } else {
+        const editBtn = el('button',{class:'btn ghost sm', type:'button'},['✎ Sửa']);
+        editBtn.addEventListener('click', ()=>{ editIdx=idx; draw(); });
+        wrap.appendChild(el('div',{class:'grid g2', style:'margin-bottom:6px;'},[
+          el('div',{},[el('div',{class:'sub', style:'margin:0 0 2px;font-weight:700;'},['Issue/Abnormal']), el('div',{style:'font-size:13px;white-space:pre-wrap;'},[p.issue||'—'])]),
+          el('div',{},[el('div',{class:'sub', style:'margin:0 0 2px;font-weight:700;'},['Action']), el('div',{style:'font-size:13px;white-space:pre-wrap;'},[p.action||'—'])]),
+        ]));
+        wrap.appendChild(el('div',{class:'row', style:'margin-bottom:10px;'},[editBtn]));
+      }
+    });
+  }
+  draw();
+  return wrap;
+}
+function buildPOCheckpointCard(sec, cp, qmsOnly, onEdited){
+  const card = el('div',{class:'card'},[
+    el('div',{class:'detailhdr'},[
+      el('h3',{},[`${sec?sec.name:cp.section} — ${fmtDateVN(cp.date)} Ca ${cp.shift}`]),
+      el('span',{class:'pill'},[`QC: ${cp.technician||'—'}`]),
+    ]),
+  ]);
+  if(!sec) return card;
+  const {issueId, actionId} = findIssueActionFieldIds(sec);
+  let any = false;
+  sec.fields.filter(f=>f.id!==issueId && f.id!==actionId).forEach(f=>{
+    if(qmsOnly && !f.isQMS) return;
+    const v = cp.fields[f.id];
+    if(v===undefined||v===null||v==='') return;
+    any = true;
+    let disp = v, cls = '';
+    if(f.type==='boolean'){ disp = boolDisp(f, v); cls = v?'pass':'fail'; }
+    else if(f.type==='number'){ const ok = inSpec(f,v); cls = ok===false?'fail':ok===true?'pass':''; }
+    const label = (qmsOnly && f.qmsLabel) || f.label.split('\n')[0];
+    card.appendChild(el('div',{class:'kv'},[el('span',{class:'k'},[label]), el('span',{class:'v'+(cls?' '+cls:'')},[String(disp)])]));
+  });
+  if(!any) card.appendChild(el('div',{class:'sub', style:'margin:4px 0;'},['Không có dữ liệu chỉ tiêu.']));
+  const imgs = cp.images || [];
+  if(imgs.length){
+    const thumbRow = el('div',{class:'thumbrow', style:'margin-top:10px;'},[]);
+    imgs.forEach(im=>{
+      const a = el('a',{href:imgSrc(im), target:'_blank'},[el('img',{src:imgSrc(im), style:'width:64px;height:64px;object-fit:cover;border-radius:10px;border:1.5px solid var(--line2);'},[])]);
+      thumbRow.appendChild(a);
+    });
+    card.appendChild(thumbRow);
+  }
+  card.appendChild(el('div',{class:'grouphdr'},['Issue / Abnormal & Action']));
+  card.appendChild(buildIssueActionEditableList(sec, cp, onEdited));
+  return card;
+}
+function renderPOTimeline(container, poQuery, matches, qmsOnly, onEdited){
+  container.innerHTML = '';
+  const relevant = matches.filter(cp=>cp.section!=='META');
+  if(relevant.length===0){
+    container.appendChild(el('div',{class:'sub', style:'padding:16px;margin:0;'},['Không có dữ liệu.']));
+    return;
+  }
+  // ---- Header: PO / Item Code / Item Name / Recipe — hiển thị 1 LẦN DUY
+  // NHẤT (không lặp lại trong từng Process bên dưới) ----
+  const withCode = relevant.find(cp=>cp.itemCode) || relevant[0];
+  const lookup = withCode.itemCode ? lookupItemByCode(withCode.itemCode) : {status:'not_found'};
+  const itemName = (lookup.status==='ok'||lookup.status==='missing_recipe') ? lookup.name : '';
+  const recipeVal = withCode.recipe || (lookup.status==='ok' ? lookup.recipe : '');
+  const hdr = el('div',{class:'card'},[
+    el('div',{class:'card-h'},[`PO ${poQuery}`, el('div',{class:'rule'})]),
+    el('div',{class:'kv'},[el('span',{class:'k'},['Item Code']), el('span',{class:'v'},[withCode.itemCode||'—'])]),
+    el('div',{class:'kv'},[el('span',{class:'k'},['Item Name']), el('span',{class:'v'},[itemName||'—'])]),
+    el('div',{class:'kv'},[el('span',{class:'k'},['Recipe']), el('span',{class:'v'},[recipeVal||'—'])]),
+    el('div',{class:'kv'},[el('span',{class:'k'},['Số điểm kiểm tra']), el('span',{class:'v'},[String(relevant.length)])]),
+  ]);
+  container.appendChild(hdr);
+
+  // ---- Process Timeline: Date+Shift đầu/cuối theo từng Công đoạn có dữ liệu ----
+  const bySection = {};
+  relevant.forEach(cp=>{ (bySection[cp.section]=bySection[cp.section]||[]).push(cp); });
+  const presentSections = PROCESS_TIMELINE_ORDER.filter(id=>bySection[id] && bySection[id].length);
+  if(presentSections.length){
+    const tlCard = el('div',{class:'card'},[el('div',{class:'card-h'},['Process Timeline', el('div',{class:'rule'})])]);
+    presentSections.forEach(id=>{
+      const list = bySection[id].slice().sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
+      const first = list[0], last = list[list.length-1];
+      const sec = sectionById(id);
+      const range = (first===last) ? `${fmtDateVN(first.date)} Ca ${first.shift}` : `${fmtDateVN(first.date)} Ca ${first.shift} → ${fmtDateVN(last.date)} Ca ${last.shift}`;
+      tlCard.appendChild(el('div',{class:'kv'},[el('span',{class:'k'},[sec?sec.name:id]), el('span',{class:'v'},[range])]));
+    });
+    container.appendChild(tlCard);
+  }
+
+  // ---- Chi tiết từng điểm kiểm tra: theo đúng thứ tự Công đoạn rồi tới
+  // thời gian — Issue/Action gắn liền checkpoint phát sinh (Process+Date+
+  // Shift), không gộp mất gốc. ----
+  presentSections.forEach(id=>{
+    const sec = sectionById(id);
+    const list = bySection[id].slice().sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
+    list.forEach(cp=>{
+      container.appendChild(buildPOCheckpointCard(sec, cp, qmsOnly, onEdited));
+    });
   });
 }
 function renderReport(){
@@ -4377,26 +4670,50 @@ function renderReport(){
   }
 
   if(mode==='shift'){
-    const shiftKeys = [...new Set(allCheckpoints.map(r=>r.date+'|'+r.shift))].sort().reverse();
-    const sel = el('select',{class:'inp'},[]);
-    shiftKeys.forEach((k,i)=>{
-      const [d,s] = k.split('|');
-      sel.appendChild(el('option',{value:String(i)},[`${fmtDateVN(d)} — Ca ${s}`]));
+    // Ngày + Ca là 2 control ĐỘC LẬP (thay vì 1 <select> chỉ liệt kê những
+    // tổ hợp Ngày+Ca đã có dữ liệu sẵn như trước) — mặc định vẫn trỏ tới tổ
+    // hợp Ngày+Ca mới nhất đang có dữ liệu (giữ nguyên trải nghiệm cũ), nhưng
+    // giờ người dùng có thể tự chọn bất kỳ Ngày/Ca nào, kể cả chưa có dữ
+    // liệu (sẽ hiện "Chưa có dữ liệu..."). "Tất cả" hiển thị lần lượt Ca 1
+    // -> 2 -> 3 của Ngày đã chọn, phân tách rõ từng ca.
+    const shiftKeysAll = [...new Set(allCheckpoints.map(r=>r.date+'|'+r.shift))].sort();
+    const latestKey = shiftKeysAll[shiftKeysAll.length-1];
+    const [latestDate, latestShift] = latestKey ? latestKey.split('|') : [todayStr(), '1'];
+    const dateVal0 = renderReport._shiftDate || latestDate;
+    const shiftVal0 = renderReport._shiftShift || latestShift;
+    const dateInp = el('input',{class:'inp', type:'date', value: dateVal0},[]);
+    pickerBox.appendChild(el('label',{class:'fld'},[el('span',{class:'lab'},['Ngày']), dateInp]));
+    const shiftSelCtrl = el('select',{class:'inp', style:'margin-top:8px;'},[]);
+    [['1','Ca 1'],['2','Ca 2'],['3','Ca 3'],['ALL','Tất cả']].forEach(([v,label])=>{
+      const o = el('option',{value:v},[label]);
+      if(v===shiftVal0) o.setAttribute('selected','selected');
+      shiftSelCtrl.appendChild(o);
     });
-    pickerBox.appendChild(sel);
+    pickerBox.appendChild(el('label',{class:'fld', style:'margin-top:8px;'},[el('span',{class:'lab'},['Ca']), shiftSelCtrl]));
     processFilterSel = el('select',{class:'inp', style:'margin-top:8px;'},[el('option',{value:'ALL'},['Tất cả công đoạn (dùng cho Xuất theo mẫu)'])]);
     SCHEMA.filter(s=>s.id!=='META').forEach(s=>processFilterSel.appendChild(el('option',{value:s.id},[s.name])));
     pickerBox.appendChild(processFilterSel);
     async function draw(){
-      const [d,s] = shiftKeys[parseInt(sel.value||'0',10)].split('|');
+      const d = dateInp.value, s = shiftSelCtrl.value;
+      renderReport._shiftDate = d; renderReport._shiftShift = s;
+      if(!d || !s){ previewWrap.innerHTML = '<div class="sub" style="padding:16px;margin:0;">Chọn đủ Ngày và Ca để xem báo cáo.</div>'; currentGen=null; return; }
       previewWrap.innerHTML = '<div class="sub" style="padding:16px;margin:0;">Đang tạo báo cáo…</div>';
-      const {svg,width,height} = await buildReportSVG(d, s, qmsOnlyChk.checked);
-      previewWrap.innerHTML = svg;
-      currentGen = ()=>({svg,width,height, filename:`Shiftly_${d}_Ca${s}.png`, printHtml:()=>buildPrintableReportHTML(d,s),
-        htmlReport:()=>buildFullHtmlReport(d,s),
-        checkpointList: checkpointsFor(d,s), headerTitle:`ILD Coffee — Ca ${s} ngày ${fmtDateVN(d)}` });
+      if(s==='ALL'){
+        const {svg,width,height} = await buildAllShiftsReportSVG(d, qmsOnlyChk.checked);
+        previewWrap.innerHTML = svg;
+        const allCps = ['1','2','3'].reduce((acc,sh)=>acc.concat(checkpointsFor(d,sh)), []);
+        currentGen = ()=>({svg,width,height, filename:`Shiftly_${d}_TatCaCa.png`,
+          checkpointList: allCps, headerTitle:`ILD Coffee — Tất cả các ca ngày ${fmtDateVN(d)}` });
+      } else {
+        const {svg,width,height} = await buildReportSVG(d, s, qmsOnlyChk.checked);
+        previewWrap.innerHTML = svg;
+        currentGen = ()=>({svg,width,height, filename:`Shiftly_${d}_Ca${s}.png`, printHtml:()=>buildPrintableReportHTML(d,s),
+          htmlReport:()=>buildFullHtmlReport(d,s),
+          checkpointList: checkpointsFor(d,s), headerTitle:`ILD Coffee — Ca ${s} ngày ${fmtDateVN(d)}` });
+      }
     }
-    sel.addEventListener('change', draw);
+    dateInp.addEventListener('change', draw);
+    shiftSelCtrl.addEventListener('change', draw);
     qmsOnlyChk.addEventListener('change', draw);
     draw();
   } else {
@@ -4410,9 +4727,12 @@ function renderReport(){
       const matches = allCheckpoints.filter(rec=>matchPO(rec, q));
       matches.sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
       if(matches.length===0){ toast('Không tìm thấy PO này trong dữ liệu'); previewWrap.innerHTML=''; currentGen=null; return; }
-      previewWrap.innerHTML = '<div class="sub" style="padding:16px;margin:0;">Đang tạo báo cáo…</div>';
+      // Xem trước dạng HTML tương tác (PO Production Timeline, có nút Sửa
+      // Issue/Action ngay tại chỗ) — KHÁC với ảnh SVG xuất ra (PNG/Chia sẻ),
+      // vốn chỉ là 1 bản chụp tĩnh nên không thể có nút bấm. doSearch chính
+      // nó là callback "đã sửa xong, vẽ lại" truyền cho khối Sửa Issue/Action.
+      renderPOTimeline(previewWrap, q, matches, qmsOnlyChk.checked, doSearch);
       const {svg,width,height} = await buildPOReportSVG(q, matches, qmsOnlyChk.checked);
-      previewWrap.innerHTML = svg;
       currentGen = ()=>({svg,width,height, filename:`Shiftly_PO_${q}.png`, printHtml:()=>buildPrintablePOReportHTML(q,matches),
         htmlReport:()=>buildFullHtmlPOReport(q,matches),
         checkpointList: matches, headerTitle:`ILD Coffee — Truy xuất PO ${q}` });
@@ -5745,8 +6065,10 @@ function renderGuide(){
     <p>Tab "Truy xuất" riêng đã được gộp vào tab <b>Dữ liệu</b> (ở chế độ "📋 Danh sách ca") — thẻ "🔎 Truy xuất — lọc theo PO/Ca/khoảng ngày" ngay phía trên bảng cho lọc theo mã PO (chọn từ gợi ý hoặc gõ tay), Ca, và/hoặc khoảng ngày; bảng bên dưới tự cập nhật ngay khi đổi bộ lọc (không cần bấm nút tìm kiếm), kèm nút "✕ Xoá bộ lọc" và "📊 Xuất Excel kết quả" cho đúng phần đang lọc. Vẫn dùng chung các nút 👁/✎/🗑 sẵn có của bảng — ✎ Sửa 1 điểm kiểm tra thuộc PO đã đóng sẽ hỏi mật khẩu Force như trước.</p>
     <h4>15. Sắp xếp lại thứ tự chỉ tiêu (Specs)</h4>
     <p>Mỗi chỉ tiêu trong tab Specs có 2 nút ▲ ▼ để di chuyển lên/xuống trong danh sách của công đoạn đó — thứ tự này cũng là thứ tự hiển thị ở tab Nhập liệu.</p>
-    <h4>16. Báo cáo theo PO (tab Báo cáo)</h4>
-    <p>Ngoài xem theo ca (gộp mọi điểm kiểm tra + Bàn giao ca của ca đó), tab Báo cáo có chế độ <b>"Theo PO"</b>: nhập mã PO → app gom tất cả các điểm kiểm tra liên quan đến PO đó (có thể ở nhiều ca, nhiều công đoạn khác nhau) thành 1 ảnh báo cáo truy xuất duy nhất. Báo cáo có thêm thanh <b>Tổng quan Đạt/Cảnh báo/Lỗi</b> ở đầu, dải màu xen kẽ theo từng công đoạn cho dễ đọc, tự xuống dòng đúng cách khi ghi chú dài (không còn bị đè chữ), hiển thị <b>Recipe</b> ngay trên tiêu đề mỗi công đoạn, và ảnh PNG xuất ra <b>nét hơn hẳn</b> (độ phân giải cao gấp 2.5 lần — không còn bị mờ khi zoom). Các định dạng xuất là các <b>nút riêng</b> hiện sẵn cạnh "🖼️ Tải ảnh PNG"/"📤 Chia sẻ ảnh": "📊 Excel theo mẫu", "📄 PDF theo mẫu" (Process/QMS — xem mục 34).</p>
+    <h4>16. Báo cáo theo ca — Ngày + Ca độc lập, xem "Tất cả"</h4>
+    <p>Chế độ <b>"Theo ca"</b> giờ tách thành 2 lựa chọn riêng: ô <b>Ngày</b> và ô <b>Ca</b> (Ca 1 / Ca 2 / Ca 3 / <b>Tất cả</b>) — mặc định trỏ sẵn tới Ngày+Ca gần nhất đang có dữ liệu, nhưng có thể tự chọn bất kỳ tổ hợp nào. Chọn <b>"Tất cả"</b> sẽ hiển thị lần lượt báo cáo Ca 1 → Ca 2 → Ca 3 của đúng Ngày đã chọn trong CÙNG 1 ảnh, mỗi ca phân tách rõ bằng 1 dải tiêu đề đậm màu; ca nào chưa có dữ liệu vẫn hiện, chỉ ghi "Chưa có dữ liệu". Trong mỗi công đoạn, Issue/Abnormal và Action giờ hiển thị <b>song song 2 cột trong cùng 1 khung</b> thay vì lẫn vào các chỉ tiêu khác, dễ thấy ngay Issue nào đi với Action nào.</p>
+    <h4>16a. Báo cáo theo PO — PO Production Timeline (tab Báo cáo)</h4>
+    <p>Chế độ <b>"Theo PO"</b>: nhập mã PO → app gom tất cả điểm kiểm tra liên quan (nhiều ca, nhiều công đoạn) thành 1 <b>PO Production Timeline</b>. Phần đầu chỉ hiện <b>Item Code / Item Name / Recipe</b> đúng 1 lần (không lặp lại ở từng công đoạn), tiếp theo là bảng <b>Process Timeline</b> tóm tắt Ngày+Ca đầu tiên → cuối cùng của mỗi công đoạn thực sự có dữ liệu, theo đúng thứ tự ROA → EXT → EVA → FOAMING → FD → FP → REWORK. Bên dưới là chi tiết từng điểm kiểm tra kèm Issue/Action đúng của checkpoint đó — khung xem trước cho phép bấm <b>"✎ Sửa"</b> ngay tại Issue/Action rồi "💾 Lưu": nội dung được ghi thẳng vào checkpoint gốc (không tạo báo cáo riêng), nên tab Nhập liệu và Data Log đều thấy thay đổi ngay lập tức. Ảnh PNG/Chia sẻ xuất ra từ chế độ này (nút "🖼️ Tải ảnh PNG"/"📤 Chia sẻ ảnh") theo đúng bố cục Timeline này; "📊 Excel theo mẫu"/"📄 PDF theo mẫu" (Process/QMS — xem mục 34) không đổi.</p>
     <h4>16b. Ảnh đính kèm full chiều rộng + lọc chỉ tiêu QMS trong báo cáo ảnh</h4>
     <p>Ảnh đính kèm trong báo cáo ảnh (PNG/chia sẻ) giờ hiển thị lớn hơn hẳn — tối đa 2 ảnh/hàng, mỗi ảnh chia đều chiều rộng báo cáo; nếu lẻ 1 ảnh ở hàng cuối, ảnh đó tự kéo full chiều rộng thay vì để trống 1 nửa như trước. Ô <b>"Chỉ hiện chỉ tiêu QMS trong báo cáo ảnh"</b> (phía trên khung xem trước) cho chuyển qua lại giữa 2 chế độ: bỏ tick (mặc định) hiện mọi chỉ tiêu đã nhập như trước giờ; tick vào chỉ còn các chỉ tiêu đã đánh dấu "Xuất trong báo cáo QMS" ở tab Specs (dùng chung đúng cấu hình với nút "Excel/PDF theo mẫu") — tiện khi cần báo cáo ảnh gọn, chỉ có số liệu QMS thay vì đầy đủ mọi Parameters đã nhập.</p>
     <h4>17. Định dạng ngày DD/MM/YYYY</h4>
