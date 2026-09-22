@@ -286,6 +286,47 @@ function ganttTextRow(doc, processLabel, subLabel) {
   return rows[barIdx + offset];
 }
 
+test('Báo cáo tab (Theo PO): ô tìm PO cũng bắt buộc đúng định dạng 9 chữ số / SHUTDOWN, giống tab Nhập liệu', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    await seedPOGanttData(w);
+    w.showTab('report');
+    await new Promise(r => setTimeout(r, 80));
+
+    const modeBtn = [...doc.querySelectorAll('#view-report button')].find(b => b.textContent.includes('Theo PO'));
+    modeBtn.click();
+    const poInp = doc.querySelector('#view-report .card input[type="text"]');
+    const findBtn = [...doc.querySelectorAll('#view-report button')].find(b => b.textContent.includes('Tìm & Tạo'));
+    const toastText = () => doc.querySelector('#toast').textContent;
+
+    // Wrong length (not SHUTDOWN, not 9 digits) -> blocked before searching.
+    poInp.value = '7126';
+    findBtn.click();
+    assert.match(toastText(), /9 chữ số|SHUTDOWN/, 'must warn about the PO format, same message family as the Input tab');
+    assert.equal(doc.querySelectorAll('#view-report .gantt-table').length, 0, 'an invalid-format query must not render any Gantt table');
+
+    // Valid FORMAT but no such PO in the data -> the existing "not found" path, not a format error.
+    poInp.value = '999999999';
+    findBtn.click();
+    await new Promise(r => setTimeout(r, 50));
+    assert.match(toastText(), /Không tìm thấy/, 'a well-formed but unknown PO must reach the normal "not found" message');
+
+    // SHUTDOWN (lowercase) must be accepted as a valid format too, even with no match.
+    poInp.value = 'shutdown';
+    findBtn.click();
+    await new Promise(r => setTimeout(r, 50));
+    assert.match(toastText(), /Không tìm thấy/, 'SHUTDOWN must pass the format check (case-insensitive)');
+
+    // A real, correctly-formatted PO must still search normally.
+    poInp.value = '612600069';
+    findBtn.click();
+    await new Promise(r => setTimeout(r, 150));
+    assert.ok(doc.querySelector('#view-report .gantt-table'), 'a valid 9-digit PO with matching data must render the Gantt as before');
+    // Not asserting errors.length===0 — see the canvas-measurement note above.
+  } finally { dom.window.close(); }
+});
+
 test('Báo cáo tab (Theo PO): timeline liên tục Date x Shift, thứ tự Process, và Gantt bar đúng khoảng đầu/cuối như mẫu Excel', async () => {
   const {dom, w, errors} = await boot();
   try {
@@ -395,6 +436,54 @@ test('Báo cáo tab (Theo PO): bấm ô Issue/Action mở modal sửa, ghi NGƯ�
     const relevantLogs = logs.filter(l => l.po === '612600069' && l.section === 'Cô đặc (EVA)');
     assert.ok(relevantLogs.length >= 1, 'Data Log must record the Issue/Action edit made from the Report tab');
     assert.ok(relevantLogs.some(l => (l.changes||[]).some(c => /Issue\/Action/.test(c.label))), 'the log entry must reference the Issue/Action change');
+    // Not asserting errors.length===0 — see the canvas-measurement note above.
+  } finally { dom.window.close(); }
+});
+
+test('Báo cáo tab (Theo PO): ô Gantt CHƯA có checkpoint vẫn bấm được để thêm Issue/Action mới — tạo đúng checkpoint (date/shift/section/PO), Gantt bar tự nới rộng theo dữ liệu mới', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    await seedPOGanttData(w);
+    w.showTab('report');
+    await new Promise(r => setTimeout(r, 80));
+    doSearchPO(doc, w, '612600069');
+    await new Promise(r => setTimeout(r, 150));
+
+    // ROA only has checkpoints at columns 0 (22/07 Ca1) and 2 (22/07 Ca3) ->
+    // bar [0,2]. Column 5 (23/07 Ca3) has NO ROA checkpoint yet.
+    assert.deepEqual(ganttBarRowInfo(doc, 'ROASTING'), {startIdx:0, endIdx:2});
+    const roaIssueRow = ganttTextRow(doc, 'ROASTING', 'Issues/Abnormal');
+    const emptyCell = [...roaIssueRow.children].slice(1)[5];
+    assert.ok(emptyCell.classList.contains('clickable'), 'a cell with NO checkpoint yet must still be clickable');
+    assert.equal(emptyCell.textContent.trim(), '');
+    emptyCell.click();
+
+    const modal = doc.querySelector('.modal-card');
+    assert.ok(modal, 'clicking an empty cell must still open a modal');
+    assert.ok(modal.textContent.includes('Không có Issue/Action nào được ghi nhận'), 'the checkpoint behind an empty cell starts with no pairs');
+    const addBtn = [...modal.querySelectorAll('button')].find(b => b.textContent.includes('+ Thêm Issue/Action'));
+    assert.ok(addBtn, '"+ Thêm Issue/Action" must be offered even when the pair list is empty');
+    addBtn.click();
+    const textareas = modal.querySelectorAll('textarea');
+    assert.equal(textareas.length, 2);
+    textareas[0].value = 'Cà rang bị cháy';
+    textareas[1].value = 'Mix 10% vào PO 69';
+    const saveBtn = [...modal.querySelectorAll('button')].find(b => b.textContent.includes('Lưu'));
+    saveBtn.click();
+    await new Promise(r => setTimeout(r, 150));
+    assert.ok(!doc.querySelector('.modal-card'), 'the modal must close after saving');
+
+    // A real checkpoint must now exist for ROA / 2026-07-22... wait 23/07 Ca3 (column 5).
+    const newCp = evalJson(w, "allCheckpoints.find(c=>c.section==='ROA' && c.po==='612600069' && c.date==='2026-07-23' && c.shift==='3')");
+    assert.ok(newCp, 'saving from an empty Gantt cell must create the checkpoint for that exact Date+Shift+Process+PO');
+    assert.deepEqual(newCp.fields[w.eval('ISSUE_PAIRS_KEY')], [{issue:'Cà rang bị cháy', action:'Mix 10% vào PO 69'}]);
+    assert.equal(newCp.fields.ROA_ISSUE, 'Cà rang bị cháy');
+
+    // The Gantt redraws (onEdited -> doSearch): ROA's bar must now extend to cover the new checkpoint (column 5).
+    assert.deepEqual(ganttBarRowInfo(doc, 'ROASTING'), {startIdx:0, endIdx:5}, 'ROA bar must extend once a checkpoint exists at column 5');
+    const roaIssueRowAfter = ganttTextRow(doc, 'ROASTING', 'Issues/Abnormal');
+    assert.equal([...roaIssueRowAfter.children].slice(1)[5].textContent.trim(), 'Cà rang bị cháy');
     // Not asserting errors.length===0 — see the canvas-measurement note above.
   } finally { dom.window.close(); }
 });

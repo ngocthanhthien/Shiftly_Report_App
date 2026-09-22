@@ -384,10 +384,48 @@ test('Issue/Action rows: an unused blank row is ignored, but a half-filled row b
   } finally { dom.window.close(); }
 });
 
-test('Editing a historical FOAMING checkpoint (legacy single Issue field, no cp.issues) still works: Process shown read-only, Issue pre-filled from the legacy field', async () => {
+test('Editing a historical REWORK checkpoint still works: Process shown read-only, historical data intact', async () => {
   const {dom, w, errors} = await boot();
   try {
     const doc = w.document;
+    const cp = w.eval(`(function(){
+      const cp = blankCheckpoint('2026-01-05','2','REWORK','712600555','Trân');
+      cp.fields['REWORK_ISSUE'] = 'Bọt không ổn định (dữ liệu lịch sử)';
+      return cp;
+    })()`);
+    await w.idbPut('shifts', cp);
+    await w.eval('refreshCache()');
+
+    w.renderInputForm._shift = '2';
+    w.renderInputForm._editKey = cp.key;
+    w.renderInputForm._addOpen = false;
+    w.showTab('input');
+    w.renderInputForm();
+
+    const root = doc.querySelector('#view-input');
+    assert.ok(root.textContent.includes('Tái chế (Rework)'), 'REWORK historical section name must still display correctly');
+    // Process must be shown as read-only text, not a restricted dropdown.
+    assert.equal([...root.querySelectorAll('select')].some(s => [...s.options].some(o => o.value === 'REWORK')), false);
+
+    const issueTextarea = root.querySelector('textarea[placeholder="Issue/ Abnormal"]');
+    assert.equal(issueTextarea.value, 'Bọt không ổn định (dữ liệu lịch sử)', 'legacy REWORK_ISSUE text must be loaded into the new paired-row editor');
+    assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+// FOAMING (Tạo bọt) was fully removed from SCHEMA at the user's explicit
+// request — it's no longer a valid Công đoạn ANYWHERE, not even for
+// historical editing (previously it was excluded only from the NEW-checkpoint
+// dropdown, see INPUT_PROCESS_OPTIONS, while still fully defined in SCHEMA
+// for legacy edits). A checkpoint saved before this change (section='FOAMING')
+// can still exist in IndexedDB/Supabase — opening it for editing must not
+// crash (sectionById('FOAMING') now returns undefined); it must show a clear
+// message and refuse to render the (now-nonexistent) field grid.
+test('Opening a historical FOAMING checkpoint for editing does not crash — shows a clear "no longer supported" message instead of a field grid', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    const doc = w.document;
+    assert.equal(w.eval("sectionById('FOAMING')"), undefined, 'sanity: FOAMING must no longer exist in SCHEMA at all');
     const cp = w.eval(`(function(){
       const cp = blankCheckpoint('2026-01-05','2','FOAMING','712600555','Trân');
       cp.fields['FOAMING_ISSUE'] = 'Bọt không ổn định (dữ liệu lịch sử)';
@@ -403,12 +441,14 @@ test('Editing a historical FOAMING checkpoint (legacy single Issue field, no cp.
     w.renderInputForm();
 
     const root = doc.querySelector('#view-input');
-    assert.ok(root.textContent.includes('Tạo bọt (Foaming)'), 'FOAMING historical section name must still display correctly');
-    // Process must be shown as read-only text, not a restricted dropdown.
-    assert.equal([...root.querySelectorAll('select')].some(s => [...s.options].some(o => o.value === 'FOAMING')), false);
-
-    const issueTextarea = root.querySelector('textarea[placeholder="Issue/ Abnormal"]');
-    assert.equal(issueTextarea.value, 'Bọt không ổn định (dữ liệu lịch sử)', 'legacy FOAMING_ISSUE text must be loaded into the new paired-row editor');
+    assert.match(root.textContent, /FOAMING.*không còn được hỗ trợ/, 'must show a clear message naming the unsupported section, not crash');
+    // The 2 textareas that DO always render here belong to "Bàn giao ca"
+    // (metaCard, unrelated to this checkpoint's own Công đoạn) — what must
+    // NOT render is the section-specific Issue/Action editor.
+    assert.equal(root.querySelectorAll('textarea[placeholder="Issue/ Abnormal"]').length, 0, 'must not attempt to render a field grid for a section with no SCHEMA definition');
+    // The underlying checkpoint itself must be untouched (data preserved, not deleted).
+    assert.equal(w.eval('allCheckpoints.length'), 1);
+    assert.equal(w.eval("allCheckpoints[0].fields.FOAMING_ISSUE"), 'Bọt không ổn định (dữ liệu lịch sử)');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });

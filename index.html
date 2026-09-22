@@ -395,15 +395,20 @@ svg.chart{width:100%;height:auto;display:block;}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ===================== DATA SCHEMA ===================== */
-const DEFAULT_SCHEMA = [{"id": "ROA", "name": "Rang (ROA)", "fields": [{"id": "ROA_R5C", "label": "Temp. Roasting (℃):", "type": "number"}, {"id": "ROA_R5E", "label": "Moisture: 4.0 - 5.0%", "type": "boolean"}, {"id": "ROA_R6C", "label": "Roasting time (s):", "type": "number"}, {"id": "ROA_R6E", "label": "Color: 45 ± 2", "type": "number", "hardMin": 43.0, "hardMax": 47.0}, {"id": "ROA_R7C", "label": "Quenching (L): 87 - 89L", "type": "number", "hardMin": 87.0, "hardMax": 89.0}, {"id": "ROA_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "EXT", "name": "Trích ly (EXT)", "fields": [{"id": "EXT_R10C", "label": "Cylcle time (mins): 17 - 22", "type": "number", "hardMin": 17.0, "hardMax": 22.0}, {"id": "EXT_R10E", "label": "TC VG2: 9.98 - 11.23%", "type": "number", "hardMin": 9.98, "hardMax": 11.23}, {"id": "EXT_R11C", "label": "Dewatering (L): Max 300", "type": "number", "hardMax": 300.0}, {"id": "EXT_R11E", "label": "TC Conilon: 10.4 - 11.70%", "type": "number", "hardMin": 10.4, "hardMax": 11.7}, {"id": "EXT_R12C", "label": "Temp. PE (℃): 130 - 131", "type": "number", "hardMin": 130.0, "hardMax": 131.0}, {"id": "EXT_R12E", "label": "TC Decaf: 9.04 - 10.40%", "type": "number", "hardMin": 9.04, "hardMax": 10.4}, {"id": "EXT_R13C", "label": "Press. Flash PE (bara): 600 - 1000", "type": "number", "hardMin": 600.0, "hardMax": 1000.0}, {"id": "EXT_R13E", "label": "Cupping (B26600)", "type": "boolean"}, {"id": "EXT_R14C", "label": "Temp. SE (℃): 190 - 191", "type": "number", "hardMin": 190.0, "hardMax": 191.0}, {"id": "EXT_R15C", "label": "Press. Flash SE (bara): 500 - 1000", "type": "number", "hardMin": 500.0, "hardMax": 1000.0}, {"id": "EXT_R16C", "label": "DOF: 5.5 - 5.7", "type": "number", "hardMin": 5.5, "hardMax": 5.7}, {"id": "EXT_R17C", "label": "Coarse/ Fine (kg)", "type": "number"}, {"id": "EXT_CLEAN_18", "label": "Flushing", "type": "boolean"}, {"id": "EXT_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "EVA", "name": "Cô đặc (EVA)", "fields": [{"id": "EVA_R21C", "label": "Clarifier CIP (hour): 8 - 12", "type": "boolean"}, {"id": "EVA_R21E", "label": "Outlet thick clarifier max Grade 1", "type": "boolean"}, {"id": "EVA_R22C", "label": "MainEvap CIP (hour): 24 - 32", "type": "boolean"}, {"id": "EVA_R22E", "label": "Sediment (S2) max Grade 1.5", "type": "boolean"}, {"id": "EVA_R23C", "label": "Flow.Clarifier (L/h): 4500 - 5000", "type": "number", "hardMin": 4500.0, "hardMax": 5000.0}, {"id": "EVA_R23E", "label": "4.8 < pH < 5.3", "type": "number", "hardMin": 4.8, "hardMax": 5.3}, {"id": "EVA_R24C", "label": "Temp. Set tank 1 (℃): 50 - 65", "type": "number", "hardMin": 50.0, "hardMax": 65.0}, {"id": "EVA_R24E", "label": "Cupping (set tank 3)", "type": "boolean"}, {"id": "EVA_R25C", "label": "Temp. Set tank 2 (℃): 15 - 18", "type": "number", "hardMin": 15.0, "hardMax": 18.0}, {"id": "EVA_R25E", "label": "TS: 47-48.5% (Normal Density)\nTS: 46 - 47% (Low Density)", "type": "number", "hardMin": 47.0, "hardMax": 48.5}, {"id": "EVA_R26C", "label": "Temp. Set tank 3 (℃): 18 - 20", "type": "number", "hardMin": 18.0, "hardMax": 20.0}, {"id": "EVA_CLEAN_27", "label": "Flushing/ CIP", "type": "boolean"}, {"id": "EVA_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FOAMING", "name": "Tạo bọt (Foaming)", "fields": [{"id": "FOAMING_R30C", "label": "TS before FMT (47.5 - 48,5% )", "type": "number", "hardMin": 47.5, "hardMax": 48.5}, {"id": "FOAMING_R30E", "label": "TS FMT ( 47.5 - 48,5% )", "type": "number", "hardMin": 47.5, "hardMax": 48.5}, {"id": "FOAMING_R31C", "label": "Temp. Pre-freezer (℃):-4.5 => -5.0", "type": "number", "hardMin": -5.0, "hardMax": -4.5}, {"id": "FOAMING_R32C", "label": "Temp. after cooler (℃): 1.0 - 2.0", "type": "number", "hardMin": 1.0, "hardMax": 2.0}, {"id": "FOAMING_R33C", "label": "Foaming Flow (kg/h): Max 2150", "type": "number", "hardMax": 2150.0}, {"id": "FOAMING_R34C", "label": "Density after foaming: 720-750g/L", "type": "number", "hardMin": 720.0, "hardMax": 750.0}, {"id": "FOAMING_R35C", "label": "Mixer pump valve (%): 9 - 14", "type": "number", "hardMin": 9.0, "hardMax": 14.0}, {"id": "FOAMING_R36C", "label": "Color foaming of belt (ACN):", "type": "number"}, {"id": "FOAMING_R37C", "label": "Back Pressure during Circulation (bar): 3.0 - 4.0", "type": "number", "hardMin": 3.0, "hardMax": 4.0}, {"id": "FOAMING_CLEAN_38", "label": "Flushing/ CIP", "type": "boolean"}, {"id": "FOAMING_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FD", "name": "Sấy thăng hoa (FD)", "fields": [{"id": "FD_R41C", "label": "Speed of belt (meters/mins): 2.4 - 3.2", "type": "number", "hardMin": 2.4, "hardMax": 3.2}, {"id": "FD_R42C", "label": "Temp. belt (℃): -16 => -18", "type": "number", "hardMin": -18.0, "hardMax": -16.0}, {"id": "FD_R43C", "label": "Temp. Ante room 4 (℃): Max 5", "type": "number", "hardMax": 5.0}, {"id": "FD_R44C", "label": "Time cycle tray (s): 26.8 - 27.0", "type": "number", "hardMin": 26.8, "hardMax": 27.0}, {"id": "FD_R45C", "label": "Filling tray (kg): 11.9 - 12.1", "type": "number", "hardMin": 11.9, "hardMax": 12.1}, {"id": "FD_R46C", "label": "Vaccum in conrad (mbar): 0.3 - 0.5", "type": "number", "hardMin": 0.3, "hardMax": 0.5}, {"id": "FD_R47C", "label": "Temp. zone   9 (℃): 120 - 138", "type": "number", "hardMin": 120.0, "hardMax": 138.0}, {"id": "FD_R48C", "label": "Temp. zone 10 (℃):   90 - 100", "type": "number", "hardMin": 90.0, "hardMax": 100.0}, {"id": "FD_R49C", "label": "Temp. zone 11 (℃):   65 -   75", "type": "number", "hardMin": 65.0, "hardMax": 75.0}, {"id": "FD_R50C", "label": "Temp. FGs at Discharge ( ℃): 42", "type": "number"}, {"id": "FD_R51C", "label": "Temprature at Discharge Room ( ℃): 23±3", "type": "number", "hardMin": 20.0, "hardMax": 26.0}, {"id": "FD_R52C", "label": "Humidity at Discharge Room (%RH): ≤ 55", "type": "number", "hardMax": 55.0}, {"id": "FD_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FP", "name": "Đóng gói (F&P)", "fields": [{"id": "FP_R55C", "label": "Oil Flow (g/h):  \n- 338 ≤  Normal ≤ 400 \n- 994 ≤  Low Density ≤ 1330", "type": "boolean"}, {"id": "FP_R56E", "label": "Không phát hiện 2 màu", "type": "boolean"}, {"id": "FP_R57E", "label": "Không phát hiện lump \n(sủi/ dầu/ melt)", "type": "boolean"}, {"id": "FP_R58C", "label": "Filling time: \nBox: 1m08s-1m12s\nBigbag: 19-20mins", "type": "text"}, {"id": "FP_R58E", "label": "Không phát hiện bụi bề mặt", "type": "boolean"}, {"id": "FP_R59E", "label": "Không phát hiện bụi sau shaking", "type": "boolean"}, {"id": "FP_R60E", "label": "Không phát hiện hạt lớn bất thường", "type": "boolean"}, {"id": "FP_R61C", "label": "Temprature at F&P ( ℃): 23±3\nHumidity at F&P (%RH): ≤ 55\nPressure at F&P (Pa): 6.0 - 7.0", "type": "boolean"}, {"id": "FP_R62E", "label": "Không phát hiện lủng bao Liner PE", "type": "boolean"}, {"id": "FP_R63E", "label": "Không phát hiện lủng thùng carton", "type": "boolean"}, {"id": "FP_R64C", "label": "Sealing: \nTemp: 190 - 195 ℃\nSpeed: 645-652 Hz", "type": "boolean"}, {"id": "FP_R64E", "label": "Không phát hiện lủng bao bigbag", "type": "boolean"}, {"id": "FP_R65E", "label": "Không phát hiện FB sau khi lồng bao", "type": "boolean"}, {"id": "FP_R66E", "label": "Artwork as standard", "type": "boolean"}, {"id": "FP_NETWEIGHT", "label": "Netweight (kg)/box: 25.00 - 25.04", "type": "boolean"}, {"id": "FP_DENSITY", "label": "Density: 220-240g/L", "type": "boolean"}, {"id": "FP_MOISTURE", "label": "Moisture: Max 3.00%", "type": "boolean"}, {"id": "FP_PH", "label": "pH: 4.80 - 5.10", "type": "boolean"}, {"id": "FP_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "REWORK", "name": "Tái chế (Rework)", "fields": [{"id": "RW_DRYMIX", "label": "Dry Mix (kg)", "type": "number"}, {"id": "RW_WETMIX", "label": "Wet Mix (kg)", "type": "number"}, {"id": "RW_PCT", "label": "% RW", "type": "number"}, {"id": "RW_DEFECT", "label": "Defect", "type": "select", "options": ["2 Color", "Out Color", "Out Moisture", "Out Density", "Out Sediment", "Lump oil", "Dust"]}, {"id": "RW_TEMP90", "label": "Temperature ≥ 90°C", "type": "boolean"}, {"id": "RW_KIEMLOCVAI", "label": "Kiểm lọc vải", "type": "boolean"}, {"id": "RW_FLOWRATE", "label": "Flowrate: 3000-3500 L/h", "type": "boolean"}, {"id": "RW_TYLERW", "label": "Tỷ lệ RW: Theo Matrix RW", "type": "boolean"}, {"id": "REWORK_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "META", "name": "Tổng kết ca", "fields": [{"id": "INFO_ISSUE", "label": "Information/ Issue", "type": "textarea"}, {"id": "HANDOVER", "label": "Handover", "type": "textarea"}]}];
+const DEFAULT_SCHEMA = [{"id": "ROA", "name": "Rang (ROA)", "fields": [{"id": "ROA_R5C", "label": "Temp. Roasting (℃):", "type": "number"}, {"id": "ROA_R5E", "label": "Moisture: 4.0 - 5.0%", "type": "boolean"}, {"id": "ROA_R6C", "label": "Roasting time (s):", "type": "number"}, {"id": "ROA_R6E", "label": "Color: 45 ± 2", "type": "number", "hardMin": 43.0, "hardMax": 47.0}, {"id": "ROA_R7C", "label": "Quenching (L): 87 - 89L", "type": "number", "hardMin": 87.0, "hardMax": 89.0}, {"id": "ROA_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "EXT", "name": "Trích ly (EXT)", "fields": [{"id": "EXT_R10C", "label": "Cylcle time (mins): 17 - 22", "type": "number", "hardMin": 17.0, "hardMax": 22.0}, {"id": "EXT_R10E", "label": "TC VG2: 9.98 - 11.23%", "type": "number", "hardMin": 9.98, "hardMax": 11.23}, {"id": "EXT_R11C", "label": "Dewatering (L): Max 300", "type": "number", "hardMax": 300.0}, {"id": "EXT_R11E", "label": "TC Conilon: 10.4 - 11.70%", "type": "number", "hardMin": 10.4, "hardMax": 11.7}, {"id": "EXT_R12C", "label": "Temp. PE (℃): 130 - 131", "type": "number", "hardMin": 130.0, "hardMax": 131.0}, {"id": "EXT_R12E", "label": "TC Decaf: 9.04 - 10.40%", "type": "number", "hardMin": 9.04, "hardMax": 10.4}, {"id": "EXT_R13C", "label": "Press. Flash PE (bara): 600 - 1000", "type": "number", "hardMin": 600.0, "hardMax": 1000.0}, {"id": "EXT_R13E", "label": "Cupping (B26600)", "type": "boolean"}, {"id": "EXT_R14C", "label": "Temp. SE (℃): 190 - 191", "type": "number", "hardMin": 190.0, "hardMax": 191.0}, {"id": "EXT_R15C", "label": "Press. Flash SE (bara): 500 - 1000", "type": "number", "hardMin": 500.0, "hardMax": 1000.0}, {"id": "EXT_R16C", "label": "DOF: 5.5 - 5.7", "type": "number", "hardMin": 5.5, "hardMax": 5.7}, {"id": "EXT_R17C", "label": "Coarse/ Fine (kg)", "type": "number"}, {"id": "EXT_CLEAN_18", "label": "Flushing", "type": "boolean"}, {"id": "EXT_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "EVA", "name": "Cô đặc (EVA)", "fields": [{"id": "EVA_R21C", "label": "Clarifier CIP (hour): 8 - 12", "type": "boolean"}, {"id": "EVA_R21E", "label": "Outlet thick clarifier max Grade 1", "type": "boolean"}, {"id": "EVA_R22C", "label": "MainEvap CIP (hour): 24 - 32", "type": "boolean"}, {"id": "EVA_R22E", "label": "Sediment (S2) max Grade 1.5", "type": "boolean"}, {"id": "EVA_R23C", "label": "Flow.Clarifier (L/h): 4500 - 5000", "type": "number", "hardMin": 4500.0, "hardMax": 5000.0}, {"id": "EVA_R23E", "label": "4.8 < pH < 5.3", "type": "number", "hardMin": 4.8, "hardMax": 5.3}, {"id": "EVA_R24C", "label": "Temp. Set tank 1 (℃): 50 - 65", "type": "number", "hardMin": 50.0, "hardMax": 65.0}, {"id": "EVA_R24E", "label": "Cupping (set tank 3)", "type": "boolean"}, {"id": "EVA_R25C", "label": "Temp. Set tank 2 (℃): 15 - 18", "type": "number", "hardMin": 15.0, "hardMax": 18.0}, {"id": "EVA_R25E", "label": "TS: 47-48.5% (Normal Density)\nTS: 46 - 47% (Low Density)", "type": "number", "hardMin": 47.0, "hardMax": 48.5}, {"id": "EVA_R26C", "label": "Temp. Set tank 3 (℃): 18 - 20", "type": "number", "hardMin": 18.0, "hardMax": 20.0}, {"id": "EVA_CLEAN_27", "label": "Flushing/ CIP", "type": "boolean"}, {"id": "EVA_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FD", "name": "Sấy thăng hoa (FD)", "fields": [{"id": "FD_R41C", "label": "Speed of belt (meters/mins): 2.4 - 3.2", "type": "number", "hardMin": 2.4, "hardMax": 3.2}, {"id": "FD_R42C", "label": "Temp. belt (℃): -16 => -18", "type": "number", "hardMin": -18.0, "hardMax": -16.0}, {"id": "FD_R43C", "label": "Temp. Ante room 4 (℃): Max 5", "type": "number", "hardMax": 5.0}, {"id": "FD_R44C", "label": "Time cycle tray (s): 26.8 - 27.0", "type": "number", "hardMin": 26.8, "hardMax": 27.0}, {"id": "FD_R45C", "label": "Filling tray (kg): 11.9 - 12.1", "type": "number", "hardMin": 11.9, "hardMax": 12.1}, {"id": "FD_R46C", "label": "Vaccum in conrad (mbar): 0.3 - 0.5", "type": "number", "hardMin": 0.3, "hardMax": 0.5}, {"id": "FD_R47C", "label": "Temp. zone   9 (℃): 120 - 138", "type": "number", "hardMin": 120.0, "hardMax": 138.0}, {"id": "FD_R48C", "label": "Temp. zone 10 (℃):   90 - 100", "type": "number", "hardMin": 90.0, "hardMax": 100.0}, {"id": "FD_R49C", "label": "Temp. zone 11 (℃):   65 -   75", "type": "number", "hardMin": 65.0, "hardMax": 75.0}, {"id": "FD_R50C", "label": "Temp. FGs at Discharge ( ℃): 42", "type": "number"}, {"id": "FD_R51C", "label": "Temprature at Discharge Room ( ℃): 23±3", "type": "number", "hardMin": 20.0, "hardMax": 26.0}, {"id": "FD_R52C", "label": "Humidity at Discharge Room (%RH): ≤ 55", "type": "number", "hardMax": 55.0}, {"id": "FD_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FP", "name": "Đóng gói (F&P)", "fields": [{"id": "FP_R55C", "label": "Oil Flow (g/h):  \n- 338 ≤  Normal ≤ 400 \n- 994 ≤  Low Density ≤ 1330", "type": "boolean"}, {"id": "FP_R56E", "label": "Không phát hiện 2 màu", "type": "boolean"}, {"id": "FP_R57E", "label": "Không phát hiện lump \n(sủi/ dầu/ melt)", "type": "boolean"}, {"id": "FP_R58C", "label": "Filling time: \nBox: 1m08s-1m12s\nBigbag: 19-20mins", "type": "text"}, {"id": "FP_R58E", "label": "Không phát hiện bụi bề mặt", "type": "boolean"}, {"id": "FP_R59E", "label": "Không phát hiện bụi sau shaking", "type": "boolean"}, {"id": "FP_R60E", "label": "Không phát hiện hạt lớn bất thường", "type": "boolean"}, {"id": "FP_R61C", "label": "Temprature at F&P ( ℃): 23±3\nHumidity at F&P (%RH): ≤ 55\nPressure at F&P (Pa): 6.0 - 7.0", "type": "boolean"}, {"id": "FP_R62E", "label": "Không phát hiện lủng bao Liner PE", "type": "boolean"}, {"id": "FP_R63E", "label": "Không phát hiện lủng thùng carton", "type": "boolean"}, {"id": "FP_R64C", "label": "Sealing: \nTemp: 190 - 195 ℃\nSpeed: 645-652 Hz", "type": "boolean"}, {"id": "FP_R64E", "label": "Không phát hiện lủng bao bigbag", "type": "boolean"}, {"id": "FP_R65E", "label": "Không phát hiện FB sau khi lồng bao", "type": "boolean"}, {"id": "FP_R66E", "label": "Artwork as standard", "type": "boolean"}, {"id": "FP_NETWEIGHT", "label": "Netweight (kg)/box: 25.00 - 25.04", "type": "boolean"}, {"id": "FP_DENSITY", "label": "Density: 220-240g/L", "type": "boolean"}, {"id": "FP_MOISTURE", "label": "Moisture: Max 3.00%", "type": "boolean"}, {"id": "FP_PH", "label": "pH: 4.80 - 5.10", "type": "boolean"}, {"id": "FP_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "REWORK", "name": "Tái chế (Rework)", "fields": [{"id": "RW_DRYMIX", "label": "Dry Mix (kg)", "type": "number"}, {"id": "RW_WETMIX", "label": "Wet Mix (kg)", "type": "number"}, {"id": "RW_PCT", "label": "% RW", "type": "number"}, {"id": "RW_DEFECT", "label": "Defect", "type": "select", "options": ["2 Color", "Out Color", "Out Moisture", "Out Density", "Out Sediment", "Lump oil", "Dust"]}, {"id": "RW_TEMP90", "label": "Temperature ≥ 90°C", "type": "boolean"}, {"id": "RW_KIEMLOCVAI", "label": "Kiểm lọc vải", "type": "boolean"}, {"id": "RW_FLOWRATE", "label": "Flowrate: 3000-3500 L/h", "type": "boolean"}, {"id": "RW_TYLERW", "label": "Tỷ lệ RW: Theo Matrix RW", "type": "boolean"}, {"id": "REWORK_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "META", "name": "Tổng kết ca", "fields": [{"id": "INFO_ISSUE", "label": "Information/ Issue", "type": "textarea"}, {"id": "HANDOVER", "label": "Handover", "type": "textarea"}]}];
 let SCHEMA = JSON.parse(JSON.stringify(DEFAULT_SCHEMA));
 const DEFECT_OPTIONS = ["2 Color", "Out Color", "Out Moisture", "Out Density", "Out Sediment", "Lump oil", "Dust"];
 function stageIds(){ return SCHEMA.map(s => s.id); }
 // Công đoạn cho phép chọn khi tạo MỚI 1 điểm kiểm tra (tab Nhập liệu). CHỦ
-// Ý tách riêng khỏi SCHEMA/stageIds(): FOAMING/REWORK/META vẫn còn đầy đủ
-// định nghĩa + dữ liệu lịch sử trong SCHEMA (đọc/sửa/xuất báo cáo bình
-// thường), chỉ KHÔNG còn hiện ra làm lựa chọn khi bắt đầu 1 điểm kiểm tra
-// mới nữa.
+// Ý tách riêng khỏi SCHEMA/stageIds(): REWORK/META vẫn còn đầy đủ định nghĩa
+// + dữ liệu lịch sử trong SCHEMA (đọc/sửa/xuất báo cáo bình thường), chỉ
+// KHÔNG còn hiện ra làm lựa chọn khi bắt đầu 1 điểm kiểm tra mới nữa.
+// "Tạo bọt (Foaming)" đã bị XOÁ HẲN khỏi DEFAULT_SCHEMA/SCHEMA theo yêu cầu
+// (không còn là 1 công đoạn hợp lệ ở bất kỳ đâu trong app) — checkpoint
+// FOAMING đã lưu TỪ TRƯỚC vẫn còn nguyên trong IndexedDB/Supabase, chỉ
+// không còn hiển thị đẹp được nữa (sectionById('FOAMING') trả về undefined,
+// những chỗ đã tự dự phòng bằng `sec?sec.name:cp.section` vẫn hoạt động,
+// chỉ hiện mã thô "FOAMING" thay vì tên tiếng Việt).
 const INPUT_PROCESS_OPTIONS = ['ROA','EXT','EVA','FD','FP'];
 
 /* Recompute CSV headers + header->field map from the CURRENT (possibly
@@ -2101,11 +2106,24 @@ function renderInputForm(){
 
   // ---- Công đoạn (Process) — chỉ ROA/EXT/EVA/FD/FP khi tạo MỚI (mục 5).
   // Đang sửa 1 điểm kiểm tra cũ thì Công đoạn giữ nguyên (không đổi được),
-  // kể cả với FOAMING/REWORK/META lịch sử — vẫn hiển thị/sửa/xuất bình
-  // thường, chỉ không còn chọn được khi TẠO MỚI nữa. ----
+  // kể cả với REWORK/META lịch sử — vẫn hiển thị/sửa/xuất bình thường, chỉ
+  // không còn chọn được khi TẠO MỚI nữa. FOAMING đã bị xoá hẳn khỏi SCHEMA
+  // (không còn công đoạn hợp lệ nào tên FOAMING nữa, kể cả khi sửa dữ liệu
+  // cũ) — xem comment ở stageIds()/INPUT_PROCESS_OPTIONS phía trên. ----
   let secId;
   if(editingCp){
     secId = editingCp.section;
+    // Công đoạn của checkpoint lịch sử này đã bị xoá hẳn khỏi SCHEMA (VD:
+    // "Tạo bọt (Foaming)") — không còn field nào để dựng lưới chỉ tiêu, nên
+    // dừng ở đây với thông báo rõ ràng thay vì crash (sectionById trả về
+    // undefined). Dữ liệu vẫn còn nguyên trong IndexedDB/Supabase, chỉ
+    // không sửa được qua màn hình này nữa.
+    if(!sectionById(secId)){
+      formCard.appendChild(el('p',{class:'sub', style:'margin:0;color:var(--fail);'},[`⚠️ Công đoạn "${secId}" của điểm kiểm tra này không còn được hỗ trợ trong app (đã bị xoá khỏi Specs) — không thể sửa qua màn hình này. Dữ liệu vẫn còn nguyên, xem ở tab Dữ liệu.`]));
+      root.appendChild(formCard);
+      root.appendChild(metaCard);
+      return;
+    }
     formCard.appendChild(el('div',{class:'kv', style:'border:none;'},[el('span',{class:'k'},['Công đoạn']), el('span',{class:'v'},[sectionById(secId).name])]));
   } else {
     secId = renderInputForm._newSection || '';
@@ -4406,8 +4424,8 @@ async function buildAllShiftsReportSVG(dateVal, qmsOnly){
 // Thứ tự ưu tiên hiển thị Process trên PO Production Timeline (mục 3) — chỉ
 // những Công đoạn THỰC SỰ có checkpoint mới xuất hiện. Nhãn tiếng Anh dùng
 // riêng cho Gantt (mục 1/3), khác tên tiếng Việt của section trong SCHEMA.
-const PROCESS_TIMELINE_ORDER = ['ROA','EXT','EVA','FOAMING','FD','FP','REWORK'];
-const GANTT_PROCESS_LABELS = {ROA:'ROASTING', EXT:'EXTRACTION', EVA:'EVAPORATION', FOAMING:'FOAMING', FD:'FREEZE DRYING', FP:'FILLING & PACKING', REWORK:'REWORK'};
+const PROCESS_TIMELINE_ORDER = ['ROA','EXT','EVA','FD','FP','REWORK'];
+const GANTT_PROCESS_LABELS = {ROA:'ROASTING', EXT:'EXTRACTION', EVA:'EVAPORATION', FD:'FREEZE DRYING', FP:'FILLING & PACKING', REWORK:'REWORK'};
 function nextDateISO(iso){
   const d = new Date(iso+'T00:00:00');
   d.setDate(d.getDate()+1);
@@ -4612,46 +4630,54 @@ function svgToPngBlob(svgString, width, height, scale){
    getIssueActionPairs/ITEM_CODE_LIST) nên luôn khớp nhau, chỉ khác cách vẽ. */
 function buildIssueActionEditableList(sec, cp, onEdited){
   const wrap = el('div',{},[]);
-  let editIdx = null;
+  let editIdx = null; // số nguyên = đang sửa cặp đó, 'new' = đang thêm cặp mới, null = không sửa gì
+  async function persistPairs(allPairs, changeLabel, before, after){
+    cp.fields = cp.fields || {};
+    cp.fields[ISSUE_PAIRS_KEY] = allPairs.filter(x=>x.issue||x.action);
+    // Ghi ngược vào field "<Section>_ISSUE"/"_ACTION" cũ — cơ chế sẵn có từ
+    // Input Form — để mọi nơi khác (Data Log, xuất Process/QMS, báo cáo)
+    // tiếp tục đọc đúng, không cần sửa gì thêm.
+    syncIssueActionToLegacyFields(cp, sec);
+    cp.updatedAt = new Date().toISOString();
+    await idbPut('shifts', cp);
+    await refreshCache();
+    await persistAll();
+    await logChange({ date:cp.date, shift:cp.shift, po:cp.po, section:sec.name, technician:cp.technician||'',
+      changes:[{fieldId:'ISSUE_ACTION', label:changeLabel, from:before, to:after}] });
+    toast('Đã lưu Issue/Action');
+  }
+  function renderEditor(initial, onSave){
+    const issueTa = el('textarea',{class:'inp', rows:'2'},[]); issueTa.value = initial.issue||'';
+    const actionTa = el('textarea',{class:'inp', rows:'2'},[]); actionTa.value = initial.action||'';
+    const saveBtn = el('button',{class:'btn teal sm', type:'button'},['💾 Lưu']);
+    const cancelBtn = el('button',{class:'btn ghost sm', type:'button'},['✕ Huỷ']);
+    saveBtn.addEventListener('click', async ()=>{
+      const newIssue = issueTa.value.trim(), newAction = actionTa.value.trim();
+      if(newIssue && !newAction){ toast('Cần nhập Action.'); return; }
+      if(!newIssue && newAction){ toast('Cần nhập Issue/Abnormal.'); return; }
+      if(!newIssue && !newAction){ toast('Vui lòng nhập Issue/Abnormal và Action.'); return; }
+      await onSave(newIssue, newAction);
+    });
+    cancelBtn.addEventListener('click', ()=>{ editIdx=null; draw(); });
+    wrap.appendChild(el('div',{class:'grid g2', style:'margin-bottom:6px;'},[issueTa, actionTa]));
+    wrap.appendChild(el('div',{class:'row', style:'margin-bottom:10px;'},[saveBtn, cancelBtn]));
+  }
   function draw(){
     wrap.innerHTML = '';
     const pairs = getIssueActionPairs(cp, sec);
-    if(pairs.length===0){
-      wrap.appendChild(el('div',{class:'sub', style:'margin:4px 0;'},['Không có Issue/Action nào được ghi nhận.']));
-      return;
+    if(pairs.length===0 && editIdx!=='new'){
+      wrap.appendChild(el('div',{class:'sub', style:'margin:4px 0 10px;'},['Không có Issue/Action nào được ghi nhận.']));
     }
     pairs.forEach((p, idx)=>{
       if(editIdx===idx){
-        const issueTa = el('textarea',{class:'inp', rows:'2'},[]); issueTa.value = p.issue||'';
-        const actionTa = el('textarea',{class:'inp', rows:'2'},[]); actionTa.value = p.action||'';
-        const saveBtn = el('button',{class:'btn teal sm', type:'button'},['💾 Lưu']);
-        const cancelBtn = el('button',{class:'btn ghost sm', type:'button'},['✕ Huỷ']);
-        saveBtn.addEventListener('click', async ()=>{
-          const newIssue = issueTa.value.trim(), newAction = actionTa.value.trim();
-          if(newIssue && !newAction){ toast('Cần nhập Action.'); return; }
-          if(!newIssue && newAction){ toast('Cần nhập Issue/Abnormal.'); return; }
+        renderEditor(p, async (newIssue, newAction)=>{
           const before = {issue:p.issue||'', action:p.action||''};
           const allPairs = getIssueActionPairs(cp, sec);
           allPairs[idx] = {issue:newIssue, action:newAction};
-          cp.fields = cp.fields || {};
-          cp.fields[ISSUE_PAIRS_KEY] = allPairs.filter(x=>x.issue||x.action);
-          // Ghi ngược vào field "<Section>_ISSUE"/"_ACTION" cũ — cơ chế sẵn
-          // có từ Input Form — để mọi nơi khác (Data Log, xuất Process/QMS,
-          // báo cáo) tiếp tục đọc đúng, không cần sửa gì thêm.
-          syncIssueActionToLegacyFields(cp, sec);
-          cp.updatedAt = new Date().toISOString();
-          await idbPut('shifts', cp);
-          await refreshCache();
-          await persistAll();
-          await logChange({ date:cp.date, shift:cp.shift, po:cp.po, section:sec.name, technician:cp.technician||'',
-            changes:[{fieldId:'ISSUE_ACTION', label:`Issue/Action #${idx+1}`, from:before, to:{issue:newIssue, action:newAction}}] });
-          toast('Đã lưu Issue/Action');
+          await persistPairs(allPairs, `Issue/Action #${idx+1}`, before, {issue:newIssue, action:newAction});
           editIdx = null;
           if(onEdited) onEdited(); else draw();
         });
-        cancelBtn.addEventListener('click', ()=>{ editIdx=null; draw(); });
-        wrap.appendChild(el('div',{class:'grid g2', style:'margin-bottom:6px;'},[issueTa, actionTa]));
-        wrap.appendChild(el('div',{class:'row', style:'margin-bottom:10px;'},[saveBtn, cancelBtn]));
       } else {
         const editBtn = el('button',{class:'btn ghost sm', type:'button'},['✎ Sửa']);
         editBtn.addEventListener('click', ()=>{ editIdx=idx; draw(); });
@@ -4662,13 +4688,30 @@ function buildIssueActionEditableList(sec, cp, onEdited){
         wrap.appendChild(el('div',{class:'row', style:'margin-bottom:10px;'},[editBtn]));
       }
     });
+    if(editIdx==='new'){
+      renderEditor({issue:'',action:''}, async (newIssue, newAction)=>{
+        const allPairs = getIssueActionPairs(cp, sec);
+        allPairs.push({issue:newIssue, action:newAction});
+        await persistPairs(allPairs, `Issue/Action #${allPairs.length}`, null, {issue:newIssue, action:newAction});
+        editIdx = null;
+        if(onEdited) onEdited(); else draw();
+      });
+    } else {
+      // Cho phép thêm Issue/Action ngay cả khi checkpoint này CHƯA có cặp
+      // nào (VD: ô Gantt trống — Ngày+Ca chưa từng ghi Issue/Action) — cùng
+      // 1 danh sách, không tạo cơ chế thêm mới riêng.
+      const addBtn = el('button',{class:'btn ghost sm', type:'button'},['+ Thêm Issue/Action']);
+      addBtn.addEventListener('click', ()=>{ editIdx='new'; draw(); });
+      wrap.appendChild(addBtn);
+    }
   }
   draw();
   return wrap;
 }
 // Gantt tương tác (mục 1-8): Header 1 lần + bảng Process x Date x Shift LIÊN
-// TỤC, cuộn ngang (.tablescroll) với cột đầu sticky trái. Mỗi ô Issue/Action
-// có checkpoint đứng sau đều bấm được -> mở modal sửa (dùng lại
+// TỤC, cuộn ngang (.tablescroll) với cột đầu sticky trái. MỌI ô Issue/Action
+// đều bấm được, kể cả Ngày+Ca chưa có checkpoint nào (getOrInitCheckpoint
+// lấy/tạo đúng checkpoint) -> mở modal sửa (dùng lại
 // buildIssueActionEditableList/openModal có sẵn) -> ghi thẳng vào checkpoint
 // gốc, KHÔNG tạo bản ghi Report/Gantt riêng nào (mục 6/7).
 function renderPOTimeline(container, poQuery, matches, onEdited){
@@ -4747,16 +4790,21 @@ function renderPOTimeline(container, poQuery, matches, onEdited){
     const issueRow = el('tr',{class:altCls.trim()},[el('th',{class:'gantt-sticky sub-label'},['Issues/Abnormal'])]);
     const actionRow = el('tr',{class:altCls.trim()},[el('th',{class:'gantt-sticky sub-label'},['Action'])]);
     cols.forEach(c=>{
-      const cp = cpIndex[id+'|'+c.date+'|'+c.shift];
-      const issueTxt = ganttCellText(cp, sec, 'issue');
-      const actionTxt = ganttCellText(cp, sec, 'action');
-      const issueCell = el('td',{class:'gantt-cell'+(cp?' clickable':'')},[issueTxt||'']);
-      const actionCell = el('td',{class:'gantt-cell'+(cp?' clickable':'')},[actionTxt||'']);
-      if(cp){
-        const titleText = `${GANTT_PROCESS_LABELS[id]||id} — ${fmtDateVN(c.date)} Ca ${c.shift}`;
-        issueCell.addEventListener('click', ()=>openEditModal(cp, sec, titleText));
-        actionCell.addEventListener('click', ()=>openEditModal(cp, sec, titleText));
-      }
+      const existingCp = cpIndex[id+'|'+c.date+'|'+c.shift];
+      const issueTxt = ganttCellText(existingCp, sec, 'issue');
+      const actionTxt = ganttCellText(existingCp, sec, 'action');
+      // Mọi ô đều bấm được, kể cả Ngày+Ca chưa có checkpoint nào — bấm vào
+      // sẽ lấy/tạo đúng checkpoint (getOrInitCheckpoint, giống hệt cơ chế
+      // Input tab) cho đúng Process+Ngày+Ca+PO đang xem; checkpoint mới chỉ
+      // thực sự ghi xuống IndexedDB khi người dùng bấm "💾 Lưu" ít nhất 1
+      // cặp Issue/Action (xem buildIssueActionEditableList) — chỉ mở modal
+      // không lưu gì thì không tạo ra bản ghi trống nào.
+      const issueCell = el('td',{class:'gantt-cell clickable'},[issueTxt||'']);
+      const actionCell = el('td',{class:'gantt-cell clickable'},[actionTxt||'']);
+      const titleText = `${GANTT_PROCESS_LABELS[id]||id} — ${fmtDateVN(c.date)} Ca ${c.shift}`;
+      const openThisCell = ()=>openEditModal(getOrInitCheckpoint(c.date, c.shift, id, poQuery), sec, titleText);
+      issueCell.addEventListener('click', openThisCell);
+      actionCell.addEventListener('click', openThisCell);
       issueRow.appendChild(issueCell);
       actionRow.appendChild(actionCell);
     });
@@ -4877,8 +4925,12 @@ function renderReport(){
     pickerBox.appendChild(poInp);
     pickerBox.appendChild(findBtn);
     async function doSearch(){
-      const q = poInp.value.trim();
-      if(!q){ toast('Nhập mã PO cần tìm'); return; }
+      const raw = poInp.value.trim();
+      if(!raw){ toast('Nhập mã PO cần tìm'); return; }
+      // Cùng quy tắc định dạng PO với tab Nhập liệu: đúng 9 chữ số, hoặc
+      // SHUTDOWN (không phân biệt hoa/thường, tự chuẩn hoá thành in hoa).
+      const q = /^shutdown$/i.test(raw) ? 'SHUTDOWN' : raw;
+      if(q!=='SHUTDOWN' && !/^\d{9}$/.test(q)){ toast('Mã PO phải gồm đúng 9 chữ số, hoặc là SHUTDOWN.'); return; }
       const matches = allCheckpoints.filter(rec=>matchPO(rec, q));
       matches.sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
       if(matches.length===0){ toast('Không tìm thấy PO này trong dữ liệu'); previewWrap.innerHTML=''; currentGen=null; return; }
@@ -6221,7 +6273,7 @@ function renderGuide(){
     <h4>16. Báo cáo theo ca — Ngày + Ca độc lập, xem "Tất cả"</h4>
     <p>Chế độ <b>"Theo ca"</b> giờ tách thành 2 lựa chọn riêng: ô <b>Ngày</b> và ô <b>Ca</b> (Ca 1 / Ca 2 / Ca 3 / <b>Tất cả</b>) — mặc định trỏ sẵn tới Ngày+Ca gần nhất đang có dữ liệu, nhưng có thể tự chọn bất kỳ tổ hợp nào. Chọn <b>"Tất cả"</b> sẽ hiển thị lần lượt báo cáo Ca 1 → Ca 2 → Ca 3 của đúng Ngày đã chọn trong CÙNG 1 ảnh, mỗi ca phân tách rõ bằng 1 dải tiêu đề đậm màu; ca nào chưa có dữ liệu vẫn hiện, chỉ ghi "Chưa có dữ liệu". Trong mỗi công đoạn, Issue/Abnormal và Action giờ hiển thị <b>song song 2 cột trong cùng 1 khung</b> thay vì lẫn vào các chỉ tiêu khác, dễ thấy ngay Issue nào đi với Action nào.</p>
     <h4>16a. Báo cáo theo PO — Gantt Process x Date x Shift (tab Báo cáo)</h4>
-    <p>Chế độ <b>"Theo PO"</b>: nhập mã PO → app dựng 1 bảng <b>Gantt</b> giống mẫu Excel "QUALITY & ACTIVITIES FOLLOW UP". Phần đầu chỉ hiện <b>ITEM CODE / ITEM NAME / PO / RECIPE</b> đúng 1 lần. Bên dưới là lưới: mỗi cột là 1 <b>Ngày + Ca</b>, sinh <b>LIÊN TỤC</b> từ checkpoint sớm nhất tới muộn nhất của PO (kể cả những Ca không có dữ liệu) để thanh Gantt thể hiện đúng khoảng chạy thật; mỗi Công đoạn thực sự có dữ liệu chiếm 3 hàng: thanh Gantt (kéo dài từ Ngày+Ca đầu tới cuối), rồi <b>Issues/Abnormal</b> và <b>Action</b> — nội dung nằm ĐÚNG ô Ngày+Ca của checkpoint phát sinh, không gộp chung. Bảng cuộn ngang được (<b>overflow-x: auto</b>), cột đầu ("Process/Information") cố định khi cuộn để luôn thấy tên công đoạn. Bấm vào 1 ô Issue/Action có dữ liệu (viền sáng lên khi rê chuột) sẽ mở popup sửa (nút "✎ Sửa" → 2 ô nhập → "💾 Lưu") — ghi thẳng vào checkpoint gốc (không tạo báo cáo riêng), nên tab Nhập liệu và Data Log đều thấy thay đổi ngay lập tức. Ảnh PNG/Chia sẻ xuất ra từ chế độ này tự co giãn theo đúng số cột thật (không giới hạn độ rộng cố định như trước), luôn thấy đủ hết các cột bên phải; "📊 Excel theo mẫu"/"📄 PDF theo mẫu" (Process/QMS — xem mục 34) không đổi.</p>
+    <p>Chế độ <b>"Theo PO"</b>: nhập mã PO (cùng quy tắc định dạng với tab Nhập liệu — đúng 9 chữ số, hoặc SHUTDOWN, không phân biệt hoa/thường) → app dựng 1 bảng <b>Gantt</b> giống mẫu Excel "QUALITY & ACTIVITIES FOLLOW UP". Phần đầu chỉ hiện <b>ITEM CODE / ITEM NAME / PO / RECIPE</b> đúng 1 lần. Bên dưới là lưới: mỗi cột là 1 <b>Ngày + Ca</b>, sinh <b>LIÊN TỤC</b> từ checkpoint sớm nhất tới muộn nhất của PO (kể cả những Ca không có dữ liệu) để thanh Gantt thể hiện đúng khoảng chạy thật; mỗi Công đoạn thực sự có dữ liệu chiếm 3 hàng: thanh Gantt (kéo dài từ Ngày+Ca đầu tới cuối), rồi <b>Issues/Abnormal</b> và <b>Action</b> — nội dung nằm ĐÚNG ô Ngày+Ca của checkpoint phát sinh, không gộp chung. Bảng cuộn ngang được (<b>overflow-x: auto</b>), cột đầu ("Process/Information") cố định khi cuộn để luôn thấy tên công đoạn. <b>Mọi ô Issue/Action đều bấm được</b>, kể cả Ngày+Ca chưa từng ghi nhận gì (viền sáng lên khi rê chuột) — mở popup sửa/thêm mới ("✎ Sửa" cho cặp đã có, hoặc "+ Thêm Issue/Action" nếu ô đó còn trống) → 2 ô nhập → "💾 Lưu" — ghi thẳng vào đúng checkpoint (Ngày/Ca/Công đoạn/PO tương ứng, tự tạo mới nếu chưa từng có, không tạo báo cáo riêng), nên tab Nhập liệu và Data Log đều thấy thay đổi ngay lập tức, và thanh Gantt của Công đoạn đó tự nới rộng nếu Ngày+Ca vừa thêm nằm ngoài khoảng cũ. Ảnh PNG/Chia sẻ xuất ra từ chế độ này tự co giãn theo đúng số cột thật (không giới hạn độ rộng cố định như trước), luôn thấy đủ hết các cột bên phải; "📊 Excel theo mẫu"/"📄 PDF theo mẫu" (Process/QMS — xem mục 34) không đổi.</p>
     <h4>16b. Ảnh đính kèm full chiều rộng + lọc chỉ tiêu QMS trong báo cáo ảnh (Theo ca)</h4>
     <p>Ảnh đính kèm trong báo cáo ảnh <b>Theo ca</b> (PNG/chia sẻ) hiển thị lớn — tối đa 2 ảnh/hàng, mỗi ảnh chia đều chiều rộng báo cáo; nếu lẻ 1 ảnh ở hàng cuối, ảnh đó tự kéo full chiều rộng thay vì để trống 1 nửa như trước. Ô <b>"Chỉ hiện chỉ tiêu QMS trong báo cáo ảnh"</b> (phía trên khung xem trước, chỉ hiện ở chế độ Theo ca) cho chuyển qua lại giữa 2 chế độ: bỏ tick (mặc định) hiện mọi chỉ tiêu đã nhập như trước giờ; tick vào chỉ còn các chỉ tiêu đã đánh dấu "Xuất trong báo cáo QMS" ở tab Specs (dùng chung đúng cấu hình với nút "Excel/PDF theo mẫu") — tiện khi cần báo cáo ảnh gọn, chỉ có số liệu QMS thay vì đầy đủ mọi Parameters đã nhập. Báo cáo <b>Theo PO</b> (Gantt, mục 16a) không hiện từng chỉ tiêu/ảnh đính kèm nữa — chỉ tập trung vào tiến độ Process theo thời gian và Issue/Action.</p>
     <h4>17. Định dạng ngày DD/MM/YYYY</h4>
@@ -6267,7 +6319,7 @@ function renderGuide(){
     <p>Quản lý bảng liên đới <b>Item Code ↔ Tên sản phẩm ↔ Recipe</b> — mỗi dòng gồm Loại (<b>FGs</b>: thành phẩm, hoặc <b>RW</b>: hàng tái chế/Rework — 2 dải mã riêng theo đúng cách nhà máy quản lý), Item Code, Tên sản phẩm, Recipe. Tab này đã có sẵn 524 dòng dữ liệu thật của nhà máy ngay từ đầu — không cần nhập hay import lại. Có thể thêm/sửa/xoá từng dòng trực tiếp, và tìm kiếm theo mã/tên/Recipe hoặc lọc riêng theo Loại (FGs/RW).</p>
     <p>Để cập nhật hàng loạt sau này: bấm <b>"⬇️ Tải template mẫu"</b> để có file Excel đúng định dạng, điền thêm dòng mới vào rồi bấm <b>"📥 Nhập từ Excel"</b> — dòng trùng cả Loại + Item Code + Tên sản phẩm sẽ tự bỏ qua (không tạo trùng lặp), dòng mới sẽ được thêm vào. Bấm <b>"⬆️ Xuất Excel"</b> để tải toàn bộ danh sách hiện tại ra file. Lưu ý: cũng như các tab danh sách khác (PO/Recipe/Client), file Excel ở đây dùng đúng định dạng ".xls" mà chính app này tự xuất ra — 1 file ".xlsx" gốc khác (vd tải trực tiếp từ Excel/Google Sheets) cần dán lại dữ liệu vào đúng file template trước khi nhập vào app.</p>
     <h4>37. Quy trình nhập liệu mới (kiểm soát chặt hơn)</h4>
-    <p>Tab Nhập liệu đi theo đúng thứ tự: <b>Ngày → Ca → QC → Công đoạn → Item Code → Tên sản phẩm/Recipe (tự động) → Mã PO → các chỉ tiêu công đoạn → Issue/Abnormal &amp; Action → Lưu</b>. Ca/QC/Công đoạn không còn tự chọn sẵn nữa — phải tự chọn (chưa chọn Ca thì cả tab chưa hiện gì, đúng ý "chưa có Ca thì chưa có gì để lưu"). Công đoạn khi TẠO MỚI chỉ còn 5 lựa chọn: Rang (ROA), Trích ly (EXT), Cô đặc (EVA), Sấy thăng hoa (FD), Đóng gói (F&amp;P) — các công đoạn cũ (Tạo bọt/Rework/Tổng kết ca) không còn tạo mới được nhưng dữ liệu lịch sử vẫn xem/sửa/xuất báo cáo bình thường.</p>
+    <p>Tab Nhập liệu đi theo đúng thứ tự: <b>Ngày → Ca → QC → Công đoạn → Item Code → Tên sản phẩm/Recipe (tự động) → Mã PO → các chỉ tiêu công đoạn → Issue/Abnormal &amp; Action → Lưu</b>. Ca/QC/Công đoạn không còn tự chọn sẵn nữa — phải tự chọn (chưa chọn Ca thì cả tab chưa hiện gì, đúng ý "chưa có Ca thì chưa có gì để lưu"). Công đoạn khi TẠO MỚI chỉ còn 5 lựa chọn: Rang (ROA), Trích ly (EXT), Cô đặc (EVA), Sấy thăng hoa (FD), Đóng gói (F&amp;P) — Rework/Tổng kết ca không còn tạo mới được nhưng dữ liệu lịch sử vẫn xem/sửa/xuất báo cáo bình thường. <b>Tạo bọt (Foaming) đã bị xoá hẳn khỏi danh sách công đoạn của app</b> (không chỉ ẩn khi tạo mới) — checkpoint Foaming đã lưu từ trước vẫn còn nguyên trong dữ liệu, chỉ không còn hiển thị đẹp/xuất báo cáo được như các công đoạn khác nữa.</p>
     <p>Ô Item Code vừa gõ tay vừa <b>tìm/chọn từ danh sách có sẵn</b> (gõ vài số đầu sẽ hiện gợi ý các mã đã có trong Item Code Master, giống hệt cách chọn PO) — chọn xong hoặc rời khỏi ô đó (bấm sang ô khác), Tên sản phẩm và Recipe tự điền (chỉ đọc, không sửa tay) từ đúng dữ liệu tab Danh sách Items Code. Không tìm thấy mã, mã có nhiều bản ghi mâu thuẫn nhau, hoặc mã chưa có Recipe trong Item Code Master đều báo lỗi rõ ràng và <b>chặn lưu</b> cho tới khi sửa đúng (đúng 8 chữ số). Mã PO phải đúng 9 chữ số, hoặc gõ "SHUTDOWN" (không phân biệt hoa/thường, tự chuyển thành chữ hoa) — với 1 điểm kiểm tra MỚI, app kiểm tra ngay khi gõ: sai định dạng thì hiện cảnh báo và <b>chưa mở phần chỉ tiêu phía dưới</b> (không cần đợi tới lúc bấm Lưu mới biết sai).</p>
     <p>Issue/Abnormal và Action giờ nhập theo từng CẶP dòng, bấm "+ Thêm Issue/Action" nếu cần nhiều dòng — dòng nào đã gõ Issue thì bắt buộc phải gõ Action tương ứng (và ngược lại), dòng để trống hoàn toàn thì bỏ qua, không chặn lưu. Dữ liệu vẫn tương thích ngược 100% với các báo cáo/Excel/QMS đã có (App tự ghép lại vào đúng ô "Issue/ Abnormal" quen thuộc khi lưu).</p>
   </div>`;

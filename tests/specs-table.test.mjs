@@ -322,7 +322,7 @@ test('filter by Loại (multi-select), by Bắt buộc, and text-filter by Tên 
   } finally { dom.window.close(); }
 });
 
-test('historical/default SCHEMA (real ROA/FOAMING/REWORK sections) still renders correctly as tables', async () => {
+test('historical/default SCHEMA (real ROA/REWORK sections) still renders correctly as tables; FOAMING was removed entirely', async () => {
   const {dom, w, errors} = await boot();
   try {
     const doc = w.document;
@@ -330,8 +330,12 @@ test('historical/default SCHEMA (real ROA/FOAMING/REWORK sections) still renders
     const card = sectionCard(doc, 'Rang (ROA)');
     assert.ok(card, 'the real default ROA section must render');
     assert.ok(dataRows(card).length > 0);
-    const foamingCard = sectionCard(doc, 'Tạo bọt (Foaming)');
-    assert.ok(foamingCard, 'historical FOAMING section must still be manageable in Specs');
+    const reworkCard = sectionCard(doc, 'Tái chế (Rework)');
+    assert.ok(reworkCard, 'REWORK section must still be manageable in Specs');
+    // "Tạo bọt (Foaming)" was fully removed from SCHEMA at the user's
+    // request — it must no longer appear anywhere in Specs.
+    assert.equal(sectionCard(doc, 'Tạo bọt (Foaming)'), undefined, 'FOAMING must no longer render as a Specs section');
+    assert.equal(w.eval("sectionById('FOAMING')"), undefined);
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
