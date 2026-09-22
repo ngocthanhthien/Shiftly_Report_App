@@ -267,6 +267,23 @@ table.specs-table tbody tr:hover td{background:var(--teal-l);}
 table.specs-table tbody tr.addrow:hover td{background:var(--teal-l);}
 table.specs-table td{vertical-align:top;}
 
+/* PO Production Timeline (Gantt) — tab Báo cáo, chế độ "Theo PO". Dùng
+   chung .tablescroll cho cuộn ngang; cột đầu (Process/Information) sticky
+   trái vì report này rất rộng (1 cột/Date+Shift, có thể hàng chục cột). */
+.gantt-table{border-collapse:collapse;table-layout:fixed;font-size:11.5px;}
+.gantt-table th,.gantt-table td{border:1px solid var(--line);padding:5px 7px;white-space:pre-wrap;vertical-align:top;min-width:80px;}
+.gantt-table thead th{background:var(--ink);color:#fff;text-align:center;font-weight:700;white-space:nowrap;}
+.gantt-table .gantt-sticky{position:sticky;left:0;z-index:3;background:var(--ink);color:#fff;text-align:left;min-width:170px;white-space:normal;}
+.gantt-table tbody .gantt-sticky{background:var(--card);color:var(--text);font-weight:700;z-index:2;border-right:1.5px solid var(--line2);}
+.gantt-table tbody .gantt-sticky.sub-label{font-weight:600;font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.2px;}
+.gantt-table tr.alt td,.gantt-table tr.alt th.gantt-sticky{background:#F8FAFC;}
+.gantt-table td.gantt-empty{background:transparent;}
+.gantt-table td.gantt-bar-cell{padding:4px 3px;}
+.gantt-bar{height:16px;border-radius:5px;background:var(--teal);}
+.gantt-table td.gantt-cell{font-size:10.5px;color:var(--text);}
+.gantt-table td.gantt-cell.clickable{cursor:pointer;}
+.gantt-table td.gantt-cell.clickable:hover{background:var(--teal-l);}
+
 /* Generic modal/popup — used by the Specs tab's "Thêm chỉ tiêu" dialog.
    No prior modal pattern existed in this app; kept intentionally generic
    (class names not Specs-specific) so it can be reused elsewhere later. */
@@ -4386,63 +4403,183 @@ async function buildAllShiftsReportSVG(dateVal, qmsOnly){
   lines.push({t:'footer', text:`Xuất lúc: ${fmtDateTimeVN(Date.now())}`});
   return renderLinesToSVG(lines, W);
 }
-// Thứ tự ưu tiên hiển thị Process trên PO Production Timeline (mục 4) — chỉ
-// những Công đoạn THỰC SỰ có checkpoint mới xuất hiện.
+// Thứ tự ưu tiên hiển thị Process trên PO Production Timeline (mục 3) — chỉ
+// những Công đoạn THỰC SỰ có checkpoint mới xuất hiện. Nhãn tiếng Anh dùng
+// riêng cho Gantt (mục 1/3), khác tên tiếng Việt của section trong SCHEMA.
 const PROCESS_TIMELINE_ORDER = ['ROA','EXT','EVA','FOAMING','FD','FP','REWORK'];
-// PO Production Timeline: Header (PO/Item Code/Item Name/Recipe) hiển thị 1
-// LẦN DUY NHẤT — không lặp lại trong từng Process như bản "Truy xuất theo
-// PO" cũ — theo sau là bảng tóm tắt Date+Shift đầu/cuối mỗi Process, rồi
-// chi tiết từng checkpoint (chỉ tiêu + Issue/Action) theo đúng thứ tự
-// Process -> thời gian.
-async function buildPOReportSVG(poQuery, matches, qmsOnly){
-  const W = 760;
-  const relevant = matches.filter(cp=>cp.section!=='META');
-  const lines = [];
-  lines.push({t:'title', text:'ILD COFFEE VIETNAM — PO PRODUCTION TIMELINE'});
-  lines.push({t:'sub', text:`Mã PO: ${poQuery}  ·  ${relevant.length} điểm kiểm tra liên quan`});
-  const withCode = relevant.find(cp=>cp.itemCode) || relevant[0];
-  if(withCode){
-    const lookup = withCode.itemCode ? lookupItemByCode(withCode.itemCode) : {status:'not_found'};
-    const itemName = (lookup.status==='ok'||lookup.status==='missing_recipe') ? lookup.name : '';
-    const recipeVal = withCode.recipe || (lookup.status==='ok' ? lookup.recipe : '');
-    lines.push({t:'row', label:'Item Code', disp: withCode.itemCode||'—', color:'#0F172A'});
-    lines.push({t:'row', label:'Item Name', disp: itemName||'—', color:'#0F172A'});
-    lines.push({t:'row', label:'Recipe', disp: recipeVal||'—', color:'#0F172A'});
+const GANTT_PROCESS_LABELS = {ROA:'ROASTING', EXT:'EXTRACTION', EVA:'EVAPORATION', FOAMING:'FOAMING', FD:'FREEZE DRYING', FP:'FILLING & PACKING', REWORK:'REWORK'};
+function nextDateISO(iso){
+  const d = new Date(iso+'T00:00:00');
+  d.setDate(d.getDate()+1);
+  const p = n=>String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+}
+// Sinh timeline LIÊN TỤC (mục 2): mỗi Date x Shift từ checkpoint sớm nhất
+// -> muộn nhất của PO, kể cả những mốc KHÔNG có checkpoint nào — để Gantt
+// thể hiện đúng khoảng chạy thật của từng Process, không chỉ các điểm rời
+// rạc có dữ liệu.
+function buildPOGanttColumns(relevant){
+  if(relevant.length===0) return [];
+  const sorted = relevant.slice().sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
+  const first = sorted[0], last = sorted[sorted.length-1];
+  const cols = [];
+  let d = first.date, s = parseInt(first.shift,10) || 1;
+  const endKey = last.date + last.shift;
+  for(let guard=0; guard<3000; guard++){
+    cols.push({date:d, shift:String(s)});
+    if(d + String(s) === endKey) break;
+    s++;
+    if(s>3){ s=1; d = nextDateISO(d); }
   }
-  lines.push({t:'gap'});
-  const stats = computeReportStats(matches);
-  if(stats.total>0) lines.push({t:'bar', stats});
-  lines.push({t:'gap'});
+  return cols;
+}
+// Gộp các cột liên tiếp cùng Ngày lại thành 1 nhóm (colspan) cho hàng tiêu
+// đề Date, để mỗi Ngày chỉ hiện 1 lần, còn hàng Ca bên dưới vẫn tách riêng.
+function groupGanttColsByDate(cols){
+  const groups = [];
+  cols.forEach(c=>{
+    const last = groups[groups.length-1];
+    if(last && last.date===c.date) last.span++;
+    else groups.push({date:c.date, span:1});
+  });
+  return groups;
+}
+// 1 checkpoint có thể mang NHIỀU cặp Issue/Action (ISSUE_PAIRS_KEY) — gộp
+// thành 1 khối text đánh số cho đúng 1 ô Gantt (mục 5, giống mẫu Excel
+// "1. ... / 2. ..."). kind: 'issue' | 'action'.
+function ganttCellText(cp, sec, kind){
+  if(!cp || !sec) return '';
+  const pairs = getIssueActionPairs(cp, sec).filter(p=>p.issue||p.action);
+  if(pairs.length===0) return '';
+  return pairs.map((p,i)=>{
+    const v = (kind==='issue' ? p.issue : p.action) || '';
+    return pairs.length>1 ? `${i+1}. ${v}` : v;
+  }).join('\n');
+}
+// PO Production Timeline dạng Gantt (mục 1-5): Header (Item Code/Item Name/
+// PO/Recipe) hiển thị 1 LẦN DUY NHẤT, rồi 1 lưới Process x Date x Shift LIÊN
+// TỤC — mỗi Process gồm 3 hàng (thanh Gantt, Issues/Abnormal, Action), Issue/
+// Action nằm ĐÚNG cột Date+Shift của checkpoint phát sinh (không gộp). Vẽ
+// thủ công bằng SVG (không qua renderLinesToSVG, vốn là danh sách dọc, không
+// hợp cho dạng lưới) — W tự co giãn theo đúng số cột thật, không giới hạn
+// 760px, để PNG xuất ra không bao giờ cắt mất cột bên phải (mục 9).
+async function buildPOReportSVG(poQuery, matches){
+  const relevant = matches.filter(cp=>cp.section!=='META');
+  const withCode = relevant.find(cp=>cp.itemCode) || relevant[0];
+  const lookup = withCode && withCode.itemCode ? lookupItemByCode(withCode.itemCode) : {status:'not_found'};
+  const itemName = withCode && (lookup.status==='ok'||lookup.status==='missing_recipe') ? lookup.name : '';
+  const recipeVal = withCode ? (withCode.recipe || (lookup.status==='ok' ? lookup.recipe : '')) : '';
+  const headerLines = [
+    ['ITEM CODE', withCode ? (withCode.itemCode||'—') : '—'],
+    ['ITEM NAME', itemName || '—'],
+    ['PO', poQuery],
+    ['RECIPE', recipeVal || '—'],
+  ];
+  const PAD=20, TITLE_H=24, HDRLINE_H=16;
 
+  if(relevant.length===0){
+    const H = PAD*2 + TITLE_H + headerLines.length*HDRLINE_H + 24;
+    const W = 560;
+    let svg = `<svg class="chart" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif"><rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
+    svg += `<text x="${PAD}" y="${PAD+14}" font-size="14" font-weight="700" fill="#0B1220">ILD COFFEE VIETNAM — QUALITY &amp; ACTIVITIES FOLLOW UP</text>`;
+    let hy = PAD+TITLE_H;
+    headerLines.forEach(([label,val])=>{ svg += `<text x="${PAD}" y="${hy+11}" font-size="11"><tspan font-weight="700" fill="#334155">${escapeXml(label)}: </tspan><tspan fill="#0F172A">${escapeXml(val)}</tspan></text>`; hy += HDRLINE_H; });
+    svg += `<text x="${PAD}" y="${hy+16}" font-size="11" fill="#94A3B8">— Không có dữ liệu nào cho PO này —</text></svg>`;
+    return {svg, width:W, height:H};
+  }
+
+  const cols = buildPOGanttColumns(relevant);
+  const dateGroups = groupGanttColsByDate(cols);
+  const cpIndex = {};
+  relevant.forEach(cp=>{ cpIndex[cp.section+'|'+cp.date+'|'+cp.shift] = cp; });
   const bySection = {};
   relevant.forEach(cp=>{ (bySection[cp.section]=bySection[cp.section]||[]).push(cp); });
   const presentSections = PROCESS_TIMELINE_ORDER.filter(id=>bySection[id] && bySection[id].length);
-  if(presentSections.length){
-    lines.push({t:'section', text:'Process Timeline'});
-    presentSections.forEach(id=>{
-      const list = bySection[id].slice().sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
-      const first = list[0], last = list[list.length-1];
-      const sec = sectionById(id);
-      const range = (first===last) ? `${fmtDateVN(first.date)} Ca ${first.shift}` : `${fmtDateVN(first.date)} Ca ${first.shift} → ${fmtDateVN(last.date)} Ca ${last.shift}`;
-      lines.push({t:'row', label: sec?sec.name:id, disp: range, color:'#0F172A'});
-    });
-    lines.push({t:'gap'});
-  }
 
-  for(const id of presentSections){
+  const STICKY_W=190, COL_W=80, HDR_ROW_H=20, BAR_ROW_H=24, TXT_ROW_MIN_H=18, LINE_H=12;
+  const FONT=10;
+  const ctx = getMeasureCtx(FONT);
+  const nCols = Math.max(cols.length,1);
+  const gridW = STICKY_W + COL_W*nCols;
+  const W = PAD*2 + gridW;
+  const colTextW = COL_W - 10;
+
+  const procRows = presentSections.map(id=>{
     const sec = sectionById(id);
-    const list = bySection[id].slice().sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
-    for(const cp of list){
-      lines.push({t:'section', text:`${sec.name} — Ca ${cp.shift} ${fmtDateVN(cp.date)} (QC: ${cp.technician||'—'})`});
-      lines.push(...buildCheckpointFieldLines(sec, cp, qmsOnly));
-      const imgLine = await buildImagesLineForCheckpoint(cp);
-      if(imgLine) lines.push(imgLine);
-      lines.push({t:'gap'});
-    }
+    const list = bySection[id];
+    let startIdx=-1, endIdx=-1;
+    const issueCells = [], actionCells = [];
+    cols.forEach((c,i)=>{
+      const cp = cpIndex[id+'|'+c.date+'|'+c.shift];
+      if(cp){ if(startIdx===-1) startIdx=i; endIdx=i; }
+      const issueTxt = ganttCellText(cp, sec, 'issue');
+      const actionTxt = ganttCellText(cp, sec, 'action');
+      issueCells.push(issueTxt ? issueTxt.split('\n').flatMap(l=>wrapText(l, colTextW, FONT, ctx)) : []);
+      actionCells.push(actionTxt ? actionTxt.split('\n').flatMap(l=>wrapText(l, colTextW, FONT, ctx)) : []);
+    });
+    const issueRowH = Math.max(TXT_ROW_MIN_H, Math.max(1, ...issueCells.map(l=>l.length))*LINE_H + 6);
+    const actionRowH = Math.max(TXT_ROW_MIN_H, Math.max(1, ...actionCells.map(l=>l.length))*LINE_H + 6);
+    return {id, sec, list, startIdx, endIdx, issueCells, actionCells, issueRowH, actionRowH};
+  });
+
+  const gridTop = PAD + TITLE_H + headerLines.length*HDRLINE_H + 12;
+  const dateRowY = gridTop, shiftRowY = gridTop+HDR_ROW_H;
+  let rowY = shiftRowY + HDR_ROW_H;
+  procRows.forEach(pr=>{ pr.barY=rowY; rowY+=BAR_ROW_H; pr.issueY=rowY; rowY+=pr.issueRowH; pr.actionY=rowY; rowY+=pr.actionRowH; });
+  const gridBottom = rowY;
+  const H = gridBottom + PAD;
+  const gx = PAD + STICKY_W;
+
+  let svg = `<svg class="chart" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">`;
+  svg += `<rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/>`;
+  svg += `<text x="${PAD}" y="${PAD+14}" font-size="14" font-weight="700" fill="#0B1220">ILD COFFEE VIETNAM — QUALITY &amp; ACTIVITIES FOLLOW UP</text>`;
+  let hy = PAD+TITLE_H;
+  headerLines.forEach(([label,val])=>{ svg += `<text x="${PAD}" y="${hy+11}" font-size="11"><tspan font-weight="700" fill="#334155">${escapeXml(label)}: </tspan><tspan fill="#0F172A">${escapeXml(val)}</tspan></text>`; hy += HDRLINE_H; });
+
+  // Zebra nền theo từng Process — vẽ TRƯỚC lưới/chữ để không bị đè lên.
+  procRows.forEach((pr,pi)=>{
+    if(pi%2===1) svg += `<rect x="${PAD}" y="${pr.barY}" width="${gridW}" height="${pr.actionY+pr.actionRowH-pr.barY}" fill="#F8FAFC"/>`;
+  });
+  // Header đậm (Date gộp theo nhóm + Ca từng cột).
+  svg += `<rect x="${PAD}" y="${dateRowY}" width="${gridW}" height="${HDR_ROW_H*2}" fill="#0B1220"/>`;
+  svg += `<text x="${PAD+8}" y="${dateRowY+HDR_ROW_H+14}" font-size="10.5" font-weight="700" fill="#ffffff">Process / Information</text>`;
+  let dgx = gx;
+  dateGroups.forEach(g=>{
+    const w = g.span*COL_W;
+    svg += `<text x="${dgx+w/2}" y="${dateRowY+14}" font-size="10" font-weight="700" fill="#ffffff" text-anchor="middle">${escapeXml(fmtDateVN(g.date))}</text>`;
+    dgx += w;
+  });
+  cols.forEach((c,i)=>{
+    svg += `<text x="${gx+i*COL_W+COL_W/2}" y="${shiftRowY+14}" font-size="10" fill="#ffffff" text-anchor="middle">Ca ${c.shift}</text>`;
+  });
+  // Lưới cột dọc xuyên suốt (canh đúng Date/Shift từng hàng bên dưới).
+  for(let i=0;i<=cols.length;i++){
+    const cx = gx+i*COL_W;
+    svg += `<line x1="${cx}" y1="${dateRowY}" x2="${cx}" y2="${gridBottom}" stroke="#E2E8F0" stroke-width="1"/>`;
   }
-  if(relevant.length===0) lines.push({t:'empty', text:'— Không có dữ liệu nào cho PO này —'});
-  lines.push({t:'footer', text:`Xuất lúc: ${fmtDateTimeVN(Date.now())}`});
-  return renderLinesToSVG(lines, W);
+  svg += `<line x1="${PAD}" y1="${dateRowY}" x2="${PAD}" y2="${gridBottom}" stroke="#CBD5E1" stroke-width="1"/>`;
+  svg += `<line x1="${PAD+gridW}" y1="${dateRowY}" x2="${PAD+gridW}" y2="${gridBottom}" stroke="#CBD5E1" stroke-width="1"/>`;
+
+  procRows.forEach(pr=>{
+    svg += `<text x="${PAD+8}" y="${pr.barY+16}" font-size="10.5" font-weight="700" fill="#0B1220">${escapeXml(GANTT_PROCESS_LABELS[pr.id]||pr.id)}</text>`;
+    svg += `<text x="${PAD+8}" y="${pr.issueY+12}" font-size="9.5" fill="#B45309">Issues/Abnormal</text>`;
+    svg += `<text x="${PAD+8}" y="${pr.actionY+12}" font-size="9.5" fill="#15803D">Action</text>`;
+    if(pr.startIdx>=0){
+      const bx = gx+pr.startIdx*COL_W+3, bw = (pr.endIdx-pr.startIdx+1)*COL_W-6;
+      svg += `<rect x="${bx}" y="${pr.barY+4}" width="${bw}" height="${BAR_ROW_H-8}" rx="5" fill="#0D9488"/>`;
+    }
+    cols.forEach((c,i)=>{
+      const cx = gx+i*COL_W+4;
+      let ty = pr.issueY+11;
+      pr.issueCells[i].forEach(l=>{ svg += `<text x="${cx}" y="${ty}" font-size="9.5" fill="#7C3E00">${escapeXml(l)}</text>`; ty+=LINE_H; });
+      let ay = pr.actionY+11;
+      pr.actionCells[i].forEach(l=>{ svg += `<text x="${cx}" y="${ay}" font-size="9.5" fill="#15803D">${escapeXml(l)}</text>`; ay+=LINE_H; });
+    });
+    svg += `<line x1="${PAD}" y1="${pr.actionY+pr.actionRowH}" x2="${PAD+gridW}" y2="${pr.actionY+pr.actionRowH}" stroke="#CBD5E1" stroke-width="1"/>`;
+  });
+
+  svg += `</svg>`;
+  return {svg, width:W, height:H};
 }
 function escapeXml(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -4529,88 +4666,102 @@ function buildIssueActionEditableList(sec, cp, onEdited){
   draw();
   return wrap;
 }
-function buildPOCheckpointCard(sec, cp, qmsOnly, onEdited){
-  const card = el('div',{class:'card'},[
-    el('div',{class:'detailhdr'},[
-      el('h3',{},[`${sec?sec.name:cp.section} — ${fmtDateVN(cp.date)} Ca ${cp.shift}`]),
-      el('span',{class:'pill'},[`QC: ${cp.technician||'—'}`]),
-    ]),
-  ]);
-  if(!sec) return card;
-  const {issueId, actionId} = findIssueActionFieldIds(sec);
-  let any = false;
-  sec.fields.filter(f=>f.id!==issueId && f.id!==actionId).forEach(f=>{
-    if(qmsOnly && !f.isQMS) return;
-    const v = cp.fields[f.id];
-    if(v===undefined||v===null||v==='') return;
-    any = true;
-    let disp = v, cls = '';
-    if(f.type==='boolean'){ disp = boolDisp(f, v); cls = v?'pass':'fail'; }
-    else if(f.type==='number'){ const ok = inSpec(f,v); cls = ok===false?'fail':ok===true?'pass':''; }
-    const label = (qmsOnly && f.qmsLabel) || f.label.split('\n')[0];
-    card.appendChild(el('div',{class:'kv'},[el('span',{class:'k'},[label]), el('span',{class:'v'+(cls?' '+cls:'')},[String(disp)])]));
-  });
-  if(!any) card.appendChild(el('div',{class:'sub', style:'margin:4px 0;'},['Không có dữ liệu chỉ tiêu.']));
-  const imgs = cp.images || [];
-  if(imgs.length){
-    const thumbRow = el('div',{class:'thumbrow', style:'margin-top:10px;'},[]);
-    imgs.forEach(im=>{
-      const a = el('a',{href:imgSrc(im), target:'_blank'},[el('img',{src:imgSrc(im), style:'width:64px;height:64px;object-fit:cover;border-radius:10px;border:1.5px solid var(--line2);'},[])]);
-      thumbRow.appendChild(a);
-    });
-    card.appendChild(thumbRow);
-  }
-  card.appendChild(el('div',{class:'grouphdr'},['Issue / Abnormal & Action']));
-  card.appendChild(buildIssueActionEditableList(sec, cp, onEdited));
-  return card;
-}
-function renderPOTimeline(container, poQuery, matches, qmsOnly, onEdited){
+// Gantt tương tác (mục 1-8): Header 1 lần + bảng Process x Date x Shift LIÊN
+// TỤC, cuộn ngang (.tablescroll) với cột đầu sticky trái. Mỗi ô Issue/Action
+// có checkpoint đứng sau đều bấm được -> mở modal sửa (dùng lại
+// buildIssueActionEditableList/openModal có sẵn) -> ghi thẳng vào checkpoint
+// gốc, KHÔNG tạo bản ghi Report/Gantt riêng nào (mục 6/7).
+function renderPOTimeline(container, poQuery, matches, onEdited){
   container.innerHTML = '';
   const relevant = matches.filter(cp=>cp.section!=='META');
+  const withCode = relevant.find(cp=>cp.itemCode) || relevant[0];
+  const lookup = withCode && withCode.itemCode ? lookupItemByCode(withCode.itemCode) : {status:'not_found'};
+  const itemName = withCode && (lookup.status==='ok'||lookup.status==='missing_recipe') ? lookup.name : '';
+  const recipeVal = withCode ? (withCode.recipe || (lookup.status==='ok' ? lookup.recipe : '')) : '';
+
+  const hdr = el('div',{class:'card'},[
+    el('div',{class:'card-h'},['QUALITY & ACTIVITIES FOLLOW UP', el('div',{class:'rule'})]),
+    el('div',{class:'kv'},[el('span',{class:'k'},['ITEM CODE']), el('span',{class:'v'},[withCode ? (withCode.itemCode||'—') : '—'])]),
+    el('div',{class:'kv'},[el('span',{class:'k'},['ITEM NAME']), el('span',{class:'v'},[itemName||'—'])]),
+    el('div',{class:'kv'},[el('span',{class:'k'},['PO']), el('span',{class:'v'},[poQuery])]),
+    el('div',{class:'kv'},[el('span',{class:'k'},['RECIPE']), el('span',{class:'v'},[recipeVal||'—'])]),
+  ]);
+  container.appendChild(hdr);
   if(relevant.length===0){
     container.appendChild(el('div',{class:'sub', style:'padding:16px;margin:0;'},['Không có dữ liệu.']));
     return;
   }
-  // ---- Header: PO / Item Code / Item Name / Recipe — hiển thị 1 LẦN DUY
-  // NHẤT (không lặp lại trong từng Process bên dưới) ----
-  const withCode = relevant.find(cp=>cp.itemCode) || relevant[0];
-  const lookup = withCode.itemCode ? lookupItemByCode(withCode.itemCode) : {status:'not_found'};
-  const itemName = (lookup.status==='ok'||lookup.status==='missing_recipe') ? lookup.name : '';
-  const recipeVal = withCode.recipe || (lookup.status==='ok' ? lookup.recipe : '');
-  const hdr = el('div',{class:'card'},[
-    el('div',{class:'card-h'},[`PO ${poQuery}`, el('div',{class:'rule'})]),
-    el('div',{class:'kv'},[el('span',{class:'k'},['Item Code']), el('span',{class:'v'},[withCode.itemCode||'—'])]),
-    el('div',{class:'kv'},[el('span',{class:'k'},['Item Name']), el('span',{class:'v'},[itemName||'—'])]),
-    el('div',{class:'kv'},[el('span',{class:'k'},['Recipe']), el('span',{class:'v'},[recipeVal||'—'])]),
-    el('div',{class:'kv'},[el('span',{class:'k'},['Số điểm kiểm tra']), el('span',{class:'v'},[String(relevant.length)])]),
-  ]);
-  container.appendChild(hdr);
 
-  // ---- Process Timeline: Date+Shift đầu/cuối theo từng Công đoạn có dữ liệu ----
+  const cols = buildPOGanttColumns(relevant);
+  const dateGroups = groupGanttColsByDate(cols);
+  const cpIndex = {};
+  relevant.forEach(cp=>{ cpIndex[cp.section+'|'+cp.date+'|'+cp.shift] = cp; });
   const bySection = {};
   relevant.forEach(cp=>{ (bySection[cp.section]=bySection[cp.section]||[]).push(cp); });
   const presentSections = PROCESS_TIMELINE_ORDER.filter(id=>bySection[id] && bySection[id].length);
-  if(presentSections.length){
-    const tlCard = el('div',{class:'card'},[el('div',{class:'card-h'},['Process Timeline', el('div',{class:'rule'})])]);
-    presentSections.forEach(id=>{
-      const list = bySection[id].slice().sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
-      const first = list[0], last = list[list.length-1];
-      const sec = sectionById(id);
-      const range = (first===last) ? `${fmtDateVN(first.date)} Ca ${first.shift}` : `${fmtDateVN(first.date)} Ca ${first.shift} → ${fmtDateVN(last.date)} Ca ${last.shift}`;
-      tlCard.appendChild(el('div',{class:'kv'},[el('span',{class:'k'},[sec?sec.name:id]), el('span',{class:'v'},[range])]));
-    });
-    container.appendChild(tlCard);
+
+  const scrollWrap = el('div',{class:'tablescroll', style:'margin-top:10px;'},[]);
+  const table = el('table',{class:'gantt-table'},[]);
+  scrollWrap.appendChild(table);
+  container.appendChild(scrollWrap);
+
+  const thead = el('thead',{},[]);
+  const dateRow = el('tr',{},[el('th',{class:'gantt-sticky'},['Process / Information'])]);
+  dateGroups.forEach(g=>dateRow.appendChild(el('th',{colspan:String(g.span)},[fmtDateVN(g.date)])));
+  const shiftRow = el('tr',{},[el('th',{class:'gantt-sticky'},[''])]);
+  cols.forEach(c=>shiftRow.appendChild(el('th',{},[`Ca ${c.shift}`])));
+  thead.appendChild(dateRow); thead.appendChild(shiftRow);
+  table.appendChild(thead);
+
+  const tbody = el('tbody',{},[]);
+  table.appendChild(tbody);
+
+  function openEditModal(cp, sec, titleText){
+    const body = el('div',{},[]);
+    let modalRef = null;
+    const editList = buildIssueActionEditableList(sec, cp, ()=>{ if(modalRef) modalRef.close(); if(onEdited) onEdited(); });
+    body.appendChild(el('div',{class:'sub', style:'margin:0 0 10px;'},[`QC: ${cp.technician||'—'}`]));
+    body.appendChild(editList);
+    modalRef = openModal(titleText, body);
   }
 
-  // ---- Chi tiết từng điểm kiểm tra: theo đúng thứ tự Công đoạn rồi tới
-  // thời gian — Issue/Action gắn liền checkpoint phát sinh (Process+Date+
-  // Shift), không gộp mất gốc. ----
-  presentSections.forEach(id=>{
+  presentSections.forEach((id,pi)=>{
     const sec = sectionById(id);
-    const list = bySection[id].slice().sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
-    list.forEach(cp=>{
-      container.appendChild(buildPOCheckpointCard(sec, cp, qmsOnly, onEdited));
+    const list = bySection[id];
+    let startIdx=-1, endIdx=-1;
+    cols.forEach((c,i)=>{ if(list.some(cp=>cp.date===c.date && cp.shift===c.shift)){ if(startIdx===-1) startIdx=i; endIdx=i; } });
+    const altCls = pi%2===1 ? ' alt' : '';
+
+    const barRow = el('tr',{class:altCls.trim()},[el('th',{class:'gantt-sticky'},[GANTT_PROCESS_LABELS[id]||id])]);
+    cols.forEach((c,i)=>{
+      if(i===startIdx){
+        barRow.appendChild(el('td',{colspan:String(endIdx-startIdx+1), class:'gantt-bar-cell'},[el('div',{class:'gantt-bar'},[])]));
+      } else if(i>startIdx && i<=endIdx){
+        // đã gộp vào ô colspan phía trên (thanh Gantt liên tục), bỏ qua.
+      } else {
+        barRow.appendChild(el('td',{class:'gantt-empty'},[]));
+      }
     });
+    tbody.appendChild(barRow);
+
+    const issueRow = el('tr',{class:altCls.trim()},[el('th',{class:'gantt-sticky sub-label'},['Issues/Abnormal'])]);
+    const actionRow = el('tr',{class:altCls.trim()},[el('th',{class:'gantt-sticky sub-label'},['Action'])]);
+    cols.forEach(c=>{
+      const cp = cpIndex[id+'|'+c.date+'|'+c.shift];
+      const issueTxt = ganttCellText(cp, sec, 'issue');
+      const actionTxt = ganttCellText(cp, sec, 'action');
+      const issueCell = el('td',{class:'gantt-cell'+(cp?' clickable':'')},[issueTxt||'']);
+      const actionCell = el('td',{class:'gantt-cell'+(cp?' clickable':'')},[actionTxt||'']);
+      if(cp){
+        const titleText = `${GANTT_PROCESS_LABELS[id]||id} — ${fmtDateVN(c.date)} Ca ${c.shift}`;
+        issueCell.addEventListener('click', ()=>openEditModal(cp, sec, titleText));
+        actionCell.addEventListener('click', ()=>openEditModal(cp, sec, titleText));
+      }
+      issueRow.appendChild(issueCell);
+      actionRow.appendChild(actionCell);
+    });
+    tbody.appendChild(issueRow);
+    tbody.appendChild(actionRow);
   });
 }
 function renderReport(){
@@ -4636,6 +4787,10 @@ function renderReport(){
   const qmsOnlyRow = el('label',{style:'display:flex;align-items:center;gap:7px;margin:0 0 10px;font-size:12.5px;'},[
     qmsOnlyChk, 'Chỉ hiện chỉ tiêu QMS trong báo cáo ảnh (đã đánh dấu "Xuất trong báo cáo QMS" ở tab Specs)',
   ]);
+  // Chế độ "Theo PO" giờ là Gantt Process x Date x Shift (không còn liệt kê
+  // từng chỉ tiêu/công đoạn) nên lọc QMS-only không còn áp dụng được — chỉ
+  // hiện ô này ở chế độ "Theo ca" (không đụng gì tới hành vi Theo ca).
+  if(mode==='po') qmsOnlyRow.style.display = 'none';
   card.appendChild(qmsOnlyRow);
   const pickerBox = el('div',{},[]);
   card.appendChild(pickerBox);
@@ -4727,20 +4882,18 @@ function renderReport(){
       const matches = allCheckpoints.filter(rec=>matchPO(rec, q));
       matches.sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
       if(matches.length===0){ toast('Không tìm thấy PO này trong dữ liệu'); previewWrap.innerHTML=''; currentGen=null; return; }
-      // Xem trước dạng HTML tương tác (PO Production Timeline, có nút Sửa
-      // Issue/Action ngay tại chỗ) — KHÁC với ảnh SVG xuất ra (PNG/Chia sẻ),
-      // vốn chỉ là 1 bản chụp tĩnh nên không thể có nút bấm. doSearch chính
-      // nó là callback "đã sửa xong, vẽ lại" truyền cho khối Sửa Issue/Action.
-      renderPOTimeline(previewWrap, q, matches, qmsOnlyChk.checked, doSearch);
-      const {svg,width,height} = await buildPOReportSVG(q, matches, qmsOnlyChk.checked);
-      currentGen = ()=>({svg,width,height, filename:`Shiftly_PO_${q}.png`, printHtml:()=>buildPrintablePOReportHTML(q,matches),
-        htmlReport:()=>buildFullHtmlPOReport(q,matches),
+      // Xem trước dạng HTML tương tác (Gantt Process x Date x Shift, ô Issue/
+      // Action bấm được để sửa ngay tại chỗ) — KHÁC với ảnh SVG xuất ra (PNG/
+      // Chia sẻ), vốn chỉ là 1 bản chụp tĩnh nên không thể có nút bấm.
+      // doSearch chính nó là callback "đã sửa xong, vẽ lại" truyền cho khối
+      // Sửa Issue/Action. buildPOReportSVG tự co giãn theo đúng số cột thật
+      // (không giới hạn 760px) nên PNG luôn chụp đủ toàn bộ chiều ngang.
+      renderPOTimeline(previewWrap, q, matches, doSearch);
+      const {svg,width,height} = await buildPOReportSVG(q, matches);
+      currentGen = ()=>({svg,width,height, filename:`Shiftly_PO_${q}.png`,
         checkpointList: matches, headerTitle:`ILD Coffee — Truy xuất PO ${q}` });
     }
     findBtn.addEventListener('click', doSearch);
-    // Đổi chế độ QMS-only chỉ vẽ lại nếu đã có 1 lần tìm kiếm trước đó
-    // (currentGen khác null) — chưa tìm gì thì không có PO nào để vẽ lại.
-    qmsOnlyChk.addEventListener('change', ()=>{ if(currentGen) doSearch(); });
   }
 
   pngBtn.addEventListener('click', async ()=>{
@@ -6067,10 +6220,10 @@ function renderGuide(){
     <p>Mỗi chỉ tiêu trong tab Specs có 2 nút ▲ ▼ để di chuyển lên/xuống trong danh sách của công đoạn đó — thứ tự này cũng là thứ tự hiển thị ở tab Nhập liệu.</p>
     <h4>16. Báo cáo theo ca — Ngày + Ca độc lập, xem "Tất cả"</h4>
     <p>Chế độ <b>"Theo ca"</b> giờ tách thành 2 lựa chọn riêng: ô <b>Ngày</b> và ô <b>Ca</b> (Ca 1 / Ca 2 / Ca 3 / <b>Tất cả</b>) — mặc định trỏ sẵn tới Ngày+Ca gần nhất đang có dữ liệu, nhưng có thể tự chọn bất kỳ tổ hợp nào. Chọn <b>"Tất cả"</b> sẽ hiển thị lần lượt báo cáo Ca 1 → Ca 2 → Ca 3 của đúng Ngày đã chọn trong CÙNG 1 ảnh, mỗi ca phân tách rõ bằng 1 dải tiêu đề đậm màu; ca nào chưa có dữ liệu vẫn hiện, chỉ ghi "Chưa có dữ liệu". Trong mỗi công đoạn, Issue/Abnormal và Action giờ hiển thị <b>song song 2 cột trong cùng 1 khung</b> thay vì lẫn vào các chỉ tiêu khác, dễ thấy ngay Issue nào đi với Action nào.</p>
-    <h4>16a. Báo cáo theo PO — PO Production Timeline (tab Báo cáo)</h4>
-    <p>Chế độ <b>"Theo PO"</b>: nhập mã PO → app gom tất cả điểm kiểm tra liên quan (nhiều ca, nhiều công đoạn) thành 1 <b>PO Production Timeline</b>. Phần đầu chỉ hiện <b>Item Code / Item Name / Recipe</b> đúng 1 lần (không lặp lại ở từng công đoạn), tiếp theo là bảng <b>Process Timeline</b> tóm tắt Ngày+Ca đầu tiên → cuối cùng của mỗi công đoạn thực sự có dữ liệu, theo đúng thứ tự ROA → EXT → EVA → FOAMING → FD → FP → REWORK. Bên dưới là chi tiết từng điểm kiểm tra kèm Issue/Action đúng của checkpoint đó — khung xem trước cho phép bấm <b>"✎ Sửa"</b> ngay tại Issue/Action rồi "💾 Lưu": nội dung được ghi thẳng vào checkpoint gốc (không tạo báo cáo riêng), nên tab Nhập liệu và Data Log đều thấy thay đổi ngay lập tức. Ảnh PNG/Chia sẻ xuất ra từ chế độ này (nút "🖼️ Tải ảnh PNG"/"📤 Chia sẻ ảnh") theo đúng bố cục Timeline này; "📊 Excel theo mẫu"/"📄 PDF theo mẫu" (Process/QMS — xem mục 34) không đổi.</p>
-    <h4>16b. Ảnh đính kèm full chiều rộng + lọc chỉ tiêu QMS trong báo cáo ảnh</h4>
-    <p>Ảnh đính kèm trong báo cáo ảnh (PNG/chia sẻ) giờ hiển thị lớn hơn hẳn — tối đa 2 ảnh/hàng, mỗi ảnh chia đều chiều rộng báo cáo; nếu lẻ 1 ảnh ở hàng cuối, ảnh đó tự kéo full chiều rộng thay vì để trống 1 nửa như trước. Ô <b>"Chỉ hiện chỉ tiêu QMS trong báo cáo ảnh"</b> (phía trên khung xem trước) cho chuyển qua lại giữa 2 chế độ: bỏ tick (mặc định) hiện mọi chỉ tiêu đã nhập như trước giờ; tick vào chỉ còn các chỉ tiêu đã đánh dấu "Xuất trong báo cáo QMS" ở tab Specs (dùng chung đúng cấu hình với nút "Excel/PDF theo mẫu") — tiện khi cần báo cáo ảnh gọn, chỉ có số liệu QMS thay vì đầy đủ mọi Parameters đã nhập.</p>
+    <h4>16a. Báo cáo theo PO — Gantt Process x Date x Shift (tab Báo cáo)</h4>
+    <p>Chế độ <b>"Theo PO"</b>: nhập mã PO → app dựng 1 bảng <b>Gantt</b> giống mẫu Excel "QUALITY & ACTIVITIES FOLLOW UP". Phần đầu chỉ hiện <b>ITEM CODE / ITEM NAME / PO / RECIPE</b> đúng 1 lần. Bên dưới là lưới: mỗi cột là 1 <b>Ngày + Ca</b>, sinh <b>LIÊN TỤC</b> từ checkpoint sớm nhất tới muộn nhất của PO (kể cả những Ca không có dữ liệu) để thanh Gantt thể hiện đúng khoảng chạy thật; mỗi Công đoạn thực sự có dữ liệu chiếm 3 hàng: thanh Gantt (kéo dài từ Ngày+Ca đầu tới cuối), rồi <b>Issues/Abnormal</b> và <b>Action</b> — nội dung nằm ĐÚNG ô Ngày+Ca của checkpoint phát sinh, không gộp chung. Bảng cuộn ngang được (<b>overflow-x: auto</b>), cột đầu ("Process/Information") cố định khi cuộn để luôn thấy tên công đoạn. Bấm vào 1 ô Issue/Action có dữ liệu (viền sáng lên khi rê chuột) sẽ mở popup sửa (nút "✎ Sửa" → 2 ô nhập → "💾 Lưu") — ghi thẳng vào checkpoint gốc (không tạo báo cáo riêng), nên tab Nhập liệu và Data Log đều thấy thay đổi ngay lập tức. Ảnh PNG/Chia sẻ xuất ra từ chế độ này tự co giãn theo đúng số cột thật (không giới hạn độ rộng cố định như trước), luôn thấy đủ hết các cột bên phải; "📊 Excel theo mẫu"/"📄 PDF theo mẫu" (Process/QMS — xem mục 34) không đổi.</p>
+    <h4>16b. Ảnh đính kèm full chiều rộng + lọc chỉ tiêu QMS trong báo cáo ảnh (Theo ca)</h4>
+    <p>Ảnh đính kèm trong báo cáo ảnh <b>Theo ca</b> (PNG/chia sẻ) hiển thị lớn — tối đa 2 ảnh/hàng, mỗi ảnh chia đều chiều rộng báo cáo; nếu lẻ 1 ảnh ở hàng cuối, ảnh đó tự kéo full chiều rộng thay vì để trống 1 nửa như trước. Ô <b>"Chỉ hiện chỉ tiêu QMS trong báo cáo ảnh"</b> (phía trên khung xem trước, chỉ hiện ở chế độ Theo ca) cho chuyển qua lại giữa 2 chế độ: bỏ tick (mặc định) hiện mọi chỉ tiêu đã nhập như trước giờ; tick vào chỉ còn các chỉ tiêu đã đánh dấu "Xuất trong báo cáo QMS" ở tab Specs (dùng chung đúng cấu hình với nút "Excel/PDF theo mẫu") — tiện khi cần báo cáo ảnh gọn, chỉ có số liệu QMS thay vì đầy đủ mọi Parameters đã nhập. Báo cáo <b>Theo PO</b> (Gantt, mục 16a) không hiện từng chỉ tiêu/ảnh đính kèm nữa — chỉ tập trung vào tiến độ Process theo thời gian và Issue/Action.</p>
     <h4>17. Định dạng ngày DD/MM/YYYY</h4>
     <p>Toàn bộ ngày hiển thị trong app (và cột Date khi xuất CSV/Excel) đều theo định dạng <b>DD/MM/YYYY</b> (VD: 17/07/2026). Khi nhập lại file CSV cũ có định dạng khác, app vẫn tự nhận diện được.</p>
     <h4>18. Xuất dữ liệu nhiều định dạng (CSV / Excel / JSON)</h4>

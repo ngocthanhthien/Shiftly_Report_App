@@ -230,18 +230,30 @@ test('Báo cáo tab (Theo ca): Ngày và Ca là 2 control độc lập; chọn "
   } finally { dom.window.close(); }
 });
 
-// ===================== 3) Report tab "Theo PO": PO Production Timeline =====================
-
-async function seedPOTimelineData(w) {
-  w.eval(`ITEM_CODE_LIST = [{type:'FGs', itemCode:'11000011', name:'Coffee X', recipe:'452'}];`);
+// ===================== 3) Report tab "Theo PO": Gantt (Process x Date x Shift) =====================
+// Scenario straight out of the prompt's own required test case:
+//   ROA: 22/07 Ca1, 22/07 Ca3        EXT: 23/07 Ca1, 23/07 Ca3
+//   EVA: 23/07 Ca1, 24/07 Ca1        FD:  23/07 Ca2, 24/07 Ca2
+//   FP:  23/07 Ca3, 24/07 Ca2
+// Expected CONTINUOUS timeline: 22/07(1,2,3) 23/07(1,2,3) 24/07(1,2) = 8 cols
+// (columns 0..7), even though several of those Date+Shift combos have no
+// checkpoint at all — the Gantt must still generate them so bars show the
+// true run length, not just the data points.
+async function seedPOGanttData(w) {
+  w.eval(`ITEM_CODE_LIST = [{type:'FGs', itemCode:'12000056', name:'Freeze Dried Instant Coffee FDR2 452', recipe:'452'}];`);
   await w.eval(`(async function(){
-    const roa1 = blankCheckpoint('2026-07-22','1','ROA','712600555','QA');
-    roa1.itemCode='11000011'; roa1.recipe='452'; roa1.fields={};
-    const roa2 = blankCheckpoint('2026-07-23','1','ROA','712600555','QA');
-    roa2.fields={};
-    const ext1 = blankCheckpoint('2026-07-23','1','EXT','712600555','QA');
-    ext1.fields={}; ext1.fields[ISSUE_PAIRS_KEY] = [{issue:'Sediment high', action:'Check centrifuge'}];
-    await idbPut('shifts', roa1); await idbPut('shifts', roa2); await idbPut('shifts', ext1);
+    const mk = (date, shift, section) => blankCheckpoint(date, shift, section, '612600069', 'QA');
+    const roa1 = mk('2026-07-22','1','ROA'); roa1.itemCode='12000056'; roa1.recipe='452'; roa1.fields={};
+    const roa3 = mk('2026-07-22','3','ROA'); roa3.fields={};
+    const ext1 = mk('2026-07-23','1','EXT'); ext1.fields={};
+    const ext3 = mk('2026-07-23','3','EXT'); ext3.fields={};
+    const eva1 = mk('2026-07-23','1','EVA'); eva1.fields={};
+    const eva2 = mk('2026-07-24','1','EVA'); eva2.fields={}; eva2.fields[ISSUE_PAIRS_KEY]=[{issue:'Sediment high', action:'Check centrifuge'}];
+    const fd2 = mk('2026-07-23','2','FD'); fd2.fields={};
+    const fd3 = mk('2026-07-24','2','FD'); fd3.fields={};
+    const fp3 = mk('2026-07-23','3','FP'); fp3.fields={};
+    const fp4 = mk('2026-07-24','2','FP'); fp4.fields={};
+    for (const cp of [roa1,roa3,ext1,ext3,eva1,eva2,fd2,fd3,fp3,fp4]) await idbPut('shifts', cp);
     await refreshCache();
   })()`);
 }
@@ -253,89 +265,125 @@ function doSearchPO(doc, w, q) {
   const findBtn = [...doc.querySelectorAll('#view-report button')].find(b => b.textContent.includes('Tìm & Tạo'));
   findBtn.click();
 }
-function poCardWithHeading(doc, textFragment) {
-  return [...doc.querySelectorAll('#view-report .reportcard .card')].find(c => {
-    const h3 = c.querySelector('h3');
-    return h3 && h3.textContent.includes(textFragment);
+function ganttBarRowInfo(doc, processLabel) {
+  const rows = [...doc.querySelectorAll('#view-report .gantt-table tbody tr')];
+  const row = rows.find(r => {
+    const th = r.querySelector('th.gantt-sticky');
+    return th && th.textContent.trim() === processLabel;
   });
+  if (!row) return null;
+  const dataCells = [...row.children].slice(1); // drop the sticky <th>
+  let startIdx = -1, span = 1;
+  dataCells.forEach((td, i) => { if (td.classList.contains('gantt-bar-cell')) { startIdx = i; span = parseInt(td.getAttribute('colspan') || '1', 10); } });
+  return { startIdx, endIdx: startIdx + span - 1 };
+}
+function ganttTextRow(doc, processLabel, subLabel) {
+  const rows = [...doc.querySelectorAll('#view-report .gantt-table tbody tr')];
+  // Rows for 1 process appear in order: bar row (th=label), issue row (th="Issues/Abnormal"), action row (th="Action").
+  const barIdx = rows.findIndex(r => { const th = r.querySelector('th.gantt-sticky'); return th && th.textContent.trim() === processLabel; });
+  if (barIdx === -1) return null;
+  const offset = subLabel === 'Issues/Abnormal' ? 1 : 2;
+  return rows[barIdx + offset];
 }
 
-test('Báo cáo tab (Theo PO): header hiện Item Code/Item Name/Recipe 1 lần, Process Timeline đúng thứ tự + khoảng Date/Shift, Issue/Action gắn đúng checkpoint gốc', async () => {
+test('Báo cáo tab (Theo PO): timeline liên tục Date x Shift, thứ tự Process, và Gantt bar đúng khoảng đầu/cuối như mẫu Excel', async () => {
   const {dom, w, errors} = await boot();
   try {
     const doc = w.document;
-    await seedPOTimelineData(w);
+    await seedPOGanttData(w);
     w.showTab('report');
     await new Promise(r => setTimeout(r, 80));
-    doSearchPO(doc, w, '712600555');
+    doSearchPO(doc, w, '612600069');
     await new Promise(r => setTimeout(r, 150));
 
-    const previewTxt = doc.querySelector('#view-report .reportcard').textContent;
-    // Header shown once.
-    assert.ok(previewTxt.includes('11000011') && previewTxt.includes('Coffee X') && previewTxt.includes('452'), 'header must show Item Code/Item Name/Recipe');
-    const nameOccurrences = previewTxt.split('Coffee X').length - 1;
-    assert.equal(nameOccurrences, 1, 'Item Name must appear exactly ONCE (header only), not repeated per checkpoint card');
+    const headerTxt = doc.querySelector('#view-report .card').textContent;
+    assert.ok(headerTxt.includes('12000056') && headerTxt.includes('Freeze Dried Instant Coffee FDR2 452') && headerTxt.includes('612600069') && headerTxt.includes('452'),
+      'header must show ITEM CODE/ITEM NAME/PO/RECIPE');
 
-    // Process Timeline: ROA range spans 22/07 -> 23/07, EXT is a single point (no arrow).
-    const timelineCard = [...doc.querySelectorAll('#view-report .reportcard .card')].find(c => c.textContent.includes('Process Timeline'));
-    assert.ok(timelineCard, 'a "Process Timeline" card must exist');
-    assert.ok(timelineCard.textContent.includes('22/07/2026 Ca 1 → 23/07/2026 Ca 1'), 'ROA must show its first->last Date+Shift range');
-    assert.ok(timelineCard.textContent.includes('23/07/2026 Ca 1') && !timelineCard.textContent.includes('23/07/2026 Ca 1 → 23/07/2026 Ca 1'), 'EXT (single checkpoint) must show one Date+Shift, not a self-range');
+    // 8 continuous Date+Shift columns (22/07 x3, 23/07 x3, 24/07 x2), not
+    // just the 2 data points per process.
+    const shiftHeaders = [...doc.querySelectorAll('#view-report .gantt-table thead tr')][1];
+    const shiftCells = [...shiftHeaders.children].slice(1);
+    assert.deepEqual(shiftCells.map(c => c.textContent.trim()), ['Ca 1','Ca 2','Ca 3','Ca 1','Ca 2','Ca 3','Ca 1','Ca 2']);
+    const dateHeaders = [...doc.querySelectorAll('#view-report .gantt-table thead tr')][0];
+    const dateCells = [...dateHeaders.children].slice(1);
+    assert.deepEqual(dateCells.map(c => ({txt:c.textContent.trim(), span:c.getAttribute('colspan')})),
+      [{txt:'22/07/2026', span:'3'}, {txt:'23/07/2026', span:'3'}, {txt:'24/07/2026', span:'2'}]);
 
-    // Process order: ROA's detail card(s) must appear before EXT's in the DOM.
-    const roaCard = poCardWithHeading(doc, 'Rang (ROA)');
-    const extCard = poCardWithHeading(doc, 'Trích ly (EXT)');
-    assert.ok(roaCard && extCard, 'both ROA and EXT detail cards must render');
-    const allCards = [...doc.querySelectorAll('#view-report .reportcard .card')];
-    assert.ok(allCards.indexOf(roaCard) < allCards.indexOf(extCard), 'ROA must be listed before EXT (PROCESS_TIMELINE_ORDER)');
+    // Process order: only ROA/EXT/EVA/FD/FP have data -> must render, in that order, no FOAMING/REWORK.
+    const processLabels = [...doc.querySelectorAll('#view-report .gantt-table tbody th.gantt-sticky')]
+      .map(th => th.textContent.trim()).filter(t => t && t !== 'Issues/Abnormal' && t !== 'Action');
+    assert.deepEqual(processLabels, ['ROASTING','EXTRACTION','EVAPORATION','FREEZE DRYING','FILLING & PACKING']);
 
-    // Issue/Action must be attached to the EXT card (where it actually happened), not ROA, not merged away.
-    assert.ok(extCard.textContent.includes('Sediment high') && extCard.textContent.includes('Check centrifuge'), 'EXT card must show its own Issue/Action pair');
-    const roaCards = allCards.filter(c => (c.querySelector('h3')||{}).textContent && c.querySelector('h3').textContent.includes('Rang (ROA)'));
-    assert.equal(roaCards.length, 2, 'both ROA checkpoints (22/07 and 23/07) must render their own detail card');
-    roaCards.forEach(c => assert.ok(!c.textContent.includes('Sediment high'), 'no ROA card must show an Issue/Action that belongs to EXT'));
-    // Not asserting errors.length===0 — see the canvas-measurement note above.
+    // Gantt bars: column indices are 0-based across the 8-column timeline above.
+    assert.deepEqual(ganttBarRowInfo(doc, 'ROASTING'), {startIdx:0, endIdx:2}, 'ROA: 22/07 Ca1 -> 22/07 Ca3');
+    assert.deepEqual(ganttBarRowInfo(doc, 'EXTRACTION'), {startIdx:3, endIdx:5}, 'EXT: 23/07 Ca1 -> 23/07 Ca3');
+    assert.deepEqual(ganttBarRowInfo(doc, 'EVAPORATION'), {startIdx:3, endIdx:6}, 'EVA: 23/07 Ca1 -> 24/07 Ca1');
+    assert.deepEqual(ganttBarRowInfo(doc, 'FREEZE DRYING'), {startIdx:4, endIdx:7}, 'FD: 23/07 Ca2 -> 24/07 Ca2');
+    assert.deepEqual(ganttBarRowInfo(doc, 'FILLING & PACKING'), {startIdx:5, endIdx:7}, 'FP: 23/07 Ca3 -> 24/07 Ca2');
+
+    // Issue/Action must land in EVA's own 24/07 Ca1 column (index 6), not any other column/process.
+    const evaIssueRow = ganttTextRow(doc, 'EVAPORATION', 'Issues/Abnormal');
+    const evaActionRow = ganttTextRow(doc, 'EVAPORATION', 'Action');
+    const evaIssueCells = [...evaIssueRow.children].slice(1);
+    const evaActionCells = [...evaActionRow.children].slice(1);
+    assert.equal(evaIssueCells[6].textContent.trim(), 'Sediment high');
+    assert.equal(evaActionCells[6].textContent.trim(), 'Check centrifuge');
+    evaIssueCells.forEach((c,i) => { if (i!==6) assert.equal(c.textContent.trim(), '', `EVA Issues column ${i} must be empty`); });
+    const roaIssueRow = ganttTextRow(doc, 'ROASTING', 'Issues/Abnormal');
+    assert.ok(![...roaIssueRow.children].some(c => c.textContent.includes('Sediment high')), 'ROA must not show an Issue that belongs to EVA');
+    // Not asserting errors.length===0 — renderReport() also draws the SVG
+    // export preview underneath the Gantt via buildPOReportSVG, which uses
+    // <canvas> for text wrapping (unavailable in jsdom, see note above).
   } finally { dom.window.close(); }
 });
 
-test('Báo cáo tab (Theo PO): sửa Issue/Action ngay tại báo cáo ghi NGƯỢC vào checkpoint gốc — Input tab và Data Log đều thấy thay đổi, không tạo bản ghi Report riêng', async () => {
+test('Báo cáo tab (Theo PO): bấm ô Issue/Action mở modal sửa, ghi NGƯỢC vào checkpoint gốc — Input tab và Data Log đều thấy thay đổi, không tạo bản ghi Report riêng', async () => {
   const {dom, w, errors} = await boot();
   try {
     const doc = w.document;
-    await seedPOTimelineData(w);
+    await seedPOGanttData(w);
     w.showTab('report');
     await new Promise(r => setTimeout(r, 80));
-    doSearchPO(doc, w, '712600555');
+    doSearchPO(doc, w, '612600069');
     await new Promise(r => setTimeout(r, 150));
 
-    const extCard = poCardWithHeading(doc, 'Trích ly (EXT)');
-    assert.ok(extCard, 'EXT detail card must exist');
-    const editBtn = [...extCard.querySelectorAll('button')].find(b => b.textContent.includes('Sửa'));
-    assert.ok(editBtn, '"✎ Sửa" button must exist on the Issue/Action block');
-    editBtn.click();
+    const evaIssueRow = ganttTextRow(doc, 'EVAPORATION', 'Issues/Abnormal');
+    const evaIssueCells = [...evaIssueRow.children].slice(1);
+    const cell = evaIssueCells[6]; // 24/07 Ca1, the only EVA checkpoint carrying an Issue/Action
+    assert.ok(cell.classList.contains('clickable'), 'a cell backed by a checkpoint must be clickable');
+    cell.click();
 
-    const textareas = extCard.querySelectorAll('textarea');
-    assert.equal(textareas.length, 2, 'editing must open 2 textareas: Issue and Action');
+    const modal = doc.querySelector('.modal-card');
+    assert.ok(modal, 'clicking the cell must open the edit modal');
+    // The modal opens showing the pair read-only (buildIssueActionEditableList,
+    // reused as-is) with its own "✎ Sửa" button — click it to reveal the 2 textareas.
+    const innerEditBtn = [...modal.querySelectorAll('button')].find(b => b.textContent.includes('Sửa'));
+    assert.ok(innerEditBtn, 'the modal must show the existing "✎ Sửa" control for this pair');
+    innerEditBtn.click();
+    const textareas = modal.querySelectorAll('textarea');
+    assert.equal(textareas.length, 2, 'the modal must open 2 textareas: Issue and Action');
     textareas[0].value = 'Sediment cao bất thường (đã sửa)';
     textareas[1].value = 'Đã kiểm tra ly tâm và điều chỉnh lại';
-    const saveBtn = [...extCard.querySelectorAll('button')].find(b => b.textContent.includes('Lưu'));
+    const saveBtn = [...modal.querySelectorAll('button')].find(b => b.textContent.includes('Lưu'));
     saveBtn.click();
     await new Promise(r => setTimeout(r, 150));
 
     // 1) The underlying checkpoint itself was updated (no separate Report record).
-    const savedCp = w.eval("allCheckpoints.find(c=>c.section==='EXT' && c.po==='712600555')");
-    const savedCpJson = evalJson(w, "allCheckpoints.find(c=>c.section==='EXT' && c.po==='712600555')");
+    const savedCpJson = evalJson(w, "allCheckpoints.find(c=>c.section==='EVA' && c.po==='612600069' && c.date==='2026-07-24')");
     assert.deepEqual(savedCpJson.fields[w.eval('ISSUE_PAIRS_KEY')], [{issue:'Sediment cao bất thường (đã sửa)', action:'Đã kiểm tra ly tâm và điều chỉnh lại'}]);
-    assert.equal(savedCpJson.fields.EXT_ISSUE, 'Sediment cao bất thường (đã sửa)', 'must sync back into the legacy EXT_ISSUE field too');
+    assert.equal(savedCpJson.fields.EVA_ISSUE, 'Sediment cao bất thường (đã sửa)', 'must sync back into the legacy EVA_ISSUE field too');
+    const savedKey = savedCpJson.key;
 
-    // 2) The Report preview itself updates immediately (re-drawn via onEdited).
-    const reportTxtAfter = doc.querySelector('#view-report .reportcard').textContent;
-    assert.ok(reportTxtAfter.includes('Sediment cao bất thường (đã sửa)'), 'Report preview must reflect the edit immediately');
+    // 2) The modal closes and the Gantt itself updates immediately (re-drawn via onEdited).
+    assert.ok(!doc.querySelector('.modal-card'), 'the modal must close after saving');
+    const reportTxtAfter = doc.querySelector('#view-report').textContent;
+    assert.ok(reportTxtAfter.includes('Sediment cao bất thường (đã sửa)'), 'Gantt must reflect the edit immediately');
 
     // 3) Opening the SAME checkpoint from Input tab must show the new text.
-    w.renderInputForm._date = '2026-07-23';
+    w.renderInputForm._date = '2026-07-24';
     w.renderInputForm._shift = '1';
-    w.renderInputForm._editKey = savedCp && w.eval(`allCheckpoints.find(c=>c.section==='EXT' && c.po==='712600555').key`);
+    w.renderInputForm._editKey = savedKey;
     w.renderInputForm._addOpen = false;
     w.showTab('input');
     w.renderInputForm();
@@ -344,10 +392,9 @@ test('Báo cáo tab (Theo PO): sửa Issue/Action ngay tại báo cáo ghi NGƯ�
 
     // 4) Data Log/Audit must have recorded the change.
     const logs = JSON.parse(await w.eval('getAllLogs().then(r=>JSON.stringify(r))'));
-    const relevant = logs.filter(l => l.po === '712600555' && l.section === 'Trích ly (EXT)');
-    assert.ok(relevant.length >= 1, 'Data Log must record the Issue/Action edit made from the Report tab');
-    assert.ok(relevant.some(l => (l.changes||[]).some(c => /Issue\/Action/.test(c.label))), 'the log entry must reference the Issue/Action change');
-    // Not asserting errors.length===0 — see the canvas-measurement note above
-    // (this test also exercises the SVG preview via doSearchPO's redraw).
+    const relevantLogs = logs.filter(l => l.po === '612600069' && l.section === 'Cô đặc (EVA)');
+    assert.ok(relevantLogs.length >= 1, 'Data Log must record the Issue/Action edit made from the Report tab');
+    assert.ok(relevantLogs.some(l => (l.changes||[]).some(c => /Issue\/Action/.test(c.label))), 'the log entry must reference the Issue/Action change');
+    // Not asserting errors.length===0 — see the canvas-measurement note above.
   } finally { dom.window.close(); }
 });
