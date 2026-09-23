@@ -623,9 +623,32 @@ function promptPasswordOK(message){
 
 /* Data Log: records a field-level audit trail every time a stage is
    saved, so QA can see who changed what and when. */
+const LOG_MAX = 10; // Data Log giữ/hiển thị tối đa 10 dòng gần nhất (giảm băng thông)
+async function getDeviceInfo(){
+  let idRow = await idbGet('meta','deviceId');
+  if(!idRow || !idRow.value){
+    const rnd = Array.from(crypto.getRandomValues(new Uint8Array(8))).map(b=>'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b%32]).join('');
+    idRow = {k:'deviceId', value:'PC-'+rnd};
+    await idbPut('meta', idRow);
+  }
+  const nameRow = await idbGet('meta','deviceName');
+  return {id: idRow.value, name: (nameRow && nameRow.value) || ''};
+}
+async function pruneLogs(){
+  const logs = await idbGetAll('logs');
+  logs.sort((a,b)=>(b.ts||'').localeCompare(a.ts||''));
+  for(const l of logs.slice(LOG_MAX)) await idbDelete('logs', l.id);
+}
 async function logChange(entry){
   entry.ts = new Date().toISOString();
-  try{ await idbPut('logs', entry); await queueOutbox('log', entry); scheduleFlush(); }catch(e){ console.error('logChange failed', e); }
+  try{
+    const dev = await getDeviceInfo();
+    entry.user = entry.user || (currentMember ? (currentMember.displayName||currentMember.username||'') : '');
+    entry.machine = dev.name || dev.id;
+    entry.action = entry.action || 'Cập nhật dữ liệu';
+    await idbPut('logs', entry); await queueOutbox('log', entry); scheduleFlush();
+    await pruneLogs();
+  }catch(e){ console.error('logChange failed', e); }
 }
 async function getAllLogs(){
   try{ return await idbGetAll('logs'); }catch(e){ return []; }
@@ -2691,7 +2714,7 @@ function renderInputForm(){
     await refreshCache();
     await persistAll();
     if(changes.length>0){
-      await logChange({ date:dateVal, shift:shiftVal, po:poVal, section:sec.name, technician:cp.technician||'', changes });
+      await logChange({ action: editingCp ? 'Sửa điểm kiểm tra' : 'Tạo điểm kiểm tra', date:dateVal, shift:shiftVal, po:poVal, section:sec.name, technician:cp.technician||'', changes });
     }
     toast(`Đã lưu điểm kiểm tra ${sec.name} — PO ${poVal}`);
     resetUiState();
@@ -3999,62 +4022,80 @@ function renderItemCodeList(){
 async function renderDataLog(){
   const root = qs('#view-datalog');
   root.innerHTML = '';
-  root.appendChild(el('div',{class:'section-title'},['Data Log']));
-  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},['Lịch sử thay đổi dữ liệu: thời gian, ca/PO liên quan, chỉ tiêu nào đổi từ giá trị gì sang giá trị gì.']));
-
-  const filterCard = el('div',{class:'card'},[]);
-  const fromInp = el('input',{class:'inp', type:'date'},[]);
-  const toInp = el('input',{class:'inp', type:'date'},[]);
-  const poInp = el('input',{class:'inp', type:'text', placeholder:'Lọc theo PO (tuỳ chọn)'},[]);
-  filterCard.appendChild(el('div',{class:'grid g3'},[
-    el('label',{class:'fld'},[el('span',{class:'lab'},['Từ ngày']), fromInp]),
-    el('label',{class:'fld'},[el('span',{class:'lab'},['Đến ngày']), toInp]),
-    el('label',{class:'fld'},[el('span',{class:'lab'},['Mã PO']), poInp]),
+  const dev = await getDeviceInfo();
+  const card = el('div',{class:'card'},[
+    el('div',{class:'card-h', style:'font-size:17px;'},['🕒 Data Input Log — Nhật ký cập nhật dữ liệu']),
+    el('p',{class:'sub', style:'margin:0 0 10px;'},[`Theo dõi User, Máy tính và thời gian mỗi lần dữ liệu được tạo/sửa/xoá/đồng bộ — giúp biết ai vừa thay đổi dữ liệu, gần như theo thời gian thực. Nhật ký cập nhật được ghi bởi máy chủ Supabase; danh sách hiển thị tối đa ${LOG_MAX} mục gần nhất.`]),
+    el('div',{class:'sub', style:'color:var(--teal-d);font-weight:700;'},['🖥️ Máy tính này — ID: '+dev.id]),
+  ]);
+  const nameInp = el('input',{class:'inp', type:'text', placeholder:'Đặt tên gợi nhớ, VD: PC Văn phòng QA', value: dev.name},[]);
+  const nameBtn = el('button',{class:'btn teal sm'},['💾 Lưu tên máy']);
+  nameBtn.addEventListener('click', async ()=>{
+    await idbPut('meta', {k:'deviceName', value: nameInp.value.trim()});
+    toast('Đã lưu tên máy'); renderDataLog();
+  });
+  card.appendChild(el('div',{class:'row', style:'margin:6px 0 12px;'},[nameInp, nameBtn]));
+  const totalNum = el('div',{style:'font-size:26px;font-weight:800;color:var(--teal-d);'},['0']);
+  card.appendChild(el('div',{class:'stat', style:'background:#F1F5F9;margin-bottom:12px;'},[
+    el('div',{class:'sub', style:'font-weight:700;'},[`Tổng số dòng nhật ký (Max: ${LOG_MAX})`]), totalNum]));
+  const userSel = el('select',{class:'inp'},[]), machSel = el('select',{class:'inp'},[]), actSel = el('select',{class:'inp'},[]);
+  const searchInp = el('input',{class:'inp', type:'text', placeholder:'Chi tiết, khu vực...'},[]);
+  card.appendChild(el('div',{class:'grid g3', style:'grid-template-columns:repeat(auto-fit,minmax(160px,1fr));'},[
+    el('label',{class:'fld'},[el('span',{class:'lab'},['Lọc User']), userSel]),
+    el('label',{class:'fld'},[el('span',{class:'lab'},['Lọc Máy tính']), machSel]),
+    el('label',{class:'fld'},[el('span',{class:'lab'},['Lọc Hành động']), actSel]),
+    el('label',{class:'fld'},[el('span',{class:'lab'},['Tìm nhanh']), searchInp]),
   ]));
-  const filterBtn = el('button',{class:'btn teal sm', style:'margin-top:10px;'},['🔎 Lọc']);
-  filterCard.appendChild(filterBtn);
-  root.appendChild(filterCard);
+  const refreshBtn = el('button',{class:'btn ghost sm', style:'margin-top:12px;'},['🔄 Làm mới']);
+  card.appendChild(refreshBtn);
+  const tableBox = el('div',{style:'margin-top:12px;overflow-x:auto;'},[]);
+  card.appendChild(tableBox);
+  root.appendChild(card);
 
-  const resultBox = el('div',{},[]);
-  root.appendChild(resultBox);
-
-  const allLogs = await getAllLogs();
-
-  function draw(){
-    const fromV = fromInp.value, toV = toInp.value, poV = poInp.value.trim().toLowerCase();
-    let logs = [...allLogs].sort((a,b)=> (b.ts||'').localeCompare(a.ts||''));
-    logs = logs.filter(l=>{
-      if(fromV && l.date < fromV) return false;
-      if(toV && l.date > toV) return false;
-      if(poV && !(l.po||'').toLowerCase().includes(poV)) return false;
-      return true;
-    });
-    resultBox.innerHTML = '';
-    resultBox.appendChild(el('div',{class:'sub', style:'margin:10px 0;'},[`${logs.length} lượt thay đổi.`]));
-    if(logs.length===0){
-      resultBox.appendChild(el('div',{class:'card empty'},[el('div',{class:'ic'},['🕓']), el('div',{},['Chưa có log nào khớp điều kiện.'])]));
-      return;
-    }
-    logs.slice(0,300).forEach(l=>{
-      const card = el('div',{class:'card'},[
-        el('div',{class:'card-h'},[
-          `${fmtDateTimeVN(new Date(l.ts).getTime())} · Ca ${l.shift} ${fmtDateVN(l.date)}${l.po?' · PO '+l.po:''}${l.technician?' · QC '+l.technician:''}`,
-          el('div',{class:'rule'}),
-        ]),
-        el('div',{class:'sub', style:'margin:0 0 8px;'},[`Công đoạn: ${l.section}`]),
-      ]);
-      (l.changes||[]).forEach(c=>{
-        card.appendChild(el('div',{class:'kv'},[
-          el('span',{class:'k'},[c.label]),
-          el('span',{class:'v'},[`${c.from===null?'—':String(c.from)} → ${c.to===null?'—':String(c.to)}`]),
-        ]));
-      });
-      resultBox.appendChild(card);
-    });
-    if(logs.length>300) resultBox.appendChild(el('div',{class:'sub'},[`Chỉ hiển thị 300/${logs.length} lượt gần nhất — thu hẹp bộ lọc để xem cụ thể hơn.`]));
+  const detailOf = l => (l.changes||[]).map(c=>`${c.label}: ${c.from===null||c.from===undefined?'—':c.from} → ${c.to===null||c.to===undefined?'—':c.to}`).join('; ');
+  let allLogs = [];
+  function fillSel(sel, allLabel, values){
+    const cur = sel.value;
+    sel.innerHTML = '';
+    sel.appendChild(el('option',{value:''},[allLabel]));
+    [...new Set(values.filter(Boolean))].sort().forEach(v=>sel.appendChild(el('option',{value:v},[v])));
+    sel.value = cur;
   }
-  filterBtn.addEventListener('click', draw);
-  draw();
+  function draw(){
+    const u = userSel.value, m = machSel.value, a = actSel.value, q = searchInp.value.trim().toLowerCase();
+    const logs = allLogs.filter(l=>(!u||l.user===u)&&(!m||l.machine===m)&&(!a||l.action===a)
+      && (!q || (detailOf(l)+' '+(l.section||'')+' '+(l.po||'')).toLowerCase().includes(q)));
+    totalNum.textContent = String(allLogs.length);
+    tableBox.innerHTML = '';
+    if(!logs.length){ tableBox.appendChild(el('div',{class:'empty'},[el('div',{class:'ic'},['🕓']), el('div',{},['Chưa có nhật ký nào khớp điều kiện.'])])); return; }
+    const th = t => el('th',{style:'text-align:left;padding:8px;color:var(--teal-d);'},[t]);
+    const table = el('table',{class:'specs-table', style:'width:100%;border-collapse:collapse;'},[
+      el('thead',{},[el('tr',{},['Thời gian','User','Máy tính','Hành động','Chi tiết','Khu vực'].map(th))]),
+      el('tbody',{},logs.map(l=>el('tr',{},[
+        fmtDateTimeVN(new Date(l.ts).getTime()), l.user||'—', l.machine||'—', l.action||'Cập nhật dữ liệu',
+        [detailOf(l), l.po?'PO '+l.po:''].filter(Boolean).join(' · '), l.section||'—',
+      ].map(t=>el('td',{style:'padding:8px;'},[String(t)]))))),
+    ]);
+    tableBox.appendChild(table);
+  }
+  async function reload(){
+    allLogs = (await getAllLogs()).sort((x,y)=>(y.ts||'').localeCompare(x.ts||'')).slice(0, LOG_MAX);
+    // Nhật ký từ MỌI máy: chỉ gọi khi mở/làm mới tab (không poll), tối đa
+    // LOG_MAX dòng; đang 🔴 Protection hoặc lỗi mạng thì dùng bản trên máy này.
+    if(cloudConfigured() && navigator.onLine && egressState().level!=='protection'){
+      const res = await cloudFetch('sync_get_logs', {p_limit: LOG_MAX});
+      if(res && Array.isArray(res.rows)) allLogs = res.rows.slice(0, LOG_MAX);
+    }
+    allLogs.forEach(l=>{ l.action = l.action||'Cập nhật dữ liệu'; });
+    fillSel(userSel, 'Tất cả User', allLogs.map(l=>l.user));
+    fillSel(machSel, 'Tất cả Máy tính', allLogs.map(l=>l.machine));
+    fillSel(actSel, 'Tất cả Hành động', allLogs.map(l=>l.action||'Cập nhật dữ liệu'));
+    draw();
+  }
+  [userSel, machSel, actSel].forEach(s=>s.addEventListener('change', draw));
+  searchInp.addEventListener('input', draw);
+  refreshBtn.addEventListener('click', reload);
+  await reload();
 }
 
 /* ===================== REPORT TAB (image export) ===================== */
@@ -4916,7 +4957,7 @@ function buildIssueActionEditableList(sec, cp, onEdited){
     await idbPut('shifts', cp);
     await refreshCache();
     await persistAll();
-    await logChange({ date:cp.date, shift:cp.shift, po:cp.po, section:sec.name, technician:cp.technician||'',
+    await logChange({ action:'Cập nhật Issue/Action', date:cp.date, shift:cp.shift, po:cp.po, section:sec.name, technician:cp.technician||'',
       changes:[{fieldId:'ISSUE_ACTION', label:changeLabel, from:before, to:after}] });
     toast('Đã lưu Issue/Action');
   }

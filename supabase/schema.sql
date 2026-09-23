@@ -69,6 +69,10 @@ create table if not exists logs (
   technician text,
   changes jsonb not null default '[]'
 );
+-- Data Input Log: ai (user_name) / máy nào (machine) / làm gì (action).
+alter table logs add column if not exists user_name text;
+alter table logs add column if not exists machine text;
+alter table logs add column if not exists action text;
 create index if not exists idx_logs_ts on logs (ts);
 
 alter table checkpoints enable row level security;
@@ -232,6 +236,7 @@ declare
   v_updated_at text;
   v_current_updated_at text;
   v_images_fp text;
+  v_rows_affected int;
   v_results jsonb := '[]'::jsonb;
 begin
   if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
@@ -276,8 +281,15 @@ begin
       images = case when v_row ? 'images' then excluded.images else checkpoints.images end,
       images_fp = case when v_row ? 'images' then excluded.images_fp else checkpoints.images_fp end,
       updated_at = excluded.updated_at, deleted = false, seq = excluded.seq
-    where excluded.updated_at > checkpoints.updated_at;
-    v_results := v_results || jsonb_build_object('key', v_key, 'applied', v_current_updated_at is null or v_updated_at > v_current_updated_at);
+    where excluded.updated_at > checkpoints.updated_at
+       -- Cùng updatedAt nhưng lần này có gửi kèm ảnh khác với ảnh đang lưu:
+       -- là lần đẩy lại ảnh đã bị hoãn (Data & Egress Control 🔴 Protection)
+       -- — phải được nhận, nếu không ảnh sẽ không bao giờ lên server.
+       or (excluded.updated_at = checkpoints.updated_at and v_row ? 'images'
+           and excluded.images_fp is distinct from checkpoints.images_fp);
+    get diagnostics v_rows_affected = row_count;
+    v_results := v_results || jsonb_build_object('key', v_key, 'applied', v_rows_affected > 0,
+      'reason', case when v_rows_affected > 0 then null else 'stale' end);
   end loop;
   return jsonb_build_object('results', v_results);
 end;
@@ -378,15 +390,32 @@ begin
   if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
   if not is_writer_member() then return jsonb_build_object('error', 'forbidden_role'); end if;
   for v_entry in select * from jsonb_array_elements(p_entries) loop
-    insert into logs (ts, date, shift, po, section, technician, changes)
+    insert into logs (ts, date, shift, po, section, technician, changes, user_name, machine, action)
     values (
       coalesce(v_entry->>'ts', now()::text), v_entry->>'date', v_entry->>'shift', v_entry->>'po',
-      v_entry->>'section', v_entry->>'technician', coalesce(v_entry->'changes', '[]'::jsonb)
+      v_entry->>'section', v_entry->>'technician', coalesce(v_entry->'changes', '[]'::jsonb),
+      v_entry->>'user', v_entry->>'machine', v_entry->>'action'
     );
   end loop;
   return jsonb_build_object('ok', true);
 end;
 $$;
+
+-- Đọc nhật ký từ MỌI máy — chỉ p_limit dòng mới nhất (mặc định 10, tối đa 100)
+-- để tiết kiệm băng thông; app chỉ gọi khi mở/làm mới tab Data Log, không poll.
+create or replace function sync_get_logs(p_limit int default 10) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  if not is_active_member() then return jsonb_build_object('error', 'unauthorized'); end if;
+  return jsonb_build_object('rows', coalesce((
+    select jsonb_agg(jsonb_build_object('ts', ts, 'date', date, 'shift', shift, 'po', po, 'section', section,
+      'technician', technician, 'changes', changes, 'user', user_name, 'machine', machine, 'action', action)
+      order by ts desc, id desc)
+    from (select * from logs order by ts desc, id desc limit greatest(1, least(coalesce(p_limit, 10), 100))) l
+  ), '[]'::jsonb));
+end;
+$$;
+grant execute on function sync_get_logs(int) to authenticated;
 
 -- ===================== Data retention (Data Log) — MANUAL, KHÔNG tự chạy =====================
 -- `logs` (tab Data Log — lịch sử mọi thay đổi số liệu) tăng vô hạn theo thời
