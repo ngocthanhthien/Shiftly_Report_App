@@ -397,6 +397,9 @@ begin
       v_entry->>'user', v_entry->>'machine', v_entry->>'action'
     );
   end loop;
+  -- Chỉ giữ 10 dòng nhật ký mới nhất (theo yêu cầu: giảm dung lượng/băng
+  -- thông) — tự xoá phần cũ hơn ngay sau mỗi lần ghi, lịch sử cũ MẤT hẳn.
+  delete from logs where id not in (select id from logs order by ts desc, id desc limit 10);
   return jsonb_build_object('ok', true);
 end;
 $$;

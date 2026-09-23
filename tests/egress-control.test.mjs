@@ -414,3 +414,14 @@ test('sync_post_logs/sync_get_logs: stores user/machine/action from any device a
   await signInAs(db, null);
   assert.equal((await rpc(db, 'sync_get_logs', {})).error, 'unauthorized');
 });
+
+test('sync_post_logs: the server keeps only the newest 10 log rows (older ones are auto-deleted)', async () => {
+  const db = await backend();
+  const uid = await createMember(db, { role: 'user' });
+  await signInAs(db, uid);
+  const entries = Array.from({ length: 15 }, (_, i) => ({ ts: `2026-09-23T11:${String(i).padStart(2, '0')}:00Z`, section: 'ROA', changes: [] }));
+  await rpc(db, 'sync_post_logs', { p_entries: entries });
+  const n = (await db.query('select count(*)::int as n, min(ts) as oldest from logs')).rows[0];
+  assert.equal(n.n, 10);
+  assert.equal(n.oldest, '2026-09-23T11:05:00Z');
+});
