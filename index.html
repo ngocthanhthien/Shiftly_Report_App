@@ -1295,6 +1295,18 @@ async function saveEgressConfig(patch){
   updateCloudPill();
   return true;
 }
+// Banner cảnh báo đồng bộ ở đầu tab Nhập liệu — cập nhật LIVE theo cloudStatus
+// (gọi từ updateCloudPill), không còn là ảnh chụp tại lúc vẽ form nên tự mất
+// khi đồng bộ đã phục hồi.
+function updateInputSyncBanner(){
+  const b = qs('#inputSyncBanner'); if(!b) return;
+  let msg = '';
+  if(!cloudConfigured()) msg = '☁️ Chưa cấu hình đồng bộ Supabase — dữ liệu vẫn lưu an toàn trong máy này. Vào tab Cài đặt để bật đồng bộ nhiều thiết bị.';
+  else if(cloudStatus==='offline') msg = '📶 Đang offline — dữ liệu lưu trong máy, sẽ tự đồng bộ khi có mạng.';
+  else if(cloudStatus==='error') msg = `⚠️ Đồng bộ gặp lỗi${lastCloudError?': '+lastCloudError:''} — dữ liệu vẫn an toàn trong máy, app sẽ tự thử lại.`;
+  b.textContent = msg;
+  b.style.display = msg ? '' : 'none';
+}
 function updateCloudPill(){
   const pill = qs('#linkPill'); const txt = qs('#linkPillTxt');
   if(pill && txt){
@@ -1312,6 +1324,7 @@ function updateCloudPill(){
       if(st.level!=='normal') txt.textContent += ' • ' + egressLevelLabel(st.level);
     }
   }
+  updateInputSyncBanner();
   // Only update the status badge; never rebuild an in-progress form here.
 }
 // Calls one of the sync_* Postgres functions (see supabase/schema.sql) via
@@ -2194,11 +2207,8 @@ function renderInputForm(){
   // no-op instead of touching not-yet-initialized `const` bindings.
   let fieldsRendered = false;
 
-  if(!cloudConfigured()){
-    root.appendChild(el('div',{class:'sub', style:'margin:0 0 10px;'},['☁️ Chưa cấu hình đồng bộ Supabase — dữ liệu vẫn lưu an toàn trong máy này. Vào tab Cài đặt để bật đồng bộ nhiều thiết bị.']));
-  } else if(cloudStatus==='error' || cloudStatus==='offline'){
-    root.appendChild(el('div',{class:'sub', style:'margin:0 0 10px;'},[cloudStatus==='offline' ? '📶 Đang offline — dữ liệu lưu trong máy, sẽ tự đồng bộ khi có mạng.' : `⚠️ Đồng bộ gặp lỗi${lastCloudError?': '+lastCloudError:''} — dữ liệu vẫn an toàn trong máy, kiểm tra lại Supabase URL/Anon Key hoặc đăng nhập lại ở tab Cài đặt.`]));
-  }
+  root.appendChild(el('div',{class:'sub', id:'inputSyncBanner', style:'margin:0 0 10px;display:none;'},[]));
+  updateInputSyncBanner();
 
   // Ngày: gợi ý mặc định qua getProductionDate() (ca đêm tràn qua nửa đêm
   // vẫn tính ngày hôm trước tới trước 6h sáng) — nhưng MỘT KHI người dùng đã
