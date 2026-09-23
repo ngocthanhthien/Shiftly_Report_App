@@ -1157,6 +1157,121 @@ function setCloudStatus(status){ cloudStatus = status; updateCloudPill(); }
 // offline) instead of a generic "error", and stops a failed PULL from being
 // masked as "✅ Đã đồng bộ" just because there was nothing local to push.
 let lastCloudError = null;
+/* ===================== DATA & EGRESS CONTROL =====================
+   Admin-configurable soft/hard DAILY traffic ceiling so Supabase egress can
+   be throttled without ever blocking QC record entry. Two separate pieces
+   of state, both reusing existing mechanisms rather than a parallel system:
+   - EGRESS_CONFIG: limits + admin overrides — an ordinary meta key
+     ('egressControl'), synced across devices through the exact same
+     queueMetaSync()/sync_put_meta()/applyRemoteMeta() path every other meta
+     key (poList/schema/tabConfig/…) already uses. Only the WRITE side needs
+     a new guard: sync_put_meta() in supabase/schema.sql rejects this one key
+     from a non-admin caller SERVER-SIDE (is_admin_member()) — the
+     currentMember.role==='admin' check here is UI convenience only.
+   - egressDaily: THIS device's own estimated traffic today (bytes). Local
+     only (IndexedDB key 'egressTrafficToday', never pushed through
+     queueMetaSync/outbox) — it measures what THIS device generated, not a
+     shared figure, and must never itself cost a network request to update. */
+const EGRESS_DEFAULTS = { enabled:true, softLimitMB:100, hardLimitMB:200, extraMB:0, extraMBDate:'', unlockToday:false, unlockDate:'' };
+let EGRESS_CONFIG = Object.assign({}, EGRESS_DEFAULTS);
+let egressDaily = { date: todayStr(), bytes: 0 };
+// Live-bound refs into the currently-rendered Settings card (if open), so
+// recordEgressTraffic() can update the progress bar/label in place without
+// re-rendering the whole tab (which would blow away an admin mid-edit of
+// the Soft/Hard Limit inputs). Cleared/replaced each time the card renders.
+let egressCardLive = null;
+function normalizeEgressConfig(raw){
+  const cfg = Object.assign({}, EGRESS_DEFAULTS, raw||{});
+  cfg.softLimitMB = Number(cfg.softLimitMB)>0 ? Number(cfg.softLimitMB) : EGRESS_DEFAULTS.softLimitMB;
+  cfg.hardLimitMB = Number(cfg.hardLimitMB)>0 ? Number(cfg.hardLimitMB) : EGRESS_DEFAULTS.hardLimitMB;
+  if(cfg.hardLimitMB <= cfg.softLimitMB) cfg.hardLimitMB = cfg.softLimitMB + 1; // never let a corrupt/old pair invert
+  cfg.extraMB = Number(cfg.extraMB) || 0;
+  cfg.enabled = cfg.enabled !== false;
+  cfg.unlockToday = !!cfg.unlockToday;
+  cfg.extraMBDate = cfg.extraMBDate || '';
+  cfg.unlockDate = cfg.unlockDate || '';
+  return cfg;
+}
+function egressEffectiveHardMB(){
+  const extra = EGRESS_CONFIG.extraMBDate===todayStr() ? EGRESS_CONFIG.extraMB : 0;
+  return EGRESS_CONFIG.hardLimitMB + extra;
+}
+function egressUnlockedToday(){ return EGRESS_CONFIG.unlockToday && EGRESS_CONFIG.unlockDate===todayStr(); }
+// Pure function, computed purely from LOCAL state (config + this device's
+// own traffic counter) — never triggers a request, so checking it as often
+// as we like adds zero egress of its own (spec requirement: "quota must be
+// computed LOCALLY", "monitoring must not significantly increase traffic").
+function egressState(){
+  const mb = egressDaily.bytes / (1024*1024);
+  const softMB = EGRESS_CONFIG.softLimitMB;
+  const hardMB = egressUnlockedToday() ? Infinity : egressEffectiveHardMB();
+  let level = 'normal';
+  if(EGRESS_CONFIG.enabled){
+    if(mb >= hardMB) level = 'protection';
+    else if(mb >= softMB) level = 'saving';
+  }
+  return {level, mb, softMB, hardMB};
+}
+function egressLevelLabel(level){
+  return level==='protection' ? '🔴 Protection' : level==='saving' ? '🟠 Data Saving' : '🟢 Normal';
+}
+async function loadEgressFromIdb(){
+  const cfgRow = await idbGet('meta', 'egressControl');
+  if(cfgRow && cfgRow.value) EGRESS_CONFIG = normalizeEgressConfig(cfgRow.value);
+  const trafficRow = await idbGet('meta', 'egressTrafficToday');
+  if(trafficRow && trafficRow.value && trafficRow.value.date===todayStr()) egressDaily = trafficRow.value;
+  else egressDaily = {date: todayStr(), bytes: 0};
+}
+// Shared by the initial paint (renderEgressControlCard, before the card is
+// even attached to the document) and every later live update (this function
+// below) — kept separate so the "is this card still on screen" guard only
+// applies to the LATER case, not the very first paint of a freshly-built,
+// still-detached card.
+function paintEgressBar(els, st){
+  const pct = st.hardMB===Infinity ? (st.mb/Math.max(st.softMB,1))*50 : Math.min(100, (st.mb/Math.max(st.hardMB,1))*100);
+  els.fill.style.width = Math.max(0,pct)+'%';
+  els.fill.style.background = st.level==='protection' ? 'var(--fail)' : st.level==='saving' ? 'var(--warn)' : 'var(--pass)';
+  els.label.textContent = `${st.mb.toFixed(1)} MB / ${st.hardMB===Infinity?'∞ (đã mở khoá hôm nay)':st.hardMB.toFixed(0)+' MB'}`;
+  els.stateLabel.textContent = egressLevelLabel(st.level);
+  if(typeof els.extra==='function') els.extra();
+}
+function refreshEgressLiveUI(){
+  if(!egressCardLive || !document.body.contains(egressCardLive.fill)) { egressCardLive = null; return; }
+  paintEgressBar(egressCardLive, egressState());
+}
+// Every sync_* RPC round-trip (checkpoints/meta/logs push+pull, the actual
+// bulk of this app's Supabase egress) funnels through cloudFetch() — see the
+// hook at the end of that function. Deliberately NOT hooked into anything
+// that would itself add a new request just to measure traffic.
+async function recordEgressTraffic(bytes){
+  if(!bytes) return;
+  if(egressDaily.date !== todayStr()) egressDaily = {date: todayStr(), bytes: 0};
+  egressDaily.bytes += bytes;
+  await idbPut('meta', {k:'egressTrafficToday', value: egressDaily});
+  refreshEgressLiveUI();
+  updateCloudPill();
+}
+// Admin-only write path for the Settings card. currentMember.role check
+// here is UX only (instant feedback, no round trip) — the real enforcement
+// is server-side in sync_put_meta() (supabase/schema.sql), which rejects
+// this key from anyone but an admin regardless of what this client sends.
+async function saveEgressConfig(patch){
+  if(!currentMember || currentMember.role!=='admin'){ toast('Chỉ Admin được đổi Data & Egress Control'); return false; }
+  const merged = Object.assign({}, EGRESS_CONFIG, patch);
+  // Validate the actual candidate values BEFORE normalizeEgressConfig() runs
+  // — that function's own soft<hard clamp is a defensive fallback for
+  // corrupt/old synced data, not meant to silently paper over an admin's
+  // invalid input here (spec: "Validate: Soft Limit < Hard Limit").
+  const soft = Number(merged.softLimitMB), hard = Number(merged.hardLimitMB);
+  if(!(soft>0) || !(hard>0)){ toast('Soft/Hard Limit phải là số dương'); return false; }
+  if(soft >= hard){ toast('Soft Limit phải nhỏ hơn Hard Limit'); return false; }
+  const next = normalizeEgressConfig(merged);
+  EGRESS_CONFIG = next;
+  await idbPut('meta', {k:'egressControl', value: EGRESS_CONFIG});
+  await queueMetaSync('egressControl', EGRESS_CONFIG);
+  updateCloudPill();
+  return true;
+}
 function updateCloudPill(){
   const pill = qs('#linkPill'); const txt = qs('#linkPillTxt');
   if(pill && txt){
@@ -1165,6 +1280,14 @@ function updateCloudPill(){
     else if(cloudStatus==='offline'){ pill.classList.add('off'); txt.textContent = 'Offline — chờ mạng'; }
     else if(cloudStatus==='error'){ pill.classList.add('off'); txt.textContent = lastCloudError || 'Lỗi đồng bộ — sẽ tự thử lại'; }
     else { pill.classList.remove('off'); txt.textContent = 'Đã đồng bộ'; }
+    // Small state suffix (spec: "☁️ Online • 🟢 Normal" style) reusing this
+    // one existing indicator instead of a new dashboard — only shown once
+    // cloud sync is actually configured, and skipped entirely for a plain
+    // Normal state so a device that never gets near its limit sees no change.
+    if(cloudConfigured() && EGRESS_CONFIG.enabled){
+      const st = egressState();
+      if(st.level!=='normal') txt.textContent += ' • ' + egressLevelLabel(st.level);
+    }
   }
   // Only update the status badge; never rebuild an in-progress form here.
 }
@@ -1182,6 +1305,7 @@ async function cloudFetch(fn, params){
     const token = await currentAccessToken();
     if(!token){ lastCloudError = 'Chưa đăng nhập'; return null; }
     const url = cloudCfg.url + '/rest/v1/rpc/' + fn;
+    const bodyStr = JSON.stringify(params || {});
     const res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -1189,11 +1313,17 @@ async function cloudFetch(fn, params){
         'apikey': cloudCfg.anonKey,
         'Authorization': 'Bearer ' + token,
       },
-      body: JSON.stringify(params || {}),
+      body: bodyStr,
       signal: AbortSignal.timeout(30000),
     });
     let body = null;
     const text = await res.text();
+    // Data & Egress Control: this is the one chokepoint every sync_* RPC
+    // (checkpoints/meta/logs, essentially all of this app's Supabase egress)
+    // already passes through — reusing it means the traffic counter needs no
+    // extra requests of its own. Estimated, not exact billing egress (no
+    // HTTP header overhead counted) — good enough for a soft/hard throttle.
+    recordEgressTraffic(bodyStr.length + text.length);
     if(text){ try{ body = JSON.parse(text); }catch(e){ body = null; } }
     if(!res.ok){
       const detail = body && (body.message||body.error_description||body.hint) || '';
@@ -1279,6 +1409,18 @@ function stripLocalMarkers(cp){
   // khác vừa được sửa — sync_put_checkpoints() phía server tự giữ nguyên
   // ảnh cũ khi thấy thiếu field này (xem comment trong supabase/schema.sql).
   if(clean._imagesSyncedFp !== undefined && clean._imagesSyncedFp === imagesFingerprint(cp)){
+    delete clean.images;
+  }
+  // Data & Egress Control 🔴 PROTECTION: also defer a genuinely NEW/changed
+  // image — the checkpoint's own fields (số liệu, Issue/Action…) still push
+  // normally below. The image itself stays intact in IndexedDB (nothing
+  // deleted), just not sent this round; flushOutbox() below deliberately
+  // skips marking the row "_syncedAt clean" whenever images were left out
+  // for a reason OTHER than "already synced, unchanged", so this exact same
+  // dirty-checkpoint machinery retries it automatically the moment
+  // Protection lifts / Admin raises quota / a new day starts — no separate
+  // "pending" flag or resync routine needed.
+  else if(clean.images && clean.images.length && egressState().level==='protection'){
     delete clean.images;
   }
   delete clean._imagesSyncedFp;
@@ -1370,6 +1512,12 @@ function applyRemoteMeta(key, value){
   else if(key==='technicians' && Array.isArray(value) && value.length){ TECHNICIANS = value; idbPut('meta', {k:'technicians', value: TECHNICIANS}); }
   else if(key==='poClosures' && value && typeof value==='object'){ poClosures = value; idbPut('meta', {k:'poClosures', value: poClosures}); }
   else if(key==='tabConfig' && value && typeof value==='object'){ TAB_CONFIG = normalizeTabConfig(value); idbPut('meta', {k:'tabConfig', value: TAB_CONFIG}); applyTabConfig(); }
+  else if(key==='egressControl' && value && typeof value==='object'){
+    EGRESS_CONFIG = normalizeEgressConfig(value);
+    idbPut('meta', {k:'egressControl', value: EGRESS_CONFIG});
+    updateCloudPill();
+    refreshEgressLiveUI();
+  }
 }
 let pulling = false;
 async function pullFromCloud(){
@@ -1483,7 +1631,15 @@ async function flushOutbox(){
           const local = await idbGet('shifts', cp.key);
           const ack=(res.results||[]).find(r=>r.key===cp.key);
           if(local && local.updatedAt===cp.updatedAt && ack && (ack.applied || ack.reason==='stale')){
-            local._syncedAt = cp.updatedAt;
+            // Only mark the whole row "synced" if images were either sent
+            // this round, or were already fully in sync beforehand (the
+            // "unchanged, lược bỏ để tiết kiệm băng thông" case). A
+            // Protection-deferred NEW image (stripLocalMarkers, `images` not
+            // in cp AND not actually in sync) must keep this row dirty so
+            // collectDirtyCheckpointRows() naturally retries it later — see
+            // stripLocalMarkers() comment.
+            const imagesFullySynced = ('images' in cp) || local._imagesSyncedFp === imagesFingerprint(local);
+            if(imagesFullySynced) local._syncedAt = cp.updatedAt;
             // Chỉ cập nhật dấu vân tay ảnh nếu lần push NÀY thật sự có gửi
             // `images` — nếu bị lược bỏ (ảnh không đổi), vân tay cũ vẫn còn
             // đúng, không cần tính lại.
@@ -1559,6 +1715,14 @@ function manualSync(){
 // locally is a harmless no-op.
 function resyncFromScratch(){
   if(!cloudConfigured()){ toast('Chưa cấu hình đồng bộ Supabase'); return; }
+  // The one genuinely large re-pull action in this app (forgets the cursor,
+  // re-fetches everything) — restrict it under 🔴 Protection, same spirit as
+  // "unnecessary data refresh"/"export-download large data" in the spec.
+  // Record entry itself (persistAll/manualSync/wakeSync) is untouched.
+  if(egressState().level==='protection'){
+    toast('Đang ở mức 🔴 Protection (giới hạn traffic hằng ngày) — tạm không tải lại toàn bộ. Dữ liệu vẫn nhập/lưu bình thường; thử lại sau hoặc nhờ Admin mở thêm quota ở Cài đặt.');
+    return;
+  }
   toast('Đang đồng bộ lại toàn bộ từ đầu…');
   syncCursors.checkpoints = '0';
   syncCursors.meta = null;
@@ -1598,8 +1762,15 @@ function armSync(){
 function baseSyncDelay(){
   const active = qs('.tab[aria-selected="true"]');
   const isInput = active && active.dataset.tab==='input';
-  if(realtimeConnected) return isInput ? 60000 : 30000;
-  return isInput ? 20000 : 8000;
+  const base = realtimeConnected ? (isInput ? 60000 : 30000) : (isInput ? 20000 : 8000);
+  // Data & Egress Control: only the PERIODIC polling fallback backs off —
+  // wakeSync()/manualSync()/persistAll() all trigger flushOutbox() directly
+  // and bypass this delay entirely, so a QC entry's own save still syncs
+  // immediately regardless of level (spec: "must NOT affect QC data entry").
+  const level = egressState().level;
+  if(level==='protection') return Math.max(base*4, 180000);
+  if(level==='saving') return base*2;
+  return base;
 }
 function wakeSync(){
   if(document.visibilityState==='hidden'){ clearTimeout(syncTimer); return; }
@@ -6189,6 +6360,78 @@ function renderTabConfigCard(){
   return card;
 }
 
+/* ===================== DATA & EGRESS CONTROL CARD =====================
+   Shown to everyone once cloud sync is configured (read-only progress/state
+   — a device's own person should see WHY things feel slower), full editable
+   controls only for Admin. Real enforcement of the Admin-only writes is
+   server-side (sync_put_meta, see supabase/schema.sql) — this is just UI. */
+function renderEgressControlCard(){
+  const isAdmin = currentMember && currentMember.role==='admin';
+  const card = el('div',{class:'card'},[
+    el('div',{class:'card-h'},['🛡️ Data & Egress Control', el('div',{class:'rule'})]),
+    el('p',{class:'sub', style:'margin:0 0 10px;'},['Tự động hạn chế lưu lượng dữ liệu (ảnh/đồng bộ nền) khi gần/vượt giới hạn hằng ngày do Admin đặt — KHÔNG khoá app, KHÔNG chặn nhập/lưu điểm kiểm tra QC. Đây là traffic ƯỚC TÍNH do chính app này tạo ra trên thiết bị này, không phải số liệu Egress chính xác từ Supabase Billing.']),
+  ]);
+  const barTrack = el('div',{style:'height:10px;border-radius:6px;background:#E2E8F0;overflow:hidden;'},[]);
+  const barFill = el('div',{style:'height:100%;width:0%;background:var(--pass);transition:width .3s;'},[]);
+  barTrack.appendChild(barFill);
+  const barLabel = el('div',{class:'sub', style:'margin-top:6px;'},['—']);
+  const stateLabel = el('b',{style:'font-size:14px;'},['—']);
+  card.appendChild(el('div',{style:'margin:4px 0 4px;'},[stateLabel]));
+  card.appendChild(barTrack);
+  card.appendChild(barLabel);
+  const protectionNote = el('p',{class:'sub', style:'margin:10px 0 0;color:var(--fail);display:none;'},['🔴 Đang bảo vệ traffic hằng ngày — dữ liệu vẫn nhập/lưu bình thường, các thao tác tốn nhiều dữ liệu (tải ảnh mới lên, đồng bộ lại toàn bộ…) tạm thời bị hạn chế đến khi hết mức bảo vệ.']);
+  card.appendChild(protectionNote);
+  function refreshNote(){ protectionNote.style.display = egressState().level==='protection' ? '' : 'none'; }
+  // Piggyback the note's visibility on the same live-refresh tick (called
+  // from recordEgressTraffic/applyRemoteMeta) instead of a second interval.
+  egressCardLive = {fill: barFill, label: barLabel, stateLabel, extra: refreshNote};
+  paintEgressBar(egressCardLive, egressState()); // initial paint — card isn't attached to the document yet, so refreshEgressLiveUI()'s "still on screen" guard would wrongly no-op here
+
+  if(!isAdmin){
+    if(!cloudConfigured()) card.appendChild(el('p',{class:'sub'},['Chỉ áp dụng khi đã cấu hình đồng bộ Supabase ở trên.']));
+    return card;
+  }
+
+  const enabledChk = el('input',{type:'checkbox'},[]); enabledChk.checked = EGRESS_CONFIG.enabled;
+  const softInp = el('input',{class:'inp', type:'number', min:'1', step:'1', value:String(EGRESS_CONFIG.softLimitMB)},[]);
+  const hardInp = el('input',{class:'inp', type:'number', min:'1', step:'1', value:String(EGRESS_CONFIG.hardLimitMB)},[]);
+  const adminCard = el('div',{class:'card', style:'margin-top:12px;'},[
+    el('div',{class:'card-h'},['Cấu hình (chỉ Admin)', el('div',{class:'rule'})]),
+    el('label',{style:'display:flex;align-items:center;gap:8px;margin-bottom:10px;'},[enabledChk, 'Bật bảo vệ traffic']),
+    el('label',{class:'fld'},[el('span',{class:'lab'},['Soft Daily Limit (MB) — chuyển sang 🟠 Data Saving']), softInp]),
+    el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Hard Daily Limit (MB) — chuyển sang 🔴 Protection']), hardInp]),
+  ]);
+  const saveBtn = el('button',{class:'btn teal sm', style:'margin-top:10px;'},['💾 Save Settings']);
+  saveBtn.addEventListener('click', async ()=>{
+    const ok = await saveEgressConfig({enabled: enabledChk.checked, softLimitMB: toNum(softInp.value), hardLimitMB: toNum(hardInp.value)});
+    if(ok) toast('Đã lưu cấu hình Data & Egress Control');
+  });
+  adminCard.appendChild(saveBtn);
+
+  const today = todayStr();
+  const extraNow = EGRESS_CONFIG.extraMBDate===today ? EGRESS_CONFIG.extraMB : 0;
+  const extraInfo = el('div',{class:'filepill', style:'margin-top:14px;'},[
+    el('span',{class:'ic'},['➕']),
+    el('span',{class:'nm'},[`Extra hôm nay: +${extraNow} MB — Effective Hard Limit: ${(EGRESS_CONFIG.hardLimitMB+extraNow)} MB`]),
+  ]);
+  adminCard.appendChild(extraInfo);
+  const extraAddInp = el('input',{class:'inp', type:'number', min:'1', step:'1', value:'100', style:'width:100px;display:inline-block;'},[]);
+  const extraAddBtn = el('button',{class:'btn ghost sm'},['➕ Extra MB hôm nay']);
+  extraAddBtn.addEventListener('click', async ()=>{
+    const add = toNum(extraAddInp.value); if(!add || add<=0){ toast('Nhập số MB hợp lệ'); return; }
+    const ok = await saveEgressConfig({extraMB: extraNow + add, extraMBDate: today});
+    if(ok){ toast(`Đã thêm +${add} MB cho hôm nay`); renderSettings(); }
+  });
+  const unlockBtn = el('button',{class:'btn '+(egressUnlockedToday()?'danger':'ghost')+' sm'},[egressUnlockedToday()?'🔒 Tắt Unlock hôm nay':'🔓 Unlock Today (bỏ qua Hard Limit hôm nay)']);
+  unlockBtn.addEventListener('click', async ()=>{
+    const turningOn = !egressUnlockedToday();
+    const ok = await saveEgressConfig({unlockToday: turningOn, unlockDate: today});
+    if(ok){ toast(turningOn ? 'Đã mở khoá Hard Limit cho hôm nay' : 'Đã tắt Unlock hôm nay'); renderSettings(); }
+  });
+  adminCard.appendChild(el('div',{class:'row', style:'margin-top:10px;'},[extraAddInp, extraAddBtn, unlockBtn]));
+  card.appendChild(adminCard);
+  return card;
+}
 /* ===================== SETTINGS TAB ===================== */
 function renderSettings(){
   const root = qs('#view-settings');
@@ -6230,6 +6473,8 @@ function renderSettings(){
     cloudBtns[bi++].addEventListener('click', clearCloudConfig);
   }
   root.appendChild(cloudCard);
+
+  if(cloudConfigured()) root.appendChild(renderEgressControlCard());
 
   if(currentMember && currentMember.role==='admin'){ root.appendChild(renderMemberManagementCard()); root.appendChild(renderTabConfigCard()); }
 
@@ -6822,6 +7067,7 @@ function renderAll(){
   if(metaClientList && Array.isArray(metaClientList.value)) CLIENT_LIST = metaClientList.value;
   const metaItemCodeList = await idbGet('meta','itemCodeList');
   if(metaItemCodeList && Array.isArray(metaItemCodeList.value) && metaItemCodeList.value.length) ITEM_CODE_LIST = metaItemCodeList.value;
+  await loadEgressFromIdb();
   await refreshCache();
   if(allCheckpoints.length===0){
     const backup = localStorage.getItem('shiftly_backup');

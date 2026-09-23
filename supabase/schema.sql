@@ -145,6 +145,21 @@ $$;
 revoke all on function is_writer_member() from public;
 grant execute on function is_writer_member() to authenticated;
 
+-- is_admin_member(): bảo vệ RIÊNG 1 số khoá `meta` nhạy cảm mà ngay cả 1
+-- writer (role 'user') bình thường cũng KHÔNG được ghi — hiện chỉ dùng cho
+-- khoá 'egressControl' (Cài đặt → 🛡️ Data & Egress Control, xem
+-- sync_put_meta bên dưới). Tách riêng khỏi is_writer_member() vì hàm đó vẫn
+-- phải cho phép role 'user' ghi mọi khoá meta KHÁC (poList/clientList/
+-- itemCodeList/schema/tabConfig/technicians/poClosures) như trước giờ.
+create or replace function is_admin_member() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from members where user_id = auth.uid() and not disabled and role = 'admin'
+  );
+$$;
+revoke all on function is_admin_member() from public;
+grant execute on function is_admin_member() to authenticated;
+
 -- Returns the caller's own membership row, or {"error":"unauthorized"} if
 -- not signed in / not a member / disabled. This is how the app learns its
 -- own display name + role after login (client code can never read `members`
@@ -334,6 +349,13 @@ begin
     v_updated_at := v_val->>'updatedAt';
     if v_updated_at is null then
       v_results := v_results || jsonb_build_object(v_key, jsonb_build_object('applied', false, 'reason', 'invalid'));
+      continue;
+    end if;
+    -- Data & Egress Control (Cài đặt): giới hạn Soft/Hard/bật-tắt bảo vệ chỉ
+    -- Admin được đổi — enforce ở ĐÂY (server), không chỉ ẩn nút bên
+    -- client, để không ai bypass được bằng DevTools/gọi RPC trực tiếp.
+    if v_key = 'egressControl' and not is_admin_member() then
+      v_results := v_results || jsonb_build_object(v_key, jsonb_build_object('applied', false, 'reason', 'forbidden_role'));
       continue;
     end if;
     select updated_at into v_current from meta where k = v_key;
