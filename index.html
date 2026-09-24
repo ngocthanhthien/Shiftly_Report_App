@@ -359,29 +359,25 @@ svg.chart{width:100%;height:auto;display:block;}
   </div>
   <div class="tabs" role="tablist">
     <button class="tab" data-tab="input" aria-selected="true" title="Nhập liệu"><span class="ic">✍️</span><span class="lbl">Nhập liệu</span></button>
-    <button class="tab" data-tab="table" aria-selected="false" title="Dữ liệu"><span class="ic">📋</span><span class="lbl">Dữ liệu</span></button>
-    <button class="tab" data-tab="polist" aria-selected="false" title="Danh sách PO"><span class="ic">📃</span><span class="lbl">Danh sách PO</span></button>
-    <button class="tab" data-tab="clientlist" aria-selected="false" title="Danh sách Client"><span class="ic">🏷️</span><span class="lbl">Danh sách Client</span></button>
-    <button class="tab" data-tab="itemcodelist" aria-selected="false" title="Danh sách Items Code"><span class="ic">🔖</span><span class="lbl">Danh sách Items Code</span></button>
-    <button class="tab" data-tab="datalog" aria-selected="false" title="Data Log"><span class="ic">🕓</span><span class="lbl">Data Log</span></button>
     <button class="tab" data-tab="report" aria-selected="false" title="Báo cáo"><span class="ic">🖼️</span><span class="lbl">Báo cáo</span></button>
-    <button class="tab" data-tab="stats" aria-selected="false" title="Thống kê"><span class="ic">📈</span><span class="lbl">Thống kê</span></button>
+    <button class="tab" data-tab="table" aria-selected="false" title="Dữ liệu"><span class="ic">📋</span><span class="lbl">Dữ liệu</span></button>
+    <button class="tab" data-tab="itemcodelist" aria-selected="false" title="Danh sách Items Code"><span class="ic">🔖</span><span class="lbl">Danh sách Items Code</span></button>
+    <button class="tab" data-tab="clientlist" aria-selected="false" title="Danh sách Client"><span class="ic">🏷️</span><span class="lbl">Danh sách Client</span></button>
+    <button class="tab" data-tab="polist" aria-selected="false" title="Danh sách PO"><span class="ic">📃</span><span class="lbl">Danh sách PO</span></button>
     <button class="tab" data-tab="specs" aria-selected="false" title="Specs"><span class="ic">🎛️</span><span class="lbl">Specs</span></button>
-    <button class="tab" data-tab="share" aria-selected="false" title="Xuất nhập dữ liệu"><span class="ic">📤</span><span class="lbl">Xuất nhập dữ liệu</span></button>
+    <button class="tab" data-tab="datalog" aria-selected="false" title="Data Log"><span class="ic">🕓</span><span class="lbl">Data Log</span></button>
     <button class="tab" data-tab="settings" aria-selected="false" title="Cài đặt"><span class="ic">⚙️</span><span class="lbl">Cài đặt</span></button>
     <button class="tab" data-tab="guide" aria-selected="false" title="Hướng dẫn"><span class="ic">📘</span><span class="lbl">Hướng dẫn</span></button>
   </div>
   <div class="main">
     <div class="view active" id="view-input"></div>
-    <div class="view" id="view-table"></div>
-    <div class="view" id="view-polist"></div>
-    <div class="view" id="view-clientlist"></div>
-    <div class="view" id="view-itemcodelist"></div>
-    <div class="view" id="view-datalog"></div>
     <div class="view" id="view-report"></div>
-    <div class="view" id="view-stats"></div>
+    <div class="view" id="view-table"></div>
+    <div class="view" id="view-itemcodelist"></div>
+    <div class="view" id="view-clientlist"></div>
+    <div class="view" id="view-polist"></div>
     <div class="view" id="view-specs"></div>
-    <div class="view" id="view-share"></div>
+    <div class="view" id="view-datalog"></div>
     <div class="view" id="view-settings"></div>
     <div class="view" id="view-guide"></div>
   </div>
@@ -1547,7 +1543,7 @@ function applyRemoteMeta(key, value){
   else if(key==='itemCodeList' && Array.isArray(value)){ ITEM_CODE_LIST = value; idbPut('meta', {k:'itemCodeList', value: ITEM_CODE_LIST}); }
   else if(key==='technicians' && Array.isArray(value) && value.length){ TECHNICIANS = value; idbPut('meta', {k:'technicians', value: TECHNICIANS}); }
   else if(key==='poClosures' && value && typeof value==='object'){ poClosures = value; idbPut('meta', {k:'poClosures', value: poClosures}); }
-  else if(key==='tabConfig' && value && typeof value==='object'){ TAB_CONFIG = normalizeTabConfig(value); idbPut('meta', {k:'tabConfig', value: TAB_CONFIG}); applyTabConfig(); }
+  else if(key==='tabConfig' && value && typeof value==='object'){ TAB_CONFIG = migrateTabConfig(value); idbPut('meta', {k:'tabConfig', value: TAB_CONFIG}); applyTabConfig(); }
   else if(key==='egressControl' && value && typeof value==='object'){
     EGRESS_CONFIG = normalizeEgressConfig(value);
     idbPut('meta', {k:'egressControl', value: EGRESS_CONFIG});
@@ -2118,9 +2114,7 @@ function showTab(name){
   if(name==='itemcodelist') renderItemCodeList();
   if(name==='datalog') renderDataLog();
   if(name==='report') renderReport();
-  if(name==='stats') renderStats();
   if(name==='specs') renderSpecs();
-  if(name==='share') renderShare();
   if(name==='settings') renderSettings();
   if(name==='guide') renderGuide();
   // Nudge a pull right when the user actually taps into a tab — the
@@ -2139,22 +2133,29 @@ qs('#topbarLogoutBtn').addEventListener('click', logoutAndClearCache);
    of this config — Admin can't lock themselves out). Stored as a single
    meta key ('tabConfig'), synced like PO_LIST/CLIENT_LIST/etc. — see
    applyRemoteMeta() and the "🗂️ Sắp xếp & Ẩn/hiện Tab" card in Cài đặt. */
-const TAB_ORDER_DEFAULT = ['input','table','polist','clientlist','itemcodelist','datalog','report','stats','specs','share','settings','guide'];
-const TAB_LABELS = {input:'Nhập liệu', table:'Dữ liệu', polist:'Danh sách PO', clientlist:'Danh sách Client', itemcodelist:'Danh sách Items Code', datalog:'Data Log', report:'Báo cáo', stats:'Thống kê', specs:'Specs', share:'Xuất nhập dữ liệu', settings:'Cài đặt', guide:'Hướng dẫn'};
-// Mặc định: Nhân viên (user) thấy đủ mọi tab như trước (không đổi hành vi
-// cũ); Giám sát/Quản lý (supervisor) mặc định ẩn tab Nhập liệu vì vai trò
-// này chỉ để xem — Admin chỉnh thêm được trong Cài đặt.
-let TAB_CONFIG = { order: TAB_ORDER_DEFAULT.slice(), hidden: { user: [], supervisor: ['input'] } };
+const TAB_ORDER_DEFAULT = ['input','report','table','itemcodelist','clientlist','specs','datalog','polist','settings','guide'];
+const TAB_LABELS = {input:'Nhập liệu', table:'Dữ liệu', polist:'Danh sách PO', clientlist:'Danh sách Client', itemcodelist:'Danh sách Items Code', datalog:'Data Log', report:'Báo cáo', specs:'Specs', settings:'Cài đặt', guide:'Hướng dẫn'};
+// Mặc định: Nhân viên (user) thấy Nhập liệu/Báo cáo/Dữ liệu/Data Log/Danh sách
+// PO/Hướng dẫn; ẩn Items Code/Client/Specs/Cài đặt. Giám sát ẩn Nhập liệu.
+// Admin luôn thấy đủ mọi tab (xem applyTabConfig) nên không thể tự khoá mình.
+const TAB_CONFIG_VERSION = 3;
+function defaultTabConfig(){
+  return { v: TAB_CONFIG_VERSION, order: TAB_ORDER_DEFAULT.slice(), hidden: { user: ['itemcodelist','clientlist','specs','settings'], supervisor: ['input'] } };
+}
+let TAB_CONFIG = defaultTabConfig();
+// Cấu hình tab lưu từ bản cũ hơn (khác version) bị bỏ, dùng lại mặc định mới —
+// áp dụng cho cả bản lưu trong máy lẫn bản đồng bộ về.
+function migrateTabConfig(cfg){
+  return (!cfg || cfg.v!==TAB_CONFIG_VERSION) ? defaultTabConfig() : normalizeTabConfig(cfg);
+}
 function normalizeTabConfig(cfg){
   const order = Array.isArray(cfg && cfg.order) ? cfg.order.filter(id=>TAB_ORDER_DEFAULT.includes(id)) : [];
   TAB_ORDER_DEFAULT.forEach(id=>{ if(!order.includes(id)) order.push(id); }); // tab nào thiếu trong cấu hình cũ (VD thêm mới sau này) vẫn không bị mất, đưa xuống cuối
   const hidden = {};
   ['user','supervisor'].forEach(role=>{
-    // 'settings' không bao giờ ẩn được — đây là nơi duy nhất có nút Đăng
-    // xuất/Ngắt kết nối, ẩn nó sẽ nhốt luôn người dùng trong tài khoản đó.
-    hidden[role] = Array.isArray(cfg && cfg.hidden && cfg.hidden[role]) ? cfg.hidden[role].filter(id=>TAB_ORDER_DEFAULT.includes(id) && id!=='settings') : [];
+    hidden[role] = Array.isArray(cfg && cfg.hidden && cfg.hidden[role]) ? cfg.hidden[role].filter(id=>TAB_ORDER_DEFAULT.includes(id)) : [];
   });
-  return { order, hidden };
+  return { v: TAB_CONFIG_VERSION, order, hidden };
 }
 // Sắp xếp lại DOM theo TAB_CONFIG.order, ẩn/hiện theo vai trò hiện tại (bỏ
 // qua hoàn toàn với Admin — luôn thấy đủ), và tự chuyển sang tab đầu tiên
@@ -3058,7 +3059,7 @@ function renderTable(){
 
   const toolCard = el('div',{class:'card'},[
     el('div',{class:'card-h'},['Xuất nhanh ca đã chọn (Short CSV)', el('div',{class:'rule'})]),
-    el('p',{class:'sub', style:'margin:0 0 10px;'},['Tick chọn vài ca ở bảng dưới rồi xuất ra 1 file CSV nhỏ (tiền tố "Short_") — cùng định dạng với file CSV tổng, chỉ ngắn hơn. Muốn nhập dữ liệu vào, hoặc xuất theo ngày/tuần/tháng tự động, dùng tab "Xuất nhập dữ liệu".']),
+    el('p',{class:'sub', style:'margin:0 0 10px;'},['Tick chọn vài ca ở bảng dưới rồi xuất ra 1 file CSV nhỏ (tiền tố "Short_") — cùng định dạng với file CSV tổng, chỉ ngắn hơn. Muốn nhập dữ liệu vào, hoặc xuất theo ngày/tuần/tháng tự động, dùng mục "Xuất nhập dữ liệu" trong tab Cài đặt.']),
     el('div',{class:'row'},[
       el('button',{class:'btn teal sm', id:'btnExportShort'},['📤 Xuất ca đã chọn (Short CSV)']),
     ]),
@@ -5326,268 +5327,6 @@ function renderReport(){
   qmsPdfBtn.addEventListener('click', ()=>exportQmsTemplate('pdf'));
 }
 
-/* ===================== STATS TAB ===================== */
-function numericFieldsList(){
-  const out = [];
-  SCHEMA.forEach(s=> s.fields.forEach(f=>{ if(f.type==='number') out.push({sectionId:s.id, sectionName:s.name, field:f}); }));
-  return out;
-}
-function boolFieldsList(){
-  const out = [];
-  SCHEMA.forEach(s=> s.fields.forEach(f=>{ if(f.type==='boolean') out.push({sectionId:s.id, sectionName:s.name, field:f}); }));
-  return out;
-}
-function overallCheckStats(){
-  let pass=0,cond=0,fail=0;
-  allCheckpoints.forEach(r=>{
-    const sec = sectionById(r.section);
-    if(!sec) return;
-    sec.fields.forEach(f=>{
-      const v = r.fields[f.id];
-      if(f.type==='boolean'){
-        if(v===true) pass++; else if(v===false) fail++;
-      } else if(f.type==='number'){
-        const st = evalStatus(f, v);
-        if(st==='pass') pass++; else if(st==='cond') cond++; else if(st==='fail') fail++;
-      }
-    });
-  });
-  return {pass,cond,fail,total:pass+cond+fail};
-}
-function renderStats(){
-  const root = qs('#view-stats');
-  root.innerHTML = '';
-  root.appendChild(el('div',{class:'section-title'},['Thống kê & SPC']));
-  if(allCheckpoints.length===0){
-    root.appendChild(el('div',{class:'card empty'},[el('div',{class:'ic'},['📊']), el('div',{},['Chưa có dữ liệu để thống kê'])]));
-    return;
-  }
-  const today = todayStr();
-  const todayCount = allCheckpoints.filter(r=>r.date===today).length;
-  const cs = overallCheckStats();
-  const passPct = cs.total ? Math.round(cs.pass/cs.total*100) : 0;
-  const failPct = cs.total ? Math.round(cs.fail/cs.total*100) : 0;
-
-  const kpis = el('div',{class:'grid g4', style:'gap:10px;margin-bottom:14px;'},[
-    kpiCard(String(allCheckpoints.length),'Tổng điểm kiểm tra','teal'),
-    kpiCard(String(todayCount),'Hôm nay','coffee'),
-    kpiCard(passPct+'%','Tỉ lệ Đạt','pass'),
-    kpiCard(failPct+'%','Tỉ lệ Lỗi','fail'),
-  ]);
-  root.appendChild(kpis);
-
-  const distCard = el('div',{class:'card'},[
-    el('div',{class:'card-h'},['Phân bố kết quả kiểm tra', el('div',{class:'rule'})]),
-  ]);
-  const distW = cs.total || 1;
-  const barWrap = el('div',{style:'display:flex;height:26px;border-radius:8px;overflow:hidden;background:#E2E8F0;'},[
-    el('div',{style:`width:${cs.pass/distW*100}%;background:var(--pass);`}),
-    el('div',{style:`width:${cs.cond/distW*100}%;background:var(--warn);`}),
-    el('div',{style:`width:${cs.fail/distW*100}%;background:var(--fail);`}),
-  ]);
-  distCard.appendChild(barWrap);
-  distCard.appendChild(el('div',{class:'legend', style:'margin-top:10px;'},[
-    el('span',{},[el('i',{style:'background:var(--pass)'}), `Đạt: ${cs.pass}`]),
-    el('span',{},[el('i',{style:'background:var(--warn)'}), `Cảnh báo (giữa LCL-UCL và LSL-USL): ${cs.cond}`]),
-    el('span',{},[el('i',{style:'background:var(--fail)'}), `Lỗi: ${cs.fail}`]),
-  ]));
-  root.appendChild(distCard);
-
-  const dayCard = el('div',{class:'card'},[
-    el('div',{class:'card-h'},['Số ca theo ngày (14 ngày gần nhất)', el('div',{class:'rule'})]),
-  ]);
-  const byDay = {};
-  const seenShiftPerDay = new Set();
-  allCheckpoints.forEach(r=>{
-    if(!r.date) return;
-    const sk = r.date+'|'+r.shift;
-    if(seenShiftPerDay.has(sk)) return;
-    seenShiftPerDay.add(sk);
-    byDay[r.date]=(byDay[r.date]||0)+1;
-  });
-  const days = Object.keys(byDay).sort().slice(-14);
-  if(days.length===0){
-    dayCard.appendChild(el('div',{class:'sub'},['Chưa có dữ liệu.']));
-  } else {
-    const dmax = Math.max(1, ...days.map(d=>byDay[d]));
-    const dayRow = el('div',{style:'display:flex;gap:6px;align-items:flex-end;height:100px;'},[]);
-    days.forEach(d=>{
-      const h = Math.round(byDay[d]/dmax*72);
-      dayRow.appendChild(el('div',{style:'flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;'},[
-        el('div',{style:'font-size:10px;font-weight:700;'},[String(byDay[d])]),
-        el('div',{style:`width:100%;height:${h}px;background:var(--teal);border-radius:4px 4px 0 0;`}),
-        el('div',{style:'font-size:9px;color:var(--muted);'},[d.slice(5)]),
-      ]));
-    });
-    dayCard.appendChild(dayRow);
-  }
-  root.appendChild(dayCard);
-
-  const paramCard = el('div',{class:'card'},[
-    el('div',{class:'card-h'},['Tóm tắt theo chỉ tiêu số', el('div',{class:'rule'})]),
-  ]);
-  const numList = numericFieldsList();
-  const rows = numList.map(it=>{
-    const vals = allCheckpoints.map(r=>r.fields[it.field.id]).filter(v=>v!=null);
-    if(vals.length===0) return {name:`${it.sectionName} — ${it.field.label.split('\n')[0]}`, empty:true};
-    const avg = vals.reduce((a,b)=>a+b,0)/vals.length;
-    const oos = allCheckpoints.filter(r=> evalStatus(it.field, r.fields[it.field.id])==='fail').length;
-    return { name:`${it.sectionName} — ${it.field.label.split('\n')[0]}`, avg, min:Math.min(...vals), max:Math.max(...vals), oos };
-  });
-  const tbl = el('table',{class:'ptab'},[]);
-  tbl.innerHTML = '<thead><tr><th>Chỉ tiêu</th><th>TB</th><th>Min</th><th>Max</th><th>OOS</th></tr></thead>';
-  const tbody = el('tbody',{},[]);
-  rows.forEach(r=>{
-    if(r.empty){ tbody.appendChild(el('tr',{},[el('td',{},[r.name]), el('td',{colspan:'4', style:'color:var(--muted2);'},['chưa có dữ liệu'])])); return; }
-    const fmt = x=>Math.round(x*1000)/1000;
-    const tr = el('tr',{},[
-      el('td',{},[r.name]), el('td',{},[String(fmt(r.avg))]), el('td',{},[String(fmt(r.min))]), el('td',{},[String(fmt(r.max))]),
-      el('td',{class: r.oos ? 'oos' : ''},[String(r.oos)]),
-    ]);
-    tbody.appendChild(tr);
-  });
-  tbl.appendChild(tbody);
-  paramCard.appendChild(tbl);
-  root.appendChild(paramCard);
-
-  const card = el('div',{class:'card'},[
-    el('div',{class:'card-h'},['SPC — Biểu đồ kiểm soát & năng lực', el('div',{class:'rule'})]),
-  ]);
-  const modeSel = el('select',{class:'inp'},[
-    el('option',{value:'spc'},['Chỉ tiêu số (SPC)']),
-    el('option',{value:'bool'},['Chỉ tiêu Đạt/Lỗi (tỉ lệ)']),
-  ]);
-  const fieldSel = el('select',{class:'inp', style:'margin-top:10px;'},[]);
-  card.appendChild(el('div',{class:'grid g2'},[modeSel, fieldSel]));
-  const chartBox = el('div',{style:'margin-top:14px;'},[]);
-  card.appendChild(chartBox);
-  root.appendChild(card);
-
-  function fillFieldOptions(){
-    fieldSel.innerHTML = '';
-    const list = modeSel.value==='bool' ? boolFieldsList() : numericFieldsList();
-    list.forEach((it,i)=>{
-      fieldSel.appendChild(el('option',{value:String(i)},[`${it.sectionName} — ${it.field.label.split('\n')[0]}`]));
-    });
-    fieldSel._list = list;
-    draw();
-  }
-  function draw(){
-    chartBox.innerHTML='';
-    const list = fieldSel._list||[];
-    const it = list[parseInt(fieldSel.value||'0',10)];
-    if(!it) return;
-    if(modeSel.value==='spc') drawSPC(chartBox, it.field);
-    else drawBoolSummary(chartBox, it.field);
-  }
-  modeSel.addEventListener('change', fillFieldOptions);
-  fieldSel.addEventListener('change', draw);
-  fillFieldOptions();
-}
-function kpiCard(value, label, tone){
-  return el('div',{style:`background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;text-align:center;`},[
-    el('div',{style:`font-size:20px;font-weight:800;color:var(--${tone});`},[value]),
-    el('div',{style:'font-size:10.5px;color:var(--muted);font-weight:600;margin-top:2px;'},[label]),
-  ]);
-}
-
-function drawBoolSummary(container, field){
-  const fo = fieldById(field.id);
-  const secTotal = fo ? allCheckpoints.filter(r=>r.section===fo.section.id).length : allCheckpoints.length;
-  const vals = allCheckpoints.map(r=>r.fields[field.id]).filter(v=>v!==undefined && v!==null);
-  const pass = vals.filter(v=>v===true).length;
-  const fail = vals.filter(v=>v===false).length;
-  const total = vals.length;
-  if(total===0){ container.appendChild(el('div',{class:'sub'},['Chưa có dữ liệu cho chỉ tiêu này.'])); return; }
-  const lb = boolLabels(field);
-  const pct = Math.round(pass/total*100);
-  const W=680,H=90;
-  const wPass = (W-40)*pass/total, wFail=(W-40)*fail/total;
-  let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
-  svg += `<rect x="20" y="30" width="${W-40}" height="30" fill="#E2E8F0" rx="8"/>`;
-  svg += `<rect x="20" y="30" width="${wPass}" height="30" fill="#15803D" rx="8"/>`;
-  svg += `<rect x="${20+wPass}" y="30" width="${wFail}" height="30" fill="#B91C1C"/>`;
-  svg += `<text x="20" y="20" font-size="13" fill="#0F172A" font-weight="700">${pct}% ${escapeXml(lb.t)} (${pass}/${total})</text>`;
-  svg += `</svg>`;
-  container.innerHTML = svg;
-  container.appendChild(el('div',{class:'legend'},[
-    el('span',{},[el('i',{style:'background:#15803D'}), `${lb.t}: ${pass}`]),
-    el('span',{},[el('i',{style:'background:#B91C1C'}), `${lb.f}: ${fail}`]),
-    el('span',{},[`Chưa kiểm: ${Math.max(0,secTotal-total)}`]),
-  ]));
-}
-
-function drawSPC(container, field){
-  const sorted = [...allCheckpoints].sort((a,b)=>(a.date+a.shift).localeCompare(b.date+b.shift));
-  const pts = sorted.map(r=>({label:`${fmtDateVN(r.date)} C${r.shift}${r.po?' PO'+r.po:''}`, v: r.fields[field.id]}))
-                     .filter(p=>p.v!==undefined && p.v!==null);
-  if(pts.length < 2){ container.appendChild(el('div',{class:'sub'},['Cần tối thiểu 2 giá trị để vẽ biểu đồ SPC.'])); return; }
-  const vals = pts.map(p=>p.v);
-  const n = vals.length;
-  const mean = vals.reduce((a,b)=>a+b,0)/n;
-  const mrs = [];
-  for(let i=1;i<n;i++) mrs.push(Math.abs(vals[i]-vals[i-1]));
-  const mrBar = mrs.reduce((a,b)=>a+b,0)/mrs.length;
-  const sigmaW = mrBar/1.128; // within-process sigma (moving range based) -> Cp/Cpk
-  const sigmaO = n>1 ? Math.sqrt(vals.reduce((a,b)=>a+(b-mean)*(b-mean),0)/(n-1)) : 0; // overall sigma -> Pp/Ppk
-  const UCL = mean + 2.66*mrBar;
-  const LCL = mean - 2.66*mrBar;
-  const LSL = field.hardMin, USL = field.hardMax;
-
-  const W=680,H=280,padL=48,padR=14,padT=16,padB=34;
-  let lo = Math.min(...vals, LCL, LSL!=null?LSL:Infinity), hi = Math.max(...vals, UCL, USL!=null?USL:-Infinity);
-  const pad = (hi-lo)*0.1 || 1; lo-=pad; hi+=pad;
-  const x = i => padL + (n<=1? 0 : i*(W-padL-padR)/(n-1));
-  const y = v => H-padB - (v-lo)*(H-padT-padB)/(hi-lo);
-  let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
-  svg += `<line x1="${padL}" y1="${H-padB}" x2="${W-padR}" y2="${H-padB}" stroke="#CBD5E1" stroke-width="1"/>`;
-  svg += `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${H-padB}" stroke="#CBD5E1" stroke-width="1"/>`;
-  const lines = [[mean,'#0F172A','','CL'],[UCL,'#B45309','4,3','UCL'],[LCL,'#B45309','4,3','LCL']];
-  if(LSL!=null) lines.push([LSL,'#B91C1C','2,2','LSL']);
-  if(USL!=null) lines.push([USL,'#B91C1C','2,2','USL']);
-  lines.forEach(([v,c,dash,lab])=>{
-    svg += `<line x1="${padL}" y1="${y(v)}" x2="${W-padR}" y2="${y(v)}" stroke="${c}" stroke-width="1.4" ${dash?`stroke-dasharray="${dash}"`:''}/>`;
-    svg += `<text x="${W-padR}" y="${y(v)-3}" font-size="9.5" fill="${c}" text-anchor="end">${lab} ${v.toFixed(2)}</text>`;
-  });
-  const linePts = pts.map((p,i)=>`${x(i)},${y(p.v)}`).join(' ');
-  svg += `<polyline points="${linePts}" fill="none" stroke="#0D9488" stroke-width="1.6"/>`;
-  pts.forEach((p,i)=>{
-    const st = evalStatus(field, p.v);
-    const outOfControl = p.v>UCL || p.v<LCL;
-    let color = '#0D9488';
-    if(st==='fail') color='#B91C1C'; else if(outOfControl) color='#B45309';
-    svg += `<circle cx="${x(i)}" cy="${y(p.v)}" r="4" fill="${color}"/>`;
-  });
-  svg += `</svg>`;
-  container.innerHTML = svg;
-
-  const oosCount = LSL!=null||USL!=null ? pts.filter(p=>(LSL!=null&&p.v<LSL)||(USL!=null&&p.v>USL)).length : 0;
-  const oocCount = pts.filter(p=>p.v>UCL||p.v<LCL).length;
-  container.appendChild(el('div',{class:'legend'},[
-    `n=${n}`, ` · CL=${mean.toFixed(2)}`, ` · σ trong nhóm=${sigmaW.toFixed(3)}`, ` · σ tổng thể=${sigmaO.toFixed(3)}`,
-    oocCount>0?` · ⚠️ Ngoài kiểm soát: ${oocCount}`:' · ✅ Trong tầm kiểm soát',
-    oosCount>0?` · 🛑 Ngoài spec: ${oosCount}`:''
-  ]));
-
-  if(LSL!=null && USL!=null && sigmaW>0){
-    const Cp = (USL-LSL)/(6*sigmaW);
-    const Cpk = Math.min((USL-mean)/(3*sigmaW), (mean-LSL)/(3*sigmaW));
-    const Pp = sigmaO>0 ? (USL-LSL)/(6*sigmaO) : null;
-    const Ppk = sigmaO>0 ? Math.min((USL-mean)/(3*sigmaO), (mean-LSL)/(3*sigmaO)) : null;
-    const capGrid = el('div',{class:'grid g4', style:'margin-top:10px;gap:8px;'},[
-      kpiCard(Cp.toFixed(2),'Cp','teal'),
-      kpiCard(Cpk.toFixed(2),'Cpk', Cpk>=1.33?'pass':Cpk>=1?'coffee':'fail'),
-      kpiCard(Pp!=null?Pp.toFixed(2):'—','Pp','teal'),
-      kpiCard(Ppk!=null?Ppk.toFixed(2):'—','Ppk', Ppk==null?'muted':Ppk>=1.33?'pass':Ppk>=1?'coffee':'fail'),
-    ]);
-    container.appendChild(capGrid);
-    let verdict = Cpk<1 ? 'Chưa đủ năng lực (Cpk<1.0) — cần cải thiện' : Cpk<1.33 ? 'Đạt mức tối thiểu (1.0–1.33)' : 'Năng lực tốt (Cpk≥1.33)';
-    container.appendChild(el('div',{class:'sub', style:'margin:8px 0 0;'},[verdict+'. Cp/Cpk dùng σ trong nhóm (moving range); Pp/Ppk dùng σ tổng thể (độ lệch chuẩn mẫu).']));
-  } else {
-    container.appendChild(el('div',{class:'sub', style:'margin:8px 0 0;'},['Chưa đủ LSL và USL (Specs tab) để tính Cp/Cpk/Pp/Ppk cho chỉ tiêu này.']));
-  }
-}
-
 /* ===================== SPECS TAB (parameters CRUD) ===================== */
 // Ghi đè LSL/LCL/UCL/USL theo Recipe cho 1 chỉ tiêu kiểu Số — tách riêng
 // khỏi bảng chính (renderSpecs) vì đây là 1 bảng con lồng bên trong, mở ra
@@ -5745,7 +5484,7 @@ function renderSpecs(){
   const root = qs('#view-specs');
   root.innerHTML = '';
   root.appendChild(el('div',{class:'section-title'},['Specs — Chỉ tiêu & Giới hạn']));
-  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},['Thêm / sửa / xoá chỉ tiêu kiểm tra cho từng công đoạn. Thay đổi có hiệu lực ngay ở tab Nhập liệu, Dữ liệu, Thống kê và cột CSV.']));
+  root.appendChild(el('div',{class:'sub', style:'margin-top:-10px;'},['Thêm / sửa / xoá chỉ tiêu kiểm tra cho từng công đoạn. Thay đổi có hiệu lực ngay ở tab Nhập liệu, Dữ liệu và cột CSV.']));
   root.appendChild(el('div',{class:'sub', style:'margin:6px 0 14px;'},['FAIL: ngoài LSL–USL · CONDITIONAL: giữa Control (LCL–UCL) và Spec (LSL–USL) · PASS: trong LCL–UCL. Bỏ trống ô nào thì ranh giới đó không áp dụng.']));
 
   const syncCard = el('div',{class:'card'},[
@@ -6000,26 +5739,11 @@ function weekRangeOf(dateStr){
   const fmt = x=>{ const p=n=>String(n).padStart(2,'0'); return `${x.getFullYear()}-${p(x.getMonth()+1)}-${p(x.getDate())}`; };
   return [fmt(monday), fmt(sunday)];
 }
-async function renderShare(){
-  const root = qs('#view-share');
-  if(!root) return;
+// Xuất/Nhập dữ liệu — trước là tab riêng, nay gộp vào tab Cài đặt: vẽ vào
+// `root` (1 khung con của renderSettings).
+async function renderShare(root){
   root.innerHTML = '';
   root.appendChild(el('div',{class:'section-title'},['Xuất nhập dữ liệu']));
-
-  const fileCard = el('div',{class:'card'},[
-    el('div',{class:'card-h'},['Trạng thái đồng bộ Supabase', el('div',{class:'rule'})]),
-  ]);
-  const statusWord = !cloudConfigured() ? 'Chưa cấu hình' : cloudStatus==='syncing' ? 'Đang đồng bộ…' : cloudStatus==='offline' ? 'Offline — chờ mạng' : cloudStatus==='error' ? (lastCloudError || 'Lỗi (sẽ tự thử lại)') : 'Đã đồng bộ';
-  fileCard.appendChild(el('div',{class:'filepill'+(cloudStatus==='idle'?' linked':'')},[
-    el('span',{class:'ic'},[cloudStatus==='idle'?'✅':cloudStatus==='syncing'?'🔄':'⚠️']),
-    el('span',{class:'nm'},[statusWord]),
-  ]));
-  fileCard.appendChild(el('div',{class:'kv'},[el('span',{class:'k'},['Số điểm kiểm tra trong máy này']), el('span',{class:'v'},[String(allCheckpoints.length)])]));
-  fileCard.appendChild(el('div',{class:'kv'},[el('span',{class:'k'},['Đồng bộ lần cuối']), el('span',{class:'v'},[cloudLastSyncAt ? fmtDateTimeVN(new Date(cloudLastSyncAt).getTime()) : '—'])]));
-  if(!cloudConfigured()){
-    fileCard.appendChild(el('p',{class:'sub', style:'margin:10px 0 0;'},['Chưa cấu hình đồng bộ — vào tab Cài đặt để bật đồng bộ nhiều thiết bị qua Supabase. Xuất/nhập thủ công bên dưới vẫn dùng được bình thường.']));
-  }
-  root.appendChild(fileCard);
 
   /* ---------- XUẤT DỮ LIỆU ---------- */
   const exportCard = el('div',{class:'card'},[
@@ -6193,7 +5917,7 @@ async function renderShare(){
       for(const r of fresh) await idbPut('shifts', r);
       await refreshCache(); await persistAll();
       toast(`Đã thêm ${fresh.length} điểm kiểm tra mới vào file CSV tổng`);
-      renderShare();
+      renderShare(root);
     });
     if(dupes.length){
       btns[1].addEventListener('click', async ()=>{
@@ -6201,7 +5925,7 @@ async function renderShare(){
         for(const r of dupes) await idbPut('shifts', r);
         await refreshCache(); await persistAll();
         toast(`Đã nhập ${incoming.length} điểm kiểm tra vào file CSV tổng (ghi đè ${dupes.length} điểm trùng)`);
-        renderShare();
+        renderShare(root);
       });
       btns[2].addEventListener('click', ()=>{ resultBox.innerHTML=''; e.target.value=''; });
     } else {
@@ -6368,18 +6092,17 @@ function renderTabConfigCard(){
   const draft = { order: TAB_CONFIG.order.slice(), hidden: {user: TAB_CONFIG.hidden.user.slice(), supervisor: TAB_CONFIG.hidden.supervisor.slice()} };
   const card = el('div',{class:'card'},[
     el('div',{class:'card-h'},['🗂️ Sắp xếp & Ẩn/hiện Tab', el('div',{class:'rule'})]),
-    el('p',{class:'sub', style:'margin:0 0 10px;'},['Đổi thứ tự hiện ở thanh tab trên cùng, và chọn ẩn tab nào với vai trò Nhân viên/Giám sát. Admin luôn thấy đủ mọi tab. Tab Cài đặt không ẩn được (nơi duy nhất có nút đăng xuất).']),
+    el('p',{class:'sub', style:'margin:0 0 10px;'},['Đổi thứ tự hiện ở thanh tab trên cùng, và chọn ẩn tab nào với vai trò Nhân viên/Giám sát. Admin luôn thấy đủ mọi tab.']),
   ]);
   const listBox = el('div',{},[]);
   card.appendChild(listBox);
   function renderList(){
     listBox.innerHTML = '';
     draft.order.forEach((id,idx)=>{
-      const isSettings = id==='settings';
       const upAttrs = {class:'btn ghost sm', title:'Lên trên'}; if(idx===0) upAttrs.disabled='disabled';
       const downAttrs = {class:'btn ghost sm', title:'Xuống dưới'}; if(idx===draft.order.length-1) downAttrs.disabled='disabled';
-      const userChk = el('input',{type:'checkbox'},[]); userChk.checked = draft.hidden.user.includes(id); userChk.disabled = isSettings;
-      const supChk = el('input',{type:'checkbox'},[]); supChk.checked = draft.hidden.supervisor.includes(id); supChk.disabled = isSettings;
+      const userChk = el('input',{type:'checkbox'},[]); userChk.checked = draft.hidden.user.includes(id);
+      const supChk = el('input',{type:'checkbox'},[]); supChk.checked = draft.hidden.supervisor.includes(id);
       const row = el('div',{class:'specfield'},[
         el('div',{class:'reorder'},[el('button',upAttrs,['▲']),el('button',downAttrs,['▼'])]),
         el('div',{class:'fi'},[el('b',{},[TAB_LABELS[id]||id])]),
@@ -6510,7 +6233,6 @@ function renderSettings(){
   ]);
   if(cloudCfg.url){
     cloudBtnRow.appendChild(el('button',{class:'btn ghost sm', title:'Dùng khi nghi ngờ 1 thiết bị bị "kẹt", không nhận được dữ liệu mới dù báo đã đồng bộ'},['🔁 Đồng bộ lại từ đầu']));
-    if(currentMember) cloudBtnRow.appendChild(el('button',{class:'btn ghost sm'},['🚪 Đăng xuất']));
     cloudBtnRow.appendChild(el('button',{class:'btn danger sm'},['⛔ Ngắt kết nối']));
   }
   cloudCard.appendChild(cloudBtnRow);
@@ -6520,7 +6242,6 @@ function renderSettings(){
   cloudBtns[bi++].addEventListener('click', manualSync);
   if(cloudCfg.url){
     cloudBtns[bi++].addEventListener('click', resyncFromScratch);
-    if(currentMember) cloudBtns[bi++].addEventListener('click', ()=>signOutCloud());
     cloudBtns[bi++].addEventListener('click', clearCloudConfig);
   }
   root.appendChild(cloudCard);
@@ -6594,6 +6315,10 @@ function renderSettings(){
   });
   root.appendChild(backupCard);
 
+  const shareBox = el('div',{},[]);
+  root.appendChild(shareBox);
+  renderShare(shareBox);
+
   const catCard = el('div',{class:'card'},[
     el('div',{class:'card-h'},['Danh mục Tên QC', el('div',{class:'rule'})]),
     el('p',{class:'sub', style:'margin:0 0 10px;'},['Mỗi tên 1 dòng. Danh sách này sẽ hiện ra dạng chọn ở tab Nhập liệu.']),
@@ -6643,7 +6368,7 @@ function renderGuide(){
     <h4>1. Đồng bộ Supabase (tuỳ chọn, khuyên bật để dùng nhiều thiết bị)</h4>
     <p>Đây là bản Online của Shiftly Report — dữ liệu luôn được lưu trước trong chính máy đang dùng (IndexedDB), giống hệt bản offline gốc, nên mất mạng vẫn nhập liệu bình thường. Muốn nhiều tablet/máy tính cùng thấy chung 1 bộ dữ liệu, vào tab <b>Cài đặt</b> → mục "☁️ Đồng bộ Supabase" → nhập <b>Supabase URL</b> và <b>Anon public key</b> (do người triển khai app cung cấp — xem <code>supabase/README.md</code> trong mã nguồn) → "💾 Lưu cấu hình". Sau đó app sẽ yêu cầu <b>đăng nhập</b> (tài khoản do Admin tạo trong tab Cài đặt → "👥 Quản lý tài khoản") — mỗi người dùng riêng, đăng nhập xong app tự đẩy/kéo dữ liệu, không cần thao tác thêm.</p>
     <h4>1b. Đăng nhập & quản lý tài khoản</h4>
-    <p>Khi đã cấu hình Đồng bộ Supabase, app yêu cầu đăng nhập trước khi vào — có 3 loại tài khoản: <b>Admin</b> (toàn quyền, đăng nhập bằng email + mật khẩu), <b>Nhân viên/User</b> (nhập liệu bình thường, đăng nhập bằng tên đăng nhập + mật khẩu), và <b>Giám sát/Quản lý</b> (chỉ xem — Báo cáo, Truy xuất, Thống kê, Dữ liệu... — không nhập/sửa được dữ liệu; cũng đăng nhập bằng tên đăng nhập + mật khẩu). Chỉ Admin thấy mục "👥 Quản lý tài khoản" trong tab Cài đặt để tạo tài khoản mới, đổi vai trò (kể cả đổi qua lại giữa 3 vai trò), hoặc vô hiệu hóa một tài khoản (người bị vô hiệu hóa không đăng nhập được nữa, kể cả trên thiết bị đang mở sẵn — lần gọi đồng bộ tiếp theo sẽ bị từ chối và quay lại màn hình đăng nhập). Tài khoản Admin đầu tiên phải được tạo thủ công 1 lần trong Supabase Dashboard — xem <code>supabase/README.md</code>. Nếu chưa cấu hình Đồng bộ Supabase, app dùng bình thường không cần đăng nhập gì cả (y hệt trước đây). Khi đã đăng nhập, góc phải thanh trên cùng (mọi tab) hiện tên tài khoản kèm nút <b>"🚪 Đăng xuất"</b> — bấm vào sẽ đăng xuất VÀ tự xoá bộ nhớ cache trình duyệt của trang (Cache Storage/Service Worker nếu có), rồi tải lại trang; dữ liệu đã nhập trong máy (IndexedDB) không hề bị đụng tới. Tab Cài đặt vẫn còn nút "🚪 Đăng xuất" riêng (chỉ đăng xuất, không xoá cache) cho ai quen dùng chỗ cũ.</p>
+    <p>Khi đã cấu hình Đồng bộ Supabase, app yêu cầu đăng nhập trước khi vào — có 3 loại tài khoản: <b>Admin</b> (toàn quyền, đăng nhập bằng email + mật khẩu), <b>Nhân viên/User</b> (nhập liệu bình thường, đăng nhập bằng tên đăng nhập + mật khẩu), và <b>Giám sát/Quản lý</b> (chỉ xem — Báo cáo, Dữ liệu... — không nhập/sửa được dữ liệu; cũng đăng nhập bằng tên đăng nhập + mật khẩu). Chỉ Admin thấy mục "👥 Quản lý tài khoản" trong tab Cài đặt để tạo tài khoản mới, đổi vai trò (kể cả đổi qua lại giữa 3 vai trò), hoặc vô hiệu hóa một tài khoản (người bị vô hiệu hóa không đăng nhập được nữa, kể cả trên thiết bị đang mở sẵn — lần gọi đồng bộ tiếp theo sẽ bị từ chối và quay lại màn hình đăng nhập). Tài khoản Admin đầu tiên phải được tạo thủ công 1 lần trong Supabase Dashboard — xem <code>supabase/README.md</code>. Nếu chưa cấu hình Đồng bộ Supabase, app dùng bình thường không cần đăng nhập gì cả (y hệt trước đây). Khi đã đăng nhập, góc phải thanh trên cùng (mọi tab) hiện tên tài khoản kèm nút <b>"🚪 Đăng xuất"</b> — bấm vào sẽ đăng xuất VÀ tự xoá bộ nhớ cache trình duyệt của trang (Cache Storage/Service Worker nếu có), rồi tải lại trang; dữ liệu đã nhập trong máy (IndexedDB) không hề bị đụng tới.</p>
     <h4>1c. Admin tuỳ chỉnh thứ tự & ẩn/hiện Tab theo vai trò</h4>
     <p>Ở tab Cài đặt, mục "🗂️ Sắp xếp &amp; Ẩn/hiện Tab" (chỉ Admin thấy) cho phép đổi thứ tự hiện ở thanh tab trên cùng (nút ▲▼, áp dụng chung cho mọi thiết bị/mọi người sau khi bấm Lưu), và chọn ẩn riêng từng tab với vai trò Nhân viên và/hoặc Giám sát/Quản lý — VD ẩn tab Specs với Nhân viên nếu không muốn họ tự sửa chỉ tiêu. Admin luôn thấy đủ mọi tab bất kể cấu hình này. Tab Cài đặt không bao giờ ẩn được (đây là nơi duy nhất có nút đăng xuất/ngắt kết nối, ẩn đi sẽ nhốt luôn tài khoản đó). Mặc định, vai trò Giám sát/Quản lý bị ẩn sẵn tab Nhập liệu.</p>
     <h4>2. Nhập liệu theo Điểm kiểm tra</h4>
@@ -6652,8 +6377,6 @@ function renderGuide(){
     <p>Với các chỉ tiêu kiểm tra ngoại quan (không có số liệu), chạm nút để chuyển trạng thái: — — (chưa kiểm) → ✅ Đạt → ❌ Lỗi → quay lại — —.</p>
     <h4>4. Xem lại & sửa</h4>
     <p>Tab <b>Dữ liệu</b> liệt kê tất cả các điểm kiểm tra đã nhập (chế độ 📋 Danh sách ca), mỗi dòng có Công đoạn + PO riêng, chạm 👁 để xem chi tiết, ✎ sửa, hoặc 🗑 xoá. Chế độ 📅 Xem theo ngày hiển thị Ca 1/2/3 cạnh nhau — mỗi cột liệt kê tất cả điểm kiểm tra (mọi công đoạn, mọi PO) của ca đó, giống bố cục file Excel gốc.</p>
-    <h4>5. Thống kê xu hướng</h4>
-    <p>Tab <b>Thống kê</b> cho phép xem biểu đồ xu hướng của từng chỉ tiêu số theo thời gian (có dải chuẩn tham chiếu), hoặc tỉ lệ Đạt/Lỗi của các chỉ tiêu ngoại quan.</p>
     <h4>6. An toàn dữ liệu</h4>
     <p>Toàn bộ dữ liệu được lưu ngay trong máy đang dùng (IndexedDB) trước tiên — luôn vào được, kể cả mất mạng. Nếu có cấu hình đồng bộ Supabase, mỗi lần lưu app sẽ tự đẩy dữ liệu lên; nếu đang offline hoặc đồng bộ lỗi, các thay đổi được xếp vào 1 "hàng đợi" lưu ngay trong máy và app tự thử lại khi có mạng trở lại — không mất dữ liệu. Vẫn nên thỉnh thoảng tải file JSON sao lưu ở tab Cài đặt như 1 lớp an toàn bổ sung.</p>
     <h4>6b. Đồng bộ Supabase — cách hoạt động</h4>
@@ -6664,15 +6387,15 @@ function renderGuide(){
     <ul>
       <li><b>Định kỳ (hàng tuần):</b> tải JSON sao lưu (tab Cài đặt) gửi email cho chính mình hoặc copy qua USB.</li>
       <li><b>Không có mạng dài ngày ở xưởng:</b> vẫn nhập liệu bình thường — dữ liệu nằm an toàn trong máy (hàng đợi đồng bộ), tự đẩy lên hết khi có mạng trở lại, không cần thao tác gì thêm.</li>
-      <li><b>Chưa/không muốn bật Supabase:</b> vẫn dùng tab <b>Xuất nhập dữ liệu</b> để xuất CSV/Excel/JSON thủ công và chia sẻ qua OneDrive/SharePoint/USB như cách làm truyền thống.</li>
+      <li><b>Chưa/không muốn bật Supabase:</b> vẫn dùng mục <b>Xuất nhập dữ liệu</b> (tab Cài đặt) để xuất CSV/Excel/JSON thủ công và chia sẻ qua OneDrive/SharePoint/USB như cách làm truyền thống.</li>
     </ul>
     <h4>8. Xuất / nhập nhanh một phần dữ liệu (Short CSV)</h4>
     <p>Khi chỉ cần gửi vài ca (không phải toàn bộ lịch sử) cho người khác — ví dụ đưa số liệu hôm nay cho quản lý xem trên máy khác:</p>
     <ul>
       <li><b>Xuất theo lựa chọn tay:</b> ở tab <b>Dữ liệu</b> (chế độ Danh sách ca), tick chọn các ca cần gửi (có "chọn tất cả" ở đầu bảng) → bấm <b>"Xuất ca đã chọn (Short CSV)"</b>.</li>
-      <li><b>Xuất theo khoảng thời gian tự động:</b> ở tab <b>Xuất nhập dữ liệu</b>, chọn phạm vi "Theo ca cụ thể / Theo ngày / Theo tuần / Theo tháng" → app tự lọc đúng các ca trong khoảng đó → "Xuất & Chia sẻ".</li>
+      <li><b>Xuất theo khoảng thời gian tự động:</b> ở mục <b>Xuất nhập dữ liệu</b> (tab Cài đặt), chọn phạm vi "Theo ca cụ thể / Theo ngày / Theo tuần / Theo tháng" → app tự lọc đúng các ca trong khoảng đó → "Xuất & Chia sẻ".</li>
       <li>Cả 2 cách đều tạo 1 file CSV nhỏ, tên bắt đầu bằng <b>"Short_"</b>, cùng định dạng cột với file CSV tổng nên mở được ở cả 2 nơi.</li>
-      <li><b>Nhập:</b> ở máy nhận, vào tab <b>Xuất nhập dữ liệu</b> → "Chọn file CSV để nhập" → chọn file "Short_..." (hoặc cả file CSV tổng) vừa nhận. App tự so sánh với dữ liệu đang có và <b>báo động nếu phát hiện ca trùng</b> (cùng Ngày+Ca đã tồn tại) — chọn "Chỉ thêm ca mới" (an toàn, bỏ qua trùng) hoặc "Ghi đè cả ca trùng" (nếu chắc chắn muốn thay bằng bản mới). Dữ liệu nhập vào được lưu vào máy này và tự đồng bộ lên Supabase (nếu đã cấu hình) như mọi thay đổi khác.</li>
+      <li><b>Nhập:</b> ở máy nhận, vào mục <b>Xuất nhập dữ liệu</b> (tab Cài đặt) → "Chọn file CSV để nhập" → chọn file "Short_..." (hoặc cả file CSV tổng) vừa nhận. App tự so sánh với dữ liệu đang có và <b>báo động nếu phát hiện ca trùng</b> (cùng Ngày+Ca đã tồn tại) — chọn "Chỉ thêm ca mới" (an toàn, bỏ qua trùng) hoặc "Ghi đè cả ca trùng" (nếu chắc chắn muốn thay bằng bản mới). Dữ liệu nhập vào được lưu vào máy này và tự đồng bộ lên Supabase (nếu đã cấu hình) như mọi thay đổi khác.</li>
     </ul>
     <h4>9. Đính kèm ảnh bất thường</h4>
     <p>Ngay dưới ô "Ghi chú bất thường" của mỗi công đoạn có 2 nút: <b>📎 Đính kèm ảnh</b> (chọn ảnh có sẵn trong máy) và <b>📷 Chụp ảnh</b> (mở camera chụp trực tiếp). Ảnh được nén gọn và lưu ngay trong máy (IndexedDB) — không cần bấm "Lưu công đoạn" mới lưu ảnh. Chạm ✕ trên ảnh nhỏ để xoá. <b>Lưu ý:</b> ảnh không đi kèm trong file CSV (CSV chỉ chứa số liệu để tương thích Excel) — ảnh chỉ xem được trong app trên chính máy đã chụp/đính kèm, hoặc trong bản backup JSON đầy đủ (tab Cài đặt).</p>
@@ -6697,9 +6420,9 @@ function renderGuide(){
     <h4>17. Định dạng ngày DD/MM/YYYY</h4>
     <p>Toàn bộ ngày hiển thị trong app (và cột Date khi xuất CSV/Excel) đều theo định dạng <b>DD/MM/YYYY</b> (VD: 17/07/2026). Khi nhập lại file CSV cũ có định dạng khác, app vẫn tự nhận diện được.</p>
     <h4>18. Xuất dữ liệu nhiều định dạng (CSV / Excel / JSON)</h4>
-    <p>Tab Xuất nhập dữ liệu giờ cho chọn phạm vi (Toàn bộ / Theo ca / Ngày / Tuần / Tháng / Theo PO) và định dạng file (CSV, Excel .xls, hoặc JSON) trước khi xuất. Giờ cũng <b>nhập lại được</b> file Excel .xls — nhưng chỉ với file do chính app này xuất ra (app đọc lại đúng định dạng của mình, không đọc được file .xlsx bất kỳ từ nơi khác).</p>
+    <p>Mục Xuất nhập dữ liệu (tab Cài đặt) giờ cho chọn phạm vi (Toàn bộ / Theo ca / Ngày / Tuần / Tháng / Theo PO) và định dạng file (CSV, Excel .xls, hoặc JSON) trước khi xuất. Giờ cũng <b>nhập lại được</b> file Excel .xls — nhưng chỉ với file do chính app này xuất ra (app đọc lại đúng định dạng của mình, không đọc được file .xlsx bất kỳ từ nơi khác).</p>
     <h4>19. Nhập ảnh đính kèm từ xa</h4>
-    <p>Tab Xuất nhập dữ liệu có mục "Nhập ảnh đính kèm": chọn đúng Ngày + Ca + Công đoạn + PO của điểm kiểm tra rồi chọn ảnh — dùng khi nhận được ảnh bằng chứng qua Zalo/email từ người khác thay vì tự chụp trực tiếp trong ca.</p>
+    <p>Mục Xuất nhập dữ liệu (tab Cài đặt) có mục "Nhập ảnh đính kèm": chọn đúng Ngày + Ca + Công đoạn + PO của điểm kiểm tra rồi chọn ảnh — dùng khi nhận được ảnh bằng chứng qua Zalo/email từ người khác thay vì tự chụp trực tiếp trong ca.</p>
     <h4>20. Dán ảnh trực tiếp (Copy/Paste)</h4>
     <p>Ô "📋 Dán ảnh vào đây (Ctrl+V)" dưới mỗi Ghi chú bất thường — chạm vào ô rồi dán (paste) ảnh đã copy sẵn, không cần lưu file trước.</p>
     <h4>21. Tab Specs — bảng chỉnh sửa trực tiếp, Bắt buộc & ghi đè theo Recipe</h4>
@@ -7085,7 +6808,7 @@ function renderAll(){
   await loadSaveDirHandle();
   ensureStoragePersisted(); // không await — không cần chặn boot để chờ hộp thoại quyền (nếu có)
   const metaTabConfig = await idbGet('meta','tabConfig');
-  if(metaTabConfig && metaTabConfig.value) TAB_CONFIG = normalizeTabConfig(metaTabConfig.value);
+  if(metaTabConfig && metaTabConfig.value) TAB_CONFIG = migrateTabConfig(metaTabConfig.value);
   const metaTech = await idbGet('meta','technicians');
   if(metaTech && Array.isArray(metaTech.value) && metaTech.value.length) TECHNICIANS = metaTech.value;
   const metaSchema = await idbGet('meta','schema');
@@ -7105,7 +6828,7 @@ function renderAll(){
   // Dọn các công đoạn đã bị xoá hẳn (hiện: FOAMING) khỏi 1 SCHEMA đã lưu từ
   // trước — xem comment ở stripRemovedSections(). Checkpoint FOAMING đã lưu
   // KHÔNG bị đụng tới, chỉ không còn là 1 công đoạn hợp lệ trong
-  // Specs/Báo cáo/Thống kê/Gantt nữa.
+  // Specs/Báo cáo/Gantt nữa.
   const cleanedSchema = stripRemovedSections(SCHEMA);
   if(cleanedSchema !== SCHEMA){ SCHEMA = cleanedSchema; migrated = true; }
   if(migrated) await saveSchema();

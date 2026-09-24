@@ -71,7 +71,7 @@ test('admin always sees every tab, even one hidden for supervisor/user', async (
   try {
     w.eval("currentMember = {userId:'u2', displayName:'Admin', role:'admin'}");
     w.applyTabConfig();
-    assert.deepEqual(hiddenTabs(w), [], 'admin must never have any tab hidden');
+    assert.deepEqual(hiddenTabs(w), [], 'admin must never have any tab hidden (even Cài đặt)');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
@@ -110,30 +110,30 @@ test('topbar "🚪 Đăng xuất" button: hidden when logged out, shown when log
   } finally { dom.window.close(); }
 });
 
-test('a plain user is unaffected (default hidden list is empty) unless Admin explicitly hides something', async () => {
+test('a plain user by default sees only Nhập liệu/Báo cáo/Dữ liệu/Data Log/Cài đặt/Hướng dẫn; Admin can hide more', async () => {
   const {dom, w, errors} = await boot();
   try {
     w.eval("currentMember = {userId:'u3', displayName:'Nhân viên', role:'user'}");
     w.applyTabConfig();
-    assert.deepEqual(hiddenTabs(w), [], 'user role keeps its pre-existing full access by default');
+    assert.deepEqual(hiddenTabs(w).sort(), ['clientlist','itemcodelist','settings','specs'], 'user role default: Items Code/Client/Specs/Cài đặt hidden, Danh sách PO stays');
 
-    w.eval("TAB_CONFIG = normalizeTabConfig({order: TAB_CONFIG.order, hidden: {user: ['stats'], supervisor: ['input']}})");
+    w.eval("TAB_CONFIG = normalizeTabConfig({order: TAB_CONFIG.order, hidden: {user: ['report'], supervisor: ['input']}})");
     w.applyTabConfig();
-    assert.deepEqual(hiddenTabs(w), ['stats'], 'Admin can explicitly hide a tab for the user role too');
+    assert.deepEqual(hiddenTabs(w), ['report'], 'Admin can explicitly hide a tab for the user role too');
     assert.equal(errors.length, 0, errors.join('\n'));
   } finally { dom.window.close(); }
 });
 
-test('normalizeTabConfig: "settings" can never be hidden, and reordering is respected', async () => {
+test('normalizeTabConfig: "settings" can now be hidden per role, and reordering is respected', async () => {
   const {dom, w, errors} = await boot();
   try {
     w.eval(`window._testCfg = normalizeTabConfig({
-      order: ['guide','settings','input','table','polist','clientlist','datalog','report','stats','specs','share'],
+      order: ['guide','settings','input','table','polist','clientlist','datalog','report','specs'],
       hidden: {user: ['settings'], supervisor: ['settings','input']},
     })`);
     const cfg = evalJson(w, 'window._testCfg');
-    assert.deepEqual(cfg.hidden.user, [], '"settings" must be stripped out even if the caller tried to hide it');
-    assert.deepEqual(cfg.hidden.supervisor, ['input']);
+    assert.deepEqual(cfg.hidden.user, ['settings'], 'Cài đặt can be hidden for a role');
+    assert.deepEqual(cfg.hidden.supervisor, ['settings','input']);
     assert.equal(cfg.order[0], 'guide');
     assert.equal(cfg.order[1], 'settings');
 
@@ -141,5 +141,21 @@ test('normalizeTabConfig: "settings" can never be hidden, and reordering is resp
     w.applyTabConfig();
     assert.deepEqual(tabOrder(w).slice(0, 2), ['guide', 'settings']);
     assert.equal(errors.length, 0, errors.join('\n'));
+  } finally { dom.window.close(); }
+});
+
+test('tab layout: Thống kê and Xuất nhập dữ liệu are gone (share merged into Cài đặt) and default order matches the requested one', async () => {
+  const {dom, w, errors} = await boot();
+  try {
+    assert.deepEqual(tabOrder(w), ['input','report','table','itemcodelist','clientlist','specs','datalog','polist','settings','guide']);
+    w.eval("showTab('settings')");
+    await new Promise(r => setTimeout(r, 100));
+    const t = w.document.getElementById('view-settings').textContent;
+    assert.ok(t.includes('Xuất dữ liệu') && t.includes('Nhập dữ liệu'), 'export/import now lives in Cài đặt');
+    // an old saved config (no version) is replaced by the new defaults
+    w.eval("TAB_CONFIG = migrateTabConfig({order:['guide','input'], hidden:{user:[],supervisor:[]}})");
+    assert.deepEqual(evalJson(w, 'TAB_CONFIG.order'), ['input','report','table','itemcodelist','clientlist','specs','datalog','polist','settings','guide']);
+    assert.equal(errors.length, 0, errors.join(' | '));
+    await new Promise(r => setTimeout(r, 150));
   } finally { dom.window.close(); }
 });
