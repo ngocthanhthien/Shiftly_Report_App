@@ -110,12 +110,12 @@ test('topbar "🚪 Đăng xuất" button: hidden when logged out, shown when log
   } finally { dom.window.close(); }
 });
 
-test('a plain user by default sees only Nhập liệu/Báo cáo/Dữ liệu/Data Log/Cài đặt/Hướng dẫn; Admin can hide more', async () => {
+test('a plain user by default sees only Nhập liệu/Báo cáo/Dữ liệu/Items Code/Hướng dẫn; Admin can hide more', async () => {
   const {dom, w, errors} = await boot();
   try {
     w.eval("currentMember = {userId:'u3', displayName:'Nhân viên', role:'user'}");
     w.applyTabConfig();
-    assert.deepEqual(hiddenTabs(w).sort(), ['clientlist','itemcodelist','settings','specs'], 'user role default: Items Code/Client/Specs/Cài đặt hidden, Danh sách PO stays');
+    assert.deepEqual(hiddenTabs(w).sort(), ['clientlist','datalog','polist','settings','specs'], 'user role default: only Nhập liệu/Báo cáo/Dữ liệu/Items Code/Hướng dẫn visible');
 
     w.eval("TAB_CONFIG = normalizeTabConfig({order: TAB_CONFIG.order, hidden: {user: ['report'], supervisor: ['input']}})");
     w.applyTabConfig();

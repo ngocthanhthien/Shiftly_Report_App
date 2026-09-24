@@ -2135,12 +2135,12 @@ qs('#topbarLogoutBtn').addEventListener('click', logoutAndClearCache);
    applyRemoteMeta() and the "🗂️ Sắp xếp & Ẩn/hiện Tab" card in Cài đặt. */
 const TAB_ORDER_DEFAULT = ['input','report','table','itemcodelist','clientlist','specs','datalog','polist','settings','guide'];
 const TAB_LABELS = {input:'Nhập liệu', table:'Dữ liệu', polist:'Danh sách PO', clientlist:'Danh sách Client', itemcodelist:'Danh sách Items Code', datalog:'Data Log', report:'Báo cáo', specs:'Specs', settings:'Cài đặt', guide:'Hướng dẫn'};
-// Mặc định: Nhân viên (user) thấy Nhập liệu/Báo cáo/Dữ liệu/Data Log/Danh sách
-// PO/Hướng dẫn; ẩn Items Code/Client/Specs/Cài đặt. Giám sát ẩn Nhập liệu.
+// Mặc định: Nhân viên (user) chỉ thấy Nhập liệu/Báo cáo/Dữ liệu/Items Code/
+// Hướng dẫn; ẩn các tab còn lại. Giám sát ẩn Nhập liệu.
 // Admin luôn thấy đủ mọi tab (xem applyTabConfig) nên không thể tự khoá mình.
-const TAB_CONFIG_VERSION = 3;
+const TAB_CONFIG_VERSION = 4;
 function defaultTabConfig(){
-  return { v: TAB_CONFIG_VERSION, order: TAB_ORDER_DEFAULT.slice(), hidden: { user: ['itemcodelist','clientlist','specs','settings'], supervisor: ['input'] } };
+  return { v: TAB_CONFIG_VERSION, order: TAB_ORDER_DEFAULT.slice(), hidden: { user: ['clientlist','specs','datalog','polist','settings'], supervisor: ['input'] } };
 }
 let TAB_CONFIG = defaultTabConfig();
 // Cấu hình tab lưu từ bản cũ hơn (khác version) bị bỏ, dùng lại mặc định mới —
