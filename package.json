@@ -7,8 +7,11 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
+    "bcryptjs": "^3.0.3",
+    "esbuild": "^0.28.2",
     "fake-indexeddb": "6.2.4",
     "jsdom": "^30.0.1",
+    "miniflare": "^4.20260730.0",
     "supabase": "^2.117.0"
   }
 }

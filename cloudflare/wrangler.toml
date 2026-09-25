@@ -1,0 +1,33 @@
+name = "shiftly-report-api"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Origin (không kèm đường dẫn) của bản web trên GitHub Pages — thêm origin khác, cách nhau dấu phẩy, nếu cần
+ALLOWED_ORIGINS = "https://ngocthanhthien.github.io"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "shiftly"
+database_id = "e9575116-0071-4f87-99d0-1e5f895ceefa"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "shiftly-images"
+
+[[durable_objects.bindings]]
+name = "HASHER"
+class_name = "Hasher"
+
+[[durable_objects.bindings]]
+name = "HUB"
+class_name = "Hub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Hasher", "Hub"]
+
+# Secrets (KHÔNG ghi ở đây) — đặt bằng: npx wrangler secret put <TÊN>
+#   JWT_SECRET       chuỗi ngẫu nhiên dài >= 32 ký tự
+#   BOOTSTRAP_TOKEN  khóa dùng 1 lần để nhập tài khoản ban đầu / tạo Admin đầu tiên

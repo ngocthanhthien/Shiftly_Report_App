@@ -1,2 +1,8 @@
 node_modules/
 *.log
+
+# Cloudflare backend — không commit dữ liệu/khóa nhạy cảm
+cloudflare/.wrangler/
+cloudflare/.dev.vars
+cloudflare/users*.json
+users-export*.json
