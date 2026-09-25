@@ -147,7 +147,7 @@ test('JSON backup v2 round-trips checkpoints AND meta, and restoring it uploads 
       const parsed = ${backup};
       for (const r of parsed.checkpoints) await idbPut('shifts', forUpload(r));
       await restoreMetaFromBackup(parsed.meta);
-      await refreshCache(); await persistAll(); await flushOutbox();
+      await refreshCache(); scheduleFlush(); await flushOutbox();
     })()`);
     assert.equal(await drained(B.w), true);
     assert.equal((await backend.db.prepare("SELECT COUNT(*) AS n FROM checkpoints WHERE po = '987654321'").first()).n, 1, 'bản ghi từ file sao lưu đã lên server');
@@ -171,6 +171,43 @@ test('a device still configured for Supabase is switched to the Cloudflare Worke
     assert.equal(w.eval('cloudCfg.url'), w.eval('DEFAULT_API_URL'));
     assert.equal(w.eval('syncCursors.checkpoints'), '0');
     assert.equal((await w.idbGetAll('outbox')).length >= 1, true, 'thay đổi chưa gửi không bị mất');
+    await settle(200);
+  } finally { dom.window.close(); }
+});
+
+test('a token refresh that fails only because of a flaky network does NOT log the user out; only a real rejection does', async () => {
+  const { dom, w } = await boot();
+  try {
+    await loginAs(w, 'user');
+    assert.equal(gateVisible(w), false);
+    // Máy chủ nói "unauthorized" và lần làm mới phiên hỏng vì mạng (fetch ném lỗi) -> giữ phiên, không đá ra.
+    w.fetch = async url => {
+      if (String(url).includes('/auth/refresh')) throw new Error('network down');
+      return { ok: true, status: 200, text: async () => JSON.stringify({ error: 'unauthorized' }) };
+    };
+    const res = await w.eval("(async () => { const r = await cloudFetch('sync_get_meta', {}); return r === null; })()");
+    assert.equal(res, true);
+    assert.equal(gateVisible(w), false, 'vẫn ở trong app');
+    assert.ok(w.eval("!!authSession"), 'phiên còn nguyên');
+    await settle(200);
+  } finally { dom.window.close(); }
+});
+
+test('restoring a large backup does not build an outbox entry per row (no O(n^2) queue with photos): rows go out via the dirty scan and all reach the server', async () => {
+  const { dom, w } = await boot();
+  try {
+    await loginAs(w, 'admin');
+    await w.eval(`(async () => {
+      for (let i = 0; i < 45; i++) {
+        const cp = blankCheckpoint('2026-09-2' + (i % 9), '1', 'ROA', String(500000000 + i), 'QA');
+        cp.updatedAt = new Date().toISOString(); cp.images = i % 5 === 0 ? [{name:'i.jpg', dataUrl:'data:image/jpeg;base64,QQ==', ts: i + 1}] : [];
+        await idbPut('shifts', forUpload(Object.assign(cp, {_syncedAt: cp.updatedAt})));
+      }
+      await refreshCache(); scheduleFlush();
+    })()`);
+    assert.equal((await w.idbGetAll('outbox')).filter(i => i.kind === 'checkpoint').length, 0, 'không xếp từng dòng vào hàng đợi');
+    assert.equal(await drained(w, 15000), true);
+    assert.equal((await backend.db.prepare("SELECT COUNT(*) AS n FROM checkpoints WHERE po LIKE '5000000%'").first()).n, 45);
     await settle(200);
   } finally { dom.window.close(); }
 });

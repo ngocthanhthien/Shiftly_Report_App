@@ -324,3 +324,10 @@ test('realtime: a WebSocket subscriber is told "changed" after another member pu
   assert.equal(await Promise.race([got, new Promise(r => setTimeout(() => r('timeout'), 3000))]), 'changed');
   ws.close();
 });
+
+test('login: an absurdly long password is rejected up front (no expensive hashing), and expired sessions are cleaned up on login', async () => {
+  assert.equal((await login('qa1', 'x'.repeat(5000))).status, 400);
+  await db.prepare("INSERT INTO sessions (id, user_id, refresh_hash, expires_at) VALUES ('old1', 'u', 'h', 1)").run();
+  assert.equal((await login('admin@example.com', 'adminpass')).status, 200);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE id = 'old1'").first()).n, 0);
+});

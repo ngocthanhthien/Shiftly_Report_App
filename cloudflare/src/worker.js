@@ -217,7 +217,7 @@ const RPC = {
         metas = row.images.map(im => { const { dataUrl, ...rest } = im; return { ...rest, size: String(dataUrl || '').length }; });
         if (a.cur) {
           const keep = new Set(row.images.map(im => im.ts));
-          parse(a.cur.images, []).filter(m => !keep.has(m.ts)).forEach(m => r2Deletes.push(imgKey(row.key, m.ts)));
+          a.removed = parse(a.cur.images, []).filter(m => !keep.has(m.ts)).map(m => imgKey(row.key, m.ts));
         }
       }
       stmts.push(env.DB.prepare(BUMP));
@@ -241,6 +241,9 @@ const RPC = {
       accepted.forEach((a, n) => {
         const applied = out[n * 2 + 1].meta.changes > 0;
         results[a.i] = applied ? { key: a.row.key, applied: true } : { key: a.row.key, applied: false, reason: 'stale' };
+        // Chỉ xoá ảnh bị bỏ của những dòng THẬT SỰ được ghi — nếu thua 1 cuộc đua (bản khác mới hơn vừa ghi trước) thì ảnh cũ vẫn
+        // đang được dòng thắng tham chiếu, không được xoá.
+        if (applied && a.removed) r2Deletes.push(...a.removed);
       });
       if (r2Deletes.length) await env.IMAGES.delete(r2Deletes.slice(0, 1000));
     }
@@ -360,7 +363,7 @@ async function handleAuth(path, req, env) {
   if (path === '/auth/login') {
     const ident = identifierToLookup(body.identifier);
     const password = String(body.password || '');
-    if (!ident || !password) return { status: 400, body: { error: 'invalid_credentials' } };
+    if (!ident || !password || password.length > 256 || ident.length > 320) return { status: 400, body: { error: 'invalid_credentials' } };
     const ip = req.headers.get('CF-Connecting-IP') || 'unknown';
     const rlKey = ip + '|' + ident;
     if (await rateLimited(env, rlKey)) return { status: 429, body: { error: 'too_many_attempts' } };
@@ -368,6 +371,7 @@ async function handleAuth(path, req, env) {
     const ok = user && !user.disabled ? (await hasher(env, { op: 'verify', password, hash: user.password_hash })).ok : false;
     if (!ok) { await recordFailure(env, rlKey); return { status: 401, body: { error: 'invalid_credentials' } }; }
     await env.DB.prepare('DELETE FROM login_attempts WHERE k = ?1').bind(rlKey).run();
+    await env.DB.prepare('DELETE FROM sessions WHERE expires_at < ?1').bind(Math.floor(Date.now() / 1000)).run(); // dọn phiên hết hạn
     // Nâng cấp bcrypt (nhập từ Supabase) lên PBKDF2 ngay lần đăng nhập đầu — các lần sau không cần bcrypt nữa.
     if (String(user.password_hash).startsWith('$2')) {
       const { hash } = await hasher(env, { op: 'hash', password });

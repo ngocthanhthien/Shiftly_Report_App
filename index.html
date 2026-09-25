@@ -1382,6 +1382,9 @@ async function cloudFetch(fn, params, _retried){
       }
       // Access token có thể vừa hết hạn (lệch đồng hồ...) — làm mới phiên rồi thử lại 1 lần trước khi coi là mất quyền.
       if(!_retried && authSession && authSession.refreshToken){ authSession.expiresAt = 0; return cloudFetch(fn, params, true); }
+      // Đã thử làm mới phiên mà vẫn bị từ chối: nếu phiên VẪN CÒN (làm mới chỉ hỏng do mạng chập chờn, chưa bị máy chủ từ chối
+      // 401) thì KHÔNG đá người dùng ra màn hình đăng nhập — chỉ báo lỗi tạm và thử lại ở lần đồng bộ sau.
+      if(_retried && authSession){ lastCloudError = 'Chưa làm mới được phiên đăng nhập (mạng chập chờn?) — sẽ tự thử lại'; return null; }
       lastCloudError = 'Tài khoản không có quyền truy cập (chưa được cấp quyền hoặc đã bị vô hiệu hóa)';
       onAccessRevoked();
       return null;
@@ -1662,6 +1665,7 @@ async function flushOutbox(){
   try{
     const items = await idbGetAll('outbox');
     const doneIds = [];
+    let localMarked = false; // có dòng nào vừa được đánh dấu "đã đồng bộ" trong IndexedDB (kể cả khi KHÔNG có mục nào trong hàng đợi)
 
     const cpItems = items.filter(i=>i.kind==='checkpoint');
     const byKey = {};
@@ -1696,6 +1700,7 @@ async function flushOutbox(){
             // đúng, không cần tính lại.
             if('images' in cp) local._imagesSyncedFp = imagesFingerprint(local);
             await idbPut('shifts', local);
+            localMarked = true;
           }
         }
         const accepted = new Set((res.results||[]).filter(r=>r.applied || r.reason==='stale').map(r=>r.key));
@@ -1745,7 +1750,7 @@ async function flushOutbox(){
     }
 
     for(const id of doneIds) await idbDelete('outbox', id);
-    if(doneIds.length){ await refreshCache(); pingRealtimeChanged(); }
+    if(doneIds.length || localMarked){ await refreshCache(); pingRealtimeChanged(); }
     await pullFromCloud();
     const remaining = await idbGetAll('outbox');
     if(lastCloudError){ setCloudStatus('error'); }
@@ -5948,7 +5953,7 @@ async function renderShare(root){
     const btns = qsa('button', actionRow);
     btns[0].addEventListener('click', async ()=>{
       for(const r of fresh) await idbPut('shifts', forUpload(r));
-      await refreshCache(); await persistAll();
+      await refreshCache(); scheduleFlush();
       toast(`Đã thêm ${fresh.length} điểm kiểm tra mới vào file CSV tổng`);
       renderShare(root);
     });
@@ -5956,7 +5961,7 @@ async function renderShare(root){
       btns[1].addEventListener('click', async ()=>{
         for(const r of fresh) await idbPut('shifts', forUpload(r));
         for(const r of dupes) await idbPut('shifts', forUpload(r));
-        await refreshCache(); await persistAll();
+        await refreshCache(); scheduleFlush();
         toast(`Đã nhập ${incoming.length} điểm kiểm tra vào file CSV tổng (ghi đè ${dupes.length} điểm trùng)`);
         renderShare(root);
       });
@@ -6374,8 +6379,10 @@ function renderSettings(){
       for(const r of records) await idbPut('shifts', forUpload(r));
       let metaCount = 0;
       if(parsed && !Array.isArray(parsed) && parsed.meta) metaCount = await restoreMetaFromBackup(parsed.meta);
+      // KHÔNG dùng persistAll() ở đây: nó xếp từng dòng (kèm ảnh) vào hàng đợi và đọc lại cả hàng đợi mỗi dòng — với vài nghìn dòng
+      // rất chậm/tốn bộ nhớ. Các dòng vừa nạp đã đánh dấu "chưa đồng bộ" (forUpload) nên flushOutbox() tự tìm và đẩy lần lượt.
       await refreshCache();
-      await persistAll();
+      scheduleFlush();
       toast(`Đã phục hồi ${records.length} điểm kiểm tra` + (metaCount ? ` và ${metaCount} mục cấu hình/danh mục` : '') + ' — đang đồng bộ lên máy chủ');
       renderAll();
     }catch(err){ toast('File JSON không hợp lệ'); }
