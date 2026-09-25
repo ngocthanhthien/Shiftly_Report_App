@@ -26,6 +26,9 @@ async function boot() {
     virtualConsole: vc,
     beforeParse(w) {
       w.indexedDB = new IDBFactory();
+      // Thiết bị đã đăng nhập từ trước (phiên lưu sẵn) và đang offline; tắt WebSocket thật để test không gọi ra mạng.
+      w.localStorage.setItem('shiftly-cf-auth', JSON.stringify({accessToken:'t', refreshToken:'r', expiresAt: 4102444800, user:{userId:'test-admin', displayName:'Test', username:'test', role:'admin'}}));
+      Object.defineProperty(w, 'WebSocket', {value: undefined, configurable: true});
       w.fetch = async () => { throw new Error('network disabled in test'); };
     },
   });
@@ -180,7 +183,7 @@ test('a Protection-deferred image is never lost: the checkpoint stays "dirty" (n
     // Server always acks "applied" for this row (images or not) — the point
     // under test is purely the CLIENT's own dirty-bookkeeping, not the RPC.
     w.eval(`fetch = async (url, opts) => {
-      const fn = url.split('/rest/v1/rpc/')[1];
+      const fn = url.split('/rpc/')[1];
       const body = fn==='sync_put_checkpoints' ? {results:[{key:${JSON.stringify(cpKey)}, applied:true}]}
         : fn==='sync_get_checkpoints' ? {rows:[], cursor:0, hasMore:false}
         : fn==='sync_get_meta' ? {items:{}, cursor:null} : {};

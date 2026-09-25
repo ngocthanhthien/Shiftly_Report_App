@@ -1,3 +1,5 @@
+> **⚠️ NHÁNH `cloudflare-migration` (chưa gộp vào `main`)** — nhánh này chuyển backend từ Supabase sang **Cloudflare** (Worker + D1 + R2 + Durable Objects, thư mục [`cloudflare/`](cloudflare/README.md), đã triển khai tại `https://shiftly-report-api.dangthanhbinh53.workers.dev`). `index.html` trên nhánh này gọi Worker thay vì Supabase (đăng nhập giữ nguyên tài khoản/mật khẩu cũ; ảnh ở R2; Realtime bằng WebSocket; file sao lưu JSON v2 có cả `meta`). `main` vẫn chạy bản Supabase cho tới khi gộp nhánh này và đẩy lên GitHub Pages. Các mô tả Supabase bên dưới là của `main`/bản cũ. Sau khi chuyển hẳn: xoá khóa `BOOTSTRAP_TOKEN` (`npx wrangler secret delete BOOTSTRAP_TOKEN`) và lưu trữ thư mục `supabase/`.
+
 # HANDOFF — Shiftly Report App
 
 Tài liệu bàn giao để tiếp tục làm việc ở phiên AI/công cụ khác. Cập nhật lần cuối: 2026-09-21.

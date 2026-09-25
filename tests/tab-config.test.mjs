@@ -22,6 +22,9 @@ async function boot() {
     virtualConsole: vc,
     beforeParse(w) {
       w.indexedDB = new IDBFactory();
+      // Thiết bị đã đăng nhập từ trước (phiên lưu sẵn) và đang offline; tắt WebSocket thật để test không gọi ra mạng.
+      w.localStorage.setItem('shiftly-cf-auth', JSON.stringify({accessToken:'t', refreshToken:'r', expiresAt: 4102444800, user:{userId:'test-admin', displayName:'Test', username:'test', role:'admin'}}));
+      Object.defineProperty(w, 'WebSocket', {value: undefined, configurable: true});
       w.fetch = async () => { throw new Error('network disabled in test'); };
     },
   });
@@ -81,6 +84,7 @@ test('topbar "🚪 Đăng xuất" button: hidden when logged out, shown when log
   try {
     const doc = w.document;
     const btn = () => doc.querySelector('#topbarLogoutBtn');
+    w.eval('currentMember = null; updateMemberPill()'); // boot() seeds a cached session; start from the logged-out state
     assert.equal(btn().style.display, 'none', 'hidden by default (no logged-in member)');
 
     w.eval("currentMember = {userId:'u1', displayName:'QA', username:'qa', role:'user'}");

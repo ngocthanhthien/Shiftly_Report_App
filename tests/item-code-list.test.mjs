@@ -21,6 +21,9 @@ async function boot() {
     virtualConsole: vc,
     beforeParse(w) {
       w.indexedDB = new IDBFactory();
+      // Thiết bị đã đăng nhập từ trước (phiên lưu sẵn) và đang offline; tắt WebSocket thật để test không gọi ra mạng.
+      w.localStorage.setItem('shiftly-cf-auth', JSON.stringify({accessToken:'t', refreshToken:'r', expiresAt: 4102444800, user:{userId:'test-admin', displayName:'Test', username:'test', role:'admin'}}));
+      Object.defineProperty(w, 'WebSocket', {value: undefined, configurable: true});
       w.fetch = async () => { throw new Error('network disabled in test'); };
     },
   });

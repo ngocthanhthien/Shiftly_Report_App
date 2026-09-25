@@ -389,7 +389,6 @@ svg.chart{width:100%;height:auto;display:block;}
      auth-gated sync_* RPC calls below, never through this SDK directly.
      If this fails to load (offline first paint, CDN blocked), the app
      still works fine on its polling fallback alone. -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 /* ===================== DATA SCHEMA ===================== */
 const DEFAULT_SCHEMA = [{"id": "ROA", "name": "Rang (ROA)", "fields": [{"id": "ROA_R5C", "label": "Temp. Roasting (℃):", "type": "number"}, {"id": "ROA_R5E", "label": "Moisture: 4.0 - 5.0%", "type": "boolean"}, {"id": "ROA_R6C", "label": "Roasting time (s):", "type": "number"}, {"id": "ROA_R6E", "label": "Color: 45 ± 2", "type": "number", "hardMin": 43.0, "hardMax": 47.0}, {"id": "ROA_R7C", "label": "Quenching (L): 87 - 89L", "type": "number", "hardMin": 87.0, "hardMax": 89.0}, {"id": "ROA_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "EXT", "name": "Trích ly (EXT)", "fields": [{"id": "EXT_R10C", "label": "Cylcle time (mins): 17 - 22", "type": "number", "hardMin": 17.0, "hardMax": 22.0}, {"id": "EXT_R10E", "label": "TC VG2: 9.98 - 11.23%", "type": "number", "hardMin": 9.98, "hardMax": 11.23}, {"id": "EXT_R11C", "label": "Dewatering (L): Max 300", "type": "number", "hardMax": 300.0}, {"id": "EXT_R11E", "label": "TC Conilon: 10.4 - 11.70%", "type": "number", "hardMin": 10.4, "hardMax": 11.7}, {"id": "EXT_R12C", "label": "Temp. PE (℃): 130 - 131", "type": "number", "hardMin": 130.0, "hardMax": 131.0}, {"id": "EXT_R12E", "label": "TC Decaf: 9.04 - 10.40%", "type": "number", "hardMin": 9.04, "hardMax": 10.4}, {"id": "EXT_R13C", "label": "Press. Flash PE (bara): 600 - 1000", "type": "number", "hardMin": 600.0, "hardMax": 1000.0}, {"id": "EXT_R13E", "label": "Cupping (B26600)", "type": "boolean"}, {"id": "EXT_R14C", "label": "Temp. SE (℃): 190 - 191", "type": "number", "hardMin": 190.0, "hardMax": 191.0}, {"id": "EXT_R15C", "label": "Press. Flash SE (bara): 500 - 1000", "type": "number", "hardMin": 500.0, "hardMax": 1000.0}, {"id": "EXT_R16C", "label": "DOF: 5.5 - 5.7", "type": "number", "hardMin": 5.5, "hardMax": 5.7}, {"id": "EXT_R17C", "label": "Coarse/ Fine (kg)", "type": "number"}, {"id": "EXT_CLEAN_18", "label": "Flushing", "type": "boolean"}, {"id": "EXT_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "EVA", "name": "Cô đặc (EVA)", "fields": [{"id": "EVA_R21C", "label": "Clarifier CIP (hour): 8 - 12", "type": "boolean"}, {"id": "EVA_R21E", "label": "Outlet thick clarifier max Grade 1", "type": "boolean"}, {"id": "EVA_R22C", "label": "MainEvap CIP (hour): 24 - 32", "type": "boolean"}, {"id": "EVA_R22E", "label": "Sediment (S2) max Grade 1.5", "type": "boolean"}, {"id": "EVA_R23C", "label": "Flow.Clarifier (L/h): 4500 - 5000", "type": "number", "hardMin": 4500.0, "hardMax": 5000.0}, {"id": "EVA_R23E", "label": "4.8 < pH < 5.3", "type": "number", "hardMin": 4.8, "hardMax": 5.3}, {"id": "EVA_R24C", "label": "Temp. Set tank 1 (℃): 50 - 65", "type": "number", "hardMin": 50.0, "hardMax": 65.0}, {"id": "EVA_R24E", "label": "Cupping (set tank 3)", "type": "boolean"}, {"id": "EVA_R25C", "label": "Temp. Set tank 2 (℃): 15 - 18", "type": "number", "hardMin": 15.0, "hardMax": 18.0}, {"id": "EVA_R25E", "label": "TS: 47-48.5% (Normal Density)\nTS: 46 - 47% (Low Density)", "type": "number", "hardMin": 47.0, "hardMax": 48.5}, {"id": "EVA_R26C", "label": "Temp. Set tank 3 (℃): 18 - 20", "type": "number", "hardMin": 18.0, "hardMax": 20.0}, {"id": "EVA_CLEAN_27", "label": "Flushing/ CIP", "type": "boolean"}, {"id": "EVA_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FD", "name": "Sấy thăng hoa (FD)", "fields": [{"id": "FD_R41C", "label": "Speed of belt (meters/mins): 2.4 - 3.2", "type": "number", "hardMin": 2.4, "hardMax": 3.2}, {"id": "FD_R42C", "label": "Temp. belt (℃): -16 => -18", "type": "number", "hardMin": -18.0, "hardMax": -16.0}, {"id": "FD_R43C", "label": "Temp. Ante room 4 (℃): Max 5", "type": "number", "hardMax": 5.0}, {"id": "FD_R44C", "label": "Time cycle tray (s): 26.8 - 27.0", "type": "number", "hardMin": 26.8, "hardMax": 27.0}, {"id": "FD_R45C", "label": "Filling tray (kg): 11.9 - 12.1", "type": "number", "hardMin": 11.9, "hardMax": 12.1}, {"id": "FD_R46C", "label": "Vaccum in conrad (mbar): 0.3 - 0.5", "type": "number", "hardMin": 0.3, "hardMax": 0.5}, {"id": "FD_R47C", "label": "Temp. zone   9 (℃): 120 - 138", "type": "number", "hardMin": 120.0, "hardMax": 138.0}, {"id": "FD_R48C", "label": "Temp. zone 10 (℃):   90 - 100", "type": "number", "hardMin": 90.0, "hardMax": 100.0}, {"id": "FD_R49C", "label": "Temp. zone 11 (℃):   65 -   75", "type": "number", "hardMin": 65.0, "hardMax": 75.0}, {"id": "FD_R50C", "label": "Temp. FGs at Discharge ( ℃): 42", "type": "number"}, {"id": "FD_R51C", "label": "Temprature at Discharge Room ( ℃): 23±3", "type": "number", "hardMin": 20.0, "hardMax": 26.0}, {"id": "FD_R52C", "label": "Humidity at Discharge Room (%RH): ≤ 55", "type": "number", "hardMax": 55.0}, {"id": "FD_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "FP", "name": "Đóng gói (F&P)", "fields": [{"id": "FP_R55C", "label": "Oil Flow (g/h):  \n- 338 ≤  Normal ≤ 400 \n- 994 ≤  Low Density ≤ 1330", "type": "boolean"}, {"id": "FP_R56E", "label": "Không phát hiện 2 màu", "type": "boolean"}, {"id": "FP_R57E", "label": "Không phát hiện lump \n(sủi/ dầu/ melt)", "type": "boolean"}, {"id": "FP_R58C", "label": "Filling time: \nBox: 1m08s-1m12s\nBigbag: 19-20mins", "type": "text"}, {"id": "FP_R58E", "label": "Không phát hiện bụi bề mặt", "type": "boolean"}, {"id": "FP_R59E", "label": "Không phát hiện bụi sau shaking", "type": "boolean"}, {"id": "FP_R60E", "label": "Không phát hiện hạt lớn bất thường", "type": "boolean"}, {"id": "FP_R61C", "label": "Temprature at F&P ( ℃): 23±3\nHumidity at F&P (%RH): ≤ 55\nPressure at F&P (Pa): 6.0 - 7.0", "type": "boolean"}, {"id": "FP_R62E", "label": "Không phát hiện lủng bao Liner PE", "type": "boolean"}, {"id": "FP_R63E", "label": "Không phát hiện lủng thùng carton", "type": "boolean"}, {"id": "FP_R64C", "label": "Sealing: \nTemp: 190 - 195 ℃\nSpeed: 645-652 Hz", "type": "boolean"}, {"id": "FP_R64E", "label": "Không phát hiện lủng bao bigbag", "type": "boolean"}, {"id": "FP_R65E", "label": "Không phát hiện FB sau khi lồng bao", "type": "boolean"}, {"id": "FP_R66E", "label": "Artwork as standard", "type": "boolean"}, {"id": "FP_NETWEIGHT", "label": "Netweight (kg)/box: 25.00 - 25.04", "type": "boolean"}, {"id": "FP_DENSITY", "label": "Density: 220-240g/L", "type": "boolean"}, {"id": "FP_MOISTURE", "label": "Moisture: Max 3.00%", "type": "boolean"}, {"id": "FP_PH", "label": "pH: 4.80 - 5.10", "type": "boolean"}, {"id": "FP_ISSUE", "label": "Issue/ Abnormal", "type": "textarea"}]}, {"id": "META", "name": "Tổng kết ca", "fields": [{"id": "INFO_ISSUE", "label": "Information/ Issue", "type": "textarea"}, {"id": "HANDOVER", "label": "Handover", "type": "textarea"}]}];
@@ -1105,38 +1104,38 @@ function fmtDateTimeVN(ms){
   return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/* ===================== CLOUD SYNC (Supabase Postgres) =====================
+/* ===================== CLOUD SYNC (Cloudflare Worker + D1 + R2) =====================
    Online counterpart of the offline-only Shiftly_Report_App.html: IndexedDB
    stays the source of truth for the UI (offline-first, unchanged), but every
-   write is also queued in an 'outbox' store and flushed to a Supabase
-   project (Postgres + RPC functions — see supabase/schema.sql) whenever the
-   device is online. There is no custom backend server: the frontend calls
-   Supabase's PostgREST RPC endpoint directly, authenticated as a real
-   Supabase Auth user (see ACCESS CONTROL below) — every sync_* function
-   checks that the caller is a signed-in, non-disabled row in `members`
-   itself, so the anon key alone (public, in this repo) grants nothing.
+   write is also queued in an 'outbox' store and flushed to the backend in
+   cloudflare/ (Worker + D1 database + R2 image bucket) whenever the device is
+   online. The frontend calls the Worker's POST /rpc/<sync_*> endpoints
+   directly, authenticated as a real signed-in user (see ACCESS CONTROL
+   below) — every sync_* function checks the caller is an active row in
+   `users` itself, so having the URL alone grants nothing.
    Conflict resolution is last-write-wins by `updatedAt` (ISO string compare),
    both here and server-side, since 2 devices only truly collide when they
    edit the exact same checkpoint (same Date+Shift+Section+PO) — everything
    else is naturally partitioned by key, so this stays simple by design. */
-// Đặt cứng mặc định cho mọi thiết bị mở app — anon public key được thiết kế
-// để công khai (xem "Vì sao an toàn" trong supabase/README.md), nên không
-// cần mỗi thiết bị tự gõ tay 2 giá trị này ở tab Cài đặt nữa; quyền truy
-// cập thật 100% vẫn do đăng nhập kiểm soát (xem ACCESS CONTROL bên dưới).
-// Tab Cài đặt vẫn cho sửa nếu sau này cần trỏ sang project Supabase khác.
-const DEFAULT_SUPABASE_URL = 'https://mpdcpfkvkncugruzzjmr.supabase.co';
-const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1wZGNwZmt2a25jdWdydXp6am1yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk3MDIyNzUsImV4cCI6MjEwNTI3ODI3NX0.RdU6r91egXItxE1j0O1Z6zfbeBRql5HMWCGCRiSlFT0';
-let cloudCfg = { url: DEFAULT_SUPABASE_URL, anonKey: DEFAULT_SUPABASE_ANON_KEY };
+// Địa chỉ backend Cloudflare Worker (D1 + R2) — đặt cứng mặc định cho mọi
+// thiết bị mở app, không cần gõ tay ở tab Cài đặt. Quyền truy cập thật 100%
+// do đăng nhập kiểm soát (xem ACCESS CONTROL bên dưới). Tab Cài đặt vẫn cho
+// sửa nếu sau này cần trỏ sang Worker khác.
+const DEFAULT_API_URL = 'https://shiftly-report-api.dangthanhbinh53.workers.dev';
+let cloudCfg = { url: DEFAULT_API_URL };
 let cloudStatus = 'unconfigured'; // unconfigured | idle | syncing | offline | error
 let cloudLastSyncAt = null;
-let syncCursors = { checkpoints:'0' }; // integer seq cursor (server write-order, not a timestamp — see supabase/schema.sql)
+let syncCursors = { checkpoints:'0' }; // integer seq cursor (server write-order, not a timestamp — see cloudflare/schema.sql)
 let metaAppliedAt = {}; // meta key -> updatedAt of the version we already have
 let lastPullCount = 0; // rows returned by the most recent pull — surfaced in the manual sync toast for diagnosis
 let flushing = false;
 let flushScheduled = false;
 
 async function loadCloudState(){
-  const cfg = await idbGet('meta','cloudCfg'); if(cfg && cfg.value) cloudCfg = Object.assign({url:'',anonKey:''}, cfg.value);
+  const cfg = await idbGet('meta','cloudCfg'); if(cfg && cfg.value) cloudCfg = { url: cfg.value.url || '' };
+  // Thiết bị đang lưu địa chỉ Supabase từ bản cũ -> chuyển sang Cloudflare Worker mặc định, KHÔNG bắt người dùng cấu hình lại.
+  // (url rỗng = người dùng chủ động "Ngắt kết nối" — giữ nguyên.)
+  if(/supabase\.co/i.test(cloudCfg.url)){ cloudCfg = { url: DEFAULT_API_URL }; await idbPut('meta', {k:'cloudCfg', value: cloudCfg}); }
   await compactOutbox();
   const cur = await idbGet('meta','syncCursors'); if(cur && cur.value) syncCursors = cur.value;
   // One-time migration: the checkpoints cursor used to be an ISO timestamp
@@ -1149,18 +1148,30 @@ async function loadCloudState(){
   }
   const ma = await idbGet('meta','metaAppliedAt'); if(ma && ma.value) metaAppliedAt = ma.value;
   const ls = await idbGet('meta','cloudLastSyncAt'); if(ls && ls.value) cloudLastSyncAt = ls.value;
+  // Một lần duy nhất khi chuyển từ Supabase sang Cloudflare: con trỏ đồng bộ của server cũ không còn ý nghĩa với server mới
+  // -> đặt lại để lần đồng bộ đầu kéo đúng từ đầu. Hàng đợi (outbox) chưa gửi được GIỮ NGUYÊN và đẩy sang server mới.
+  const be = await idbGet('meta','backend');
+  if(!be || be.value!=='cloudflare-v1'){
+    syncCursors = { checkpoints:'0' }; metaAppliedAt = {};
+    await idbPut('meta', {k:'syncCursors', value: syncCursors});
+    await idbPut('meta', {k:'metaAppliedAt', value: metaAppliedAt});
+    await idbPut('meta', {k:'backend', value:'cloudflare-v1'});
+    try{ localStorage.removeItem('shiftly-auth'); }catch(e){} // phiên đăng nhập kiểu Supabase cũ, vô dụng với backend mới
+  }
+  loadAuthSession();
 }
-async function saveCloudConfig(url, anonKey){
-  cloudCfg = { url: (url||'').trim().replace(/\/+$/,''), anonKey: (anonKey||'').trim() };
+async function saveCloudConfig(url){
+  const next = (url||'').trim().replace(/\/+$/,'');
+  if(next !== cloudCfg.url){ stopRealtime(); saveAuthSession(null); currentMember = null; updateMemberPill(); }
+  cloudCfg = { url: next };
   await idbPut('meta', {k:'cloudCfg', value: cloudCfg});
   updateCloudPill();
-  sbClient = null; // force ensureSupabaseClient() to rebuild against the new URL/key
-  if(cloudCfg.url && cloudCfg.anonKey){ toast('Đã lưu cấu hình — vui lòng đăng nhập để đồng bộ'); await checkAccessGate(); }
+  if(cloudCfg.url){ toast('Đã lưu cấu hình — vui lòng đăng nhập để đồng bộ'); await checkAccessGate(); }
 }
 async function clearCloudConfig(){
-  if(!confirm('Ngắt kết nối đồng bộ Supabase? Dữ liệu vẫn an toàn trong máy này — chỉ là app sẽ ngừng đẩy/kéo dữ liệu online cho tới khi bạn cấu hình lại.')) return;
-  cloudCfg = {url:'', anonKey:''};
-  // Lưu (không xoá) bản ghi rỗng — có DEFAULT_SUPABASE_URL/ANON_KEY hardcode
+  if(!confirm('Ngắt kết nối đồng bộ? Dữ liệu vẫn an toàn trong máy này — chỉ là app sẽ ngừng đẩy/kéo dữ liệu online cho tới khi bạn cấu hình lại.')) return;
+  cloudCfg = {url:''};
+  // Lưu (không xoá) bản ghi rỗng — có DEFAULT_API_URL hardcode
   // ở trên, nên nếu xoá hẳn bản ghi, lần mở app sau sẽ lại tự dùng mặc định
   // (loadCloudState() chỉ ghi đè cloudCfg khi tìm thấy bản ghi đã lưu).
   await idbPut('meta', {k:'cloudCfg', value: cloudCfg});
@@ -1169,7 +1180,7 @@ async function clearCloudConfig(){
   toast('Đã ngắt kết nối đồng bộ');
   updateCloudPill();
 }
-function cloudConfigured(){ return !!(cloudCfg.url && cloudCfg.anonKey); }
+function cloudConfigured(){ return !!cloudCfg.url; }
 function setCloudStatus(status){ cloudStatus = status; updateCloudPill(); }
 // Set by cloudFetch() whenever a call fails, cleared on the next success —
 // lets flushOutbox() surface WHY sync failed (wrong URL/key, expired session vs.
@@ -1177,14 +1188,14 @@ function setCloudStatus(status){ cloudStatus = status; updateCloudPill(); }
 // masked as "✅ Đã đồng bộ" just because there was nothing local to push.
 let lastCloudError = null;
 /* ===================== DATA & EGRESS CONTROL =====================
-   Admin-configurable soft/hard DAILY traffic ceiling so Supabase egress can
+   Admin-configurable soft/hard DAILY traffic ceiling so server traffic can
    be throttled without ever blocking QC record entry. Two separate pieces
    of state, both reusing existing mechanisms rather than a parallel system:
    - EGRESS_CONFIG: limits + admin overrides — an ordinary meta key
      ('egressControl'), synced across devices through the exact same
      queueMetaSync()/sync_put_meta()/applyRemoteMeta() path every other meta
      key (poList/schema/tabConfig/…) already uses. Only the WRITE side needs
-     a new guard: sync_put_meta() in supabase/schema.sql rejects this one key
+     a new guard: sync_put_meta() in cloudflare/src/worker.js rejects this one key
      from a non-admin caller SERVER-SIDE (is_admin_member()) — the
      currentMember.role==='admin' check here is UI convenience only.
    - egressDaily: THIS device's own estimated traffic today (bytes). Local
@@ -1297,7 +1308,7 @@ async function saveEgressConfig(patch){
 function updateInputSyncBanner(){
   const b = qs('#inputSyncBanner'); if(!b) return;
   let msg = '';
-  if(!cloudConfigured()) msg = '☁️ Chưa cấu hình đồng bộ Supabase — dữ liệu vẫn lưu an toàn trong máy này. Vào tab Cài đặt để bật đồng bộ nhiều thiết bị.';
+  if(!cloudConfigured()) msg = '☁️ Chưa cấu hình đồng bộ — dữ liệu vẫn lưu an toàn trong máy này. Vào tab Cài đặt để bật đồng bộ nhiều thiết bị.';
   else if(cloudStatus==='offline') msg = '📶 Đang offline — dữ liệu lưu trong máy, sẽ tự đồng bộ khi có mạng.';
   else if(cloudStatus==='error') msg = `⚠️ Đồng bộ gặp lỗi${lastCloudError?': '+lastCloudError:''} — dữ liệu vẫn an toàn trong máy, app sẽ tự thử lại.`;
   b.textContent = msg;
@@ -1332,17 +1343,16 @@ function updateCloudPill(){
 // {error:"unauthorized"} rather than a raised-exception status code, which
 // keeps this one code path the single source of truth for failures instead
 // of also having to guess at PostgREST's error-code-to-HTTP-status mapping.
-async function cloudFetch(fn, params){
+async function cloudFetch(fn, params, _retried){
   try{
     const token = await currentAccessToken();
     if(!token){ lastCloudError = 'Chưa đăng nhập'; return null; }
-    const url = cloudCfg.url + '/rest/v1/rpc/' + fn;
+    const url = cloudCfg.url + '/rpc/' + fn;
     const bodyStr = JSON.stringify(params || {});
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': cloudCfg.anonKey,
         'Authorization': 'Bearer ' + token,
       },
       body: bodyStr,
@@ -1359,7 +1369,7 @@ async function cloudFetch(fn, params){
     if(text){ try{ body = JSON.parse(text); }catch(e){ body = null; } }
     if(!res.ok){
       const detail = body && (body.message||body.error_description||body.hint) || '';
-      lastCloudError = res.status===401||res.status===403||res.status===404 ? 'Sai Supabase URL/Anon Key hoặc phiên đăng nhập hết hạn' : `Lỗi máy chủ (HTTP ${res.status}${detail?': '+detail:''})`;
+      lastCloudError = res.status===401||res.status===403||res.status===404 ? 'Sai địa chỉ máy chủ hoặc phiên đăng nhập hết hạn' : `Lỗi máy chủ (HTTP ${res.status}${detail?': '+detail:''})`;
       throw new Error('HTTP '+res.status);
     }
     if(body && body.error){
@@ -1370,13 +1380,15 @@ async function cloudFetch(fn, params){
         lastCloudError = 'Tài khoản Giám sát/Quản lý chỉ được xem, không được nhập/sửa dữ liệu';
         return null;
       }
+      // Access token có thể vừa hết hạn (lệch đồng hồ...) — làm mới phiên rồi thử lại 1 lần trước khi coi là mất quyền.
+      if(!_retried && authSession && authSession.refreshToken){ authSession.expiresAt = 0; return cloudFetch(fn, params, true); }
       lastCloudError = 'Tài khoản không có quyền truy cập (chưa được cấp quyền hoặc đã bị vô hiệu hóa)';
       onAccessRevoked();
       return null;
     }
     return body || {};
   }catch(e){
-    if(!lastCloudError) lastCloudError = 'Không kết nối được tới Supabase (kiểm tra mạng / Supabase URL có đúng không)';
+    if(!lastCloudError) lastCloudError = 'Không kết nối được tới máy chủ (kiểm tra mạng / địa chỉ máy chủ có đúng không)';
     console.error('cloudFetch failed:', fn, e);
     return null;
   }
@@ -1462,13 +1474,17 @@ function stripLocalMarkers(cp){
 // đếm cố định số dòng) — xem lý do trong flushOutbox(). Luôn có ít nhất 1
 // dòng/nhóm kể cả khi dòng đó một mình đã vượt maxBytes (không bao giờ bỏ
 // sót dữ liệu chỉ vì nó quá nặng).
+// Ngoài dung lượng, mỗi lần gọi còn bị giới hạn theo "chi phí" (2 truy vấn D1/dòng + 1 thao tác R2/ảnh) vì máy chủ Cloudflare gói
+// Free chỉ cho ~50 thao tác mỗi request (xem cloudflare/src/worker.js) — dòng không ảnh: tối đa 20 dòng/lần.
+const PUSH_MAX_COST = 40;
+function rowCost(row){ return 2 + (Array.isArray(row.images) ? row.images.length : 0); }
 function chunkRowsBySize(rows, maxBytes){
   const chunks = [];
-  let cur = [], curSize = 0;
+  let cur = [], curSize = 0, curCost = 0;
   for(const row of rows){
-    const size = JSON.stringify(row).length;
-    if(cur.length && curSize + size > maxBytes){ chunks.push(cur); cur = []; curSize = 0; }
-    cur.push(row); curSize += size;
+    const size = JSON.stringify(row).length, cost = rowCost(row);
+    if(cur.length && (curSize + size > maxBytes || curCost + cost > PUSH_MAX_COST)){ chunks.push(cur); cur = []; curSize = 0; curCost = 0; }
+    cur.push(row); curSize += size; curCost += cost;
   }
   if(cur.length) chunks.push(cur);
   return chunks;
@@ -1591,19 +1607,22 @@ async function pullFromCloud(){
     }
     let imagesOk = true;
     if(needImages.length){
-      const imgRes = await cloudFetch('sync_get_checkpoint_images', {p_keys: needImages});
-      if(imgRes && imgRes.items){
-        for(const key of needImages){
+      // Máy chủ trả tối đa ~40 ảnh/lần gọi (giới hạn thao tác R2 mỗi request) — phần chưa phục vụ nằm trong `pending`, gọi lại
+      // cho tới khi hết. Mọi lỗi giữa chừng -> KHÔNG tiến cursor, lần poll sau thử lại nguyên trang (không bỏ sót ảnh).
+      let todo = needImages.slice(), rounds = 0;
+      while(todo.length && rounds++ < 200){
+        const batch = todo.slice(0, 20), rest = todo.slice(20);
+        const imgRes = await cloudFetch('sync_get_checkpoint_images', {p_keys: batch});
+        if(!(imgRes && imgRes.items)){ imagesOk = false; break; }
+        for(const key of batch){
           const images = imgRes.items[key];
           if(!Array.isArray(images)) continue;
           const cp = await idbGet('shifts', key);
           if(cp){ cp.images = images; await idbPut('shifts', cp); }
         }
-      } else {
-        // Lỗi mạng/RPC lúc lấy ảnh — KHÔNG tiến cursor, để lần poll sau thử
-        // lại nguyên trang này (kể cả phần ảnh) thay vì bỏ sót ảnh vĩnh viễn.
-        imagesOk = false;
+        todo = (Array.isArray(imgRes.pending) ? imgRes.pending : []).concat(rest);
       }
+      if(todo.length) imagesOk = false;
     }
     if(imagesOk && cpRes.cursor!=null){ syncCursors.checkpoints = String(cpRes.cursor); await idbPut('meta', {k:'syncCursors', value: syncCursors}); }
     hasMore = imagesOk && !!cpRes.hasMore;
@@ -1695,8 +1714,14 @@ async function flushOutbox(){
       // thay vì lặp gọi từng key một — tránh N+1 round-trip khi xoá nhiều ca
       // cùng lúc (xem audit egress 2026-09-19).
       const deletes = Object.values(byKeyD).map(d=>({key:d.key, updatedAt:d.updatedAt}));
-      const res = await cloudFetch('sync_delete_checkpoints', {p_deletes: deletes});
-      if(res) delItems.forEach(i=>doneIds.push(i.id));
+      // Máy chủ xử lý tối đa 20 dòng/lần gọi — chia lô, và chỉ đánh dấu xong đúng những dòng thuộc lô đã gửi thành công.
+      for(let n=0; n<deletes.length; n+=20){
+        const part = deletes.slice(n, n+20);
+        const res = await cloudFetch('sync_delete_checkpoints', {p_deletes: part});
+        if(!res) break;
+        const sent = new Set(part.map(d=>d.key));
+        delItems.filter(i=>sent.has(i.payload.key)).forEach(i=>doneIds.push(i.id));
+      }
     }
 
     const metaItems = items.filter(i=>i.kind==='meta');
@@ -1711,8 +1736,12 @@ async function flushOutbox(){
 
     const logItems = items.filter(i=>i.kind==='log');
     if(logItems.length){
-      const res = await cloudFetch('sync_post_logs', {p_entries: logItems.map(i=>i.payload)});
-      if(res) logItems.forEach(i=>doneIds.push(i.id));
+      for(let n=0; n<logItems.length; n+=20){
+        const part = logItems.slice(n, n+20);
+        const res = await cloudFetch('sync_post_logs', {p_entries: part.map(i=>i.payload)});
+        if(!res) break;
+        part.forEach(i=>doneIds.push(i.id));
+      }
     }
 
     for(const id of doneIds) await idbDelete('outbox', id);
@@ -1734,7 +1763,7 @@ async function flushOutbox(){
   armSync();
 }
 function manualSync(){
-  if(!cloudConfigured()){ toast('Chưa cấu hình đồng bộ Supabase'); return; }
+  if(!cloudConfigured()){ toast('Chưa cấu hình đồng bộ'); return; }
   toast('Đang đồng bộ…');
   flushOutbox().then(()=>{
     if(cloudStatus==='error') toast(lastCloudError || 'Đồng bộ chưa xong — sẽ tự thử lại');
@@ -1746,7 +1775,7 @@ function manualSync(){
 // any time — idbPut() upserts by key, so re-applying data already present
 // locally is a harmless no-op.
 function resyncFromScratch(){
-  if(!cloudConfigured()){ toast('Chưa cấu hình đồng bộ Supabase'); return; }
+  if(!cloudConfigured()){ toast('Chưa cấu hình đồng bộ'); return; }
   // The one genuinely large re-pull action in this app (forgets the cursor,
   // re-fetches everything) — restrict it under 🔴 Protection, same spirit as
   // "unnecessary data refresh"/"export-download large data" in the spec.
@@ -1818,103 +1847,105 @@ document.addEventListener('visibilitychange',wakeSync);
 armSync();
 
 /* ===================== REALTIME "WAKE UP" SIGNAL (optional, best-effort) =====================
-   Pattern from the supabase-sync-auth-patterns skill: don't push detailed
-   row-level changes over Realtime — just broadcast "something changed" and
-   let every listener re-run the SAME protected pull (pullFromCloud) it
-   already uses for polling. Deliberately a public Broadcast channel, NOT
-   `postgres_changes` on the tables: postgres_changes only delivers events a
-   client could also SELECT under RLS, and these tables have zero SELECT
-   policies for anon/authenticated (every real read goes through the
-   auth-checked sync_* RPCs — see CLOUD SYNC above). Loosening RLS just to
-   let postgres_changes through would let any authenticated Supabase user
-   read rows directly, bypassing the members/is_active_member() check these
-   RPCs do entirely — a real regression, not a style choice. Broadcast
-   has no such requirement: it carries no data, just a ping, so it costs
-   nothing here. If supabase-js fails to load (CDN blocked, offline first
-   paint) or the socket can't connect, this quietly does nothing — the
-   polling loop above is the tested safety net and needs no help from this
-   to keep working. */
-let sbClient = null;
-let realtimeChannel = null;
+   Chỉ báo "vừa có thay đổi" — KHÔNG mang dữ liệu: mỗi lần 1 thiết bị ghi thành công, máy chủ (Durable Object `Hub` trong
+   cloudflare/src/worker.js) phát chữ "changed" tới mọi WebSocket đang mở; máy nhận chạy lại đúng pullFromCloud() đã có
+   (debounce 400ms). Nếu WebSocket không kết nối được (mạng công ty chặn...), hàm này lặng lẽ không làm gì — vòng polling ở
+   trên là lưới an toàn đã được kiểm thử và không cần Realtime để hoạt động. */
+let realtimeSocket = null;
+let realtimeRetryTimer = null;
+let realtimePingTimer = null;
+let realtimeFailures = 0;
 let realtimePullTimer = null;
-// Audit egress 2026-09-21: cờ này (không phải chỉ "có channel object hay
-// không") mới thật sự nói lên Realtime có đang SỐNG hay không — dùng để nới
-// nhịp polling ở baseSyncDelay() phía trên khi đã chắc chắn không cần polling
-// dồn dập nữa.
+// Audit egress 2026-09-21: cờ này (không phải chỉ "có socket hay không") mới thật sự nói lên Realtime có đang SỐNG hay
+// không — dùng để nới nhịp polling ở baseSyncDelay() khi đã chắc chắn không cần polling dồn dập nữa.
 let realtimeConnected = false;
-function ensureSupabaseClient(){
-  if(!cloudConfigured() || typeof window.supabase === 'undefined') return null;
-  if(sbClient && sbClient._shiftlyUrl===cloudCfg.url && sbClient._shiftlyKey===cloudCfg.anonKey) return sbClient;
-  try{
-    // persistSession:true — a real Auth session, unlike the old shared
-    // secret, must survive a page reload or the gate below would demand a
-    // fresh login every time the app opens (see ACCESS CONTROL section).
-    sbClient = window.supabase.createClient(cloudCfg.url, cloudCfg.anonKey, {auth:{persistSession:true, storageKey:'shiftly-auth'}});
-    sbClient._shiftlyUrl = cloudCfg.url; sbClient._shiftlyKey = cloudCfg.anonKey;
-  }catch(e){ console.error('Supabase Realtime client init failed:', e); sbClient = null; }
-  return sbClient;
-}
 function scheduleRealtimePull(){
   clearTimeout(realtimePullTimer);
-  // Coalesce a burst of pings (e.g. a save touching several rows) into one
-  // pull — same debounce the skill's pattern uses.
+  // Gộp 1 loạt tín hiệu liên tiếp (VD 1 lần lưu chạm nhiều dòng) thành 1 lần kéo.
   realtimePullTimer = setTimeout(()=>{ if(!pulling) pullFromCloud().catch(e=>console.error(e)); }, 400);
 }
-function startRealtime(){
-  if(realtimeChannel) return;
-  const sb = ensureSupabaseClient();
-  if(!sb) return;
+async function startRealtime(){
+  if(realtimeSocket || !cloudConfigured() || typeof WebSocket==='undefined') return;
+  const token = await currentAccessToken();
+  if(!token || realtimeSocket) return;
   try{
-    const ch = sb.channel('shiftly-changes', {config:{broadcast:{self:false}}});
-    ch.on('broadcast', {event:'changed'}, scheduleRealtimePull);
-    ch.subscribe(status=>{
-      realtimeConnected = (status==='SUBSCRIBED');
-      // Vừa xác nhận kết nối (hoặc vừa MẤT kết nối) — áp dụng nhịp poll mới
-      // (baseSyncDelay()) ngay thay vì đợi tới lần armSync() kế tiếp mới đổi.
+    const ws = new WebSocket(cloudCfg.url.replace(/^http/i,'ws') + '/realtime?token=' + encodeURIComponent(token));
+    realtimeSocket = ws;
+    ws.onopen = ()=>{
+      realtimeConnected = true; realtimeFailures = 0;
+      // Vừa xác nhận kết nối — áp dụng nhịp poll mới (baseSyncDelay()) ngay thay vì đợi armSync() kế tiếp.
       syncDelay = baseSyncDelay();
-    });
-    realtimeChannel = ch;
-  }catch(e){ console.error('Realtime subscribe failed (falling back to polling only):', e); realtimeChannel = null; realtimeConnected = false; }
+      clearInterval(realtimePingTimer);
+      realtimePingTimer = setInterval(()=>{ try{ if(ws.readyState===1) ws.send('ping'); }catch(e){} }, 50000);
+    };
+    ws.onmessage = e=>{ if(e.data==='changed') scheduleRealtimePull(); };
+    ws.onerror = ()=>{ try{ ws.close(); }catch(e){} };
+    ws.onclose = ()=>{
+      if(realtimeSocket!==ws) return; // đã chủ động stopRealtime()
+      realtimeSocket = null; realtimeConnected = false;
+      clearInterval(realtimePingTimer);
+      syncDelay = baseSyncDelay();
+      if(currentMember){
+        realtimeFailures++;
+        clearTimeout(realtimeRetryTimer);
+        realtimeRetryTimer = setTimeout(startRealtime, Math.min(60000, 2000 * Math.pow(2, Math.min(realtimeFailures, 5))));
+      }
+    };
+  }catch(e){ console.error('Realtime connect failed (falling back to polling only):', e); realtimeSocket = null; realtimeConnected = false; }
 }
 function stopRealtime(){
-  if(realtimeChannel){
-    try{ if(sbClient && sbClient.removeChannel) sbClient.removeChannel(realtimeChannel); else realtimeChannel.unsubscribe(); }catch(e){}
-  }
-  realtimeChannel = null;
-  realtimeConnected = false;
+  clearTimeout(realtimeRetryTimer); clearInterval(realtimePingTimer);
+  const ws = realtimeSocket;
+  realtimeSocket = null; realtimeConnected = false;
+  if(ws){ try{ ws.close(); }catch(e){} }
 }
-function pingRealtimeChanged(){
-  if(!realtimeChannel) return;
-  try{ realtimeChannel.send({type:'broadcast', event:'changed', payload:{}}); }catch(e){ console.error(e); }
-}
+// Máy chủ tự phát tín hiệu sau mỗi lần ghi thành công, nên client không cần tự gửi nữa (giữ hàm để mọi nơi gọi cũ không đổi).
+function pingRealtimeChanged(){}
 
-/* ===================== ACCESS CONTROL (Supabase Auth) =====================
-   Once cloud sync is configured (Supabase URL + Anon key saved in Cài đặt),
-   the ENTIRE app is gated behind a real login — this is the "ngăn truy cập"
-   layer: having the anon key (public, in this repo) grants nothing by
-   itself. Two account shapes, both plain Supabase Auth accounts under the
-   hood:
-     - Admin: signs in with a real email + password.
-     - User: signs in with just a username + password — Supabase Auth only
-       knows email/phone, so a username account is given a synthetic,
-       never-mailed address (<username>@<project-ref>.users.internal); the
-       person never sees or types that address, only their username. Must
-       match the exact same transform the admin-users Edge Function uses
-       when creating the account.
-   Whether an authenticated Supabase user is actually allowed into THIS app
-   (and with which role) is decided server-side by the `members` table via
-   sync_whoami() (see supabase/schema.sql) — never trust a cached role past
-   what the last successful whoami said. If cloud sync isn't configured at
-   all, none of this runs and the app behaves exactly like before (fully
-   offline, no login), preserving that standalone use case. */
+/* ===================== ACCESS CONTROL (Cloudflare Worker auth) =====================
+   Khi đã cấu hình đồng bộ (địa chỉ Worker — mặc định đã đặt sẵn), TOÀN BỘ app nằm sau màn hình đăng nhập thật. Hai dạng
+   tài khoản, cách đăng nhập/mật khẩu giữ nguyên như bản cũ:
+     - Admin: email + mật khẩu.
+     - Nhân viên/Giám sát: tên đăng nhập + mật khẩu.
+   Máy chủ (POST /auth/login) trả access token (JWT ~1 giờ) + refresh token, lưu ở localStorage 'shiftly-cf-auth' để không
+   phải đăng nhập lại mỗi lần mở app. Tài khoản còn được phép vào app hay không (và vai trò gì) do MÁY CHỦ quyết định ở mọi
+   request (bảng `users` — bị vô hiệu hóa/đổi vai trò có hiệu lực ngay), qua sync_whoami() — không bao giờ tin vai trò đã lưu
+   tạm quá lần whoami thành công gần nhất. Nếu chưa cấu hình đồng bộ, không có gì ở đây chạy: app dùng offline y như trước. */
 let currentMember = null; // {userId, displayName, username, role} once signed in + verified, else null
-function shadowAuthDomain(){
-  try{ return new URL(cloudCfg.url).hostname.split('.')[0] + '.users.internal'; }catch(e){ return ''; }
+const AUTH_KEY = 'shiftly-cf-auth';
+let authSession = null;   // {accessToken, refreshToken, expiresAt, user}
+function loadAuthSession(){
+  try{ authSession = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); }catch(e){ authSession = null; }
 }
+function saveAuthSession(sess){
+  authSession = sess || null;
+  try{ if(sess) localStorage.setItem(AUTH_KEY, JSON.stringify(sess)); else localStorage.removeItem(AUTH_KEY); }catch(e){}
+}
+async function authPost(path, body){
+  const res = await fetch(cloudCfg.url + path, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body||{}), signal: AbortSignal.timeout(20000),
+  });
+  let data = {}; try{ data = await res.json(); }catch(e){}
+  return {status: res.status, data};
+}
+let tokenRefreshing = null;
 async function currentAccessToken(){
-  const sb = ensureSupabaseClient(); if(!sb) return null;
-  try{ const {data} = await sb.auth.getSession(); return data && data.session ? data.session.access_token : null; }
-  catch(e){ return null; }
+  if(!authSession) return null;
+  const now = Math.floor(Date.now()/1000);
+  if(authSession.expiresAt - now > 60 || !navigator.onLine) return authSession.accessToken;
+  if(!tokenRefreshing){
+    const rt = authSession.refreshToken;
+    tokenRefreshing = (async()=>{
+      try{
+        const r = await authPost('/auth/refresh', {refreshToken: rt});
+        if(r.status===200) saveAuthSession(r.data);
+        else if(r.status===401){ saveAuthSession(null); if(currentMember) onAccessRevoked('Phiên đăng nhập đã hết hạn — vui lòng đăng nhập lại.'); }
+      }catch(e){ /* mất mạng: giữ phiên, thử lại lần sau */ }
+      finally{ tokenRefreshing = null; }
+    })();
+  }
+  await tokenRefreshing;
+  return authSession ? authSession.accessToken : null;
 }
 function updateMemberPill(){
   const pill = qs('#memberPill'), txt = qs('#memberPillTxt'), logoutBtn = qs('#topbarLogoutBtn');
@@ -1938,20 +1969,23 @@ function showLoginGate(errorMsg){
   renderLoginGate(errorMsg);
   qs('#loginGate').style.display = '';
 }
-async function onAccessRevoked(){
+async function endSession(){
+  const rt = authSession && authSession.refreshToken;
+  saveAuthSession(null);
+  if(rt && cloudConfigured()) try{ await authPost('/auth/logout', {refreshToken: rt}); }catch(e){}
+}
+async function onAccessRevoked(msg){
   currentMember = null;
   updateMemberPill();
   stopRealtime();
-  const sb = ensureSupabaseClient();
-  if(sb) try{ await sb.auth.signOut(); }catch(e){}
-  showLoginGate('Tài khoản chưa được cấp quyền hoặc đã bị vô hiệu hóa — liên hệ Admin.');
+  await endSession();
+  showLoginGate(msg || 'Tài khoản chưa được cấp quyền hoặc đã bị vô hiệu hóa — liên hệ Admin.');
 }
 async function signOutCloud(silent){
   currentMember = null;
   updateMemberPill();
   stopRealtime();
-  const sb = ensureSupabaseClient();
-  if(sb) try{ await sb.auth.signOut(); }catch(e){}
+  await endSession();
   if(!silent) showLoginGate();
 }
 // Nút "🚪 Đăng xuất" ở góc topbar (khác nút cùng tên trong tab Cài đặt: nút
@@ -1982,12 +2016,16 @@ async function logoutAndClearCache(){
   await clearBrowserCaches();
   location.reload();
 }
-// Runs after a successful signInWithPassword AND on every app boot when a
+// Runs after a successful sign-in AND on every app boot when a
 // persisted session already exists — always re-verifies against the server
 // (sync_whoami) rather than trusting anything cached, since an Admin may
 // have disabled the account or changed its role since the last visit.
 async function verifyAndEnter(){
-  const res = await cloudFetch('sync_whoami', {});
+  let res = await cloudFetch('sync_whoami', {});
+  // cloudFetch trả null cả khi mất mạng lẫn khi bị từ chối — bị từ chối thì onAccessRevoked() đã xoá phiên; còn phiên nghĩa là
+  // chỉ đang offline: vào app bằng thông tin đã lưu ở lần đăng nhập gần nhất (offline-first), lần đồng bộ có mạng kế tiếp sẽ
+  // tự kiểm lại quyền thật với máy chủ.
+  if(!res && authSession && authSession.user) res = authSession.user;
   if(!res || res.error){ await onAccessRevoked(); return false; }
   currentMember = {userId:res.userId, displayName:res.displayName, username:res.username, role:res.role};
   updateMemberPill();
@@ -1997,39 +2035,34 @@ async function verifyAndEnter(){
   flushOutbox();
   return true;
 }
-// Called on boot (once cloud is configured) and right after saving new
-// Supabase URL/Anon key in Cài đặt — decides whether to show the app or the
-// login gate.
+// Called on boot (once cloud is configured) and right after saving a new
+// server address in Cài đặt — decides whether to show the app or the login gate.
 async function checkAccessGate(){
   if(!cloudConfigured()){ showApp(); renderAll(); return; }
-  const sb = ensureSupabaseClient();
-  if(!sb){ showApp(); renderAll(); return; } // supabase-js failed to load — fail open to the offline-first app rather than lock it
-  const {data} = await sb.auth.getSession();
-  if(data && data.session){ await verifyAndEnter(); }
+  loadAuthSession();
+  if(authSession){ await verifyAndEnter(); }
   else showLoginGate();
 }
-async function signInAdmin(email, password){
-  const sb = ensureSupabaseClient(); if(!sb) return 'Không khởi tạo được kết nối Supabase';
-  const {error} = await sb.auth.signInWithPassword({email:(email||'').trim(), password: password||''});
-  if(error) return 'Sai email hoặc mật khẩu';
+async function loginRequest(identifier, password, wrongMsg){
+  if(!cloudConfigured()) return 'Chưa cấu hình đồng bộ';
+  let r;
+  try{ r = await authPost('/auth/login', {identifier: (identifier||'').trim(), password: password||''}); }
+  catch(e){ return 'Không kết nối được máy chủ — kiểm tra mạng rồi thử lại'; }
+  if(r.status===429) return 'Đăng nhập sai quá nhiều lần — vui lòng thử lại sau ít phút';
+  if(r.status!==200) return wrongMsg;
+  saveAuthSession(r.data);
   const ok = await verifyAndEnter();
   return ok ? null : 'Tài khoản chưa được cấp quyền truy cập app này';
 }
-async function signInUser(username, password){
-  const sb = ensureSupabaseClient(); if(!sb) return 'Không khởi tạo được kết nối Supabase';
-  const email = (username||'').trim().toLowerCase() + '@' + shadowAuthDomain();
-  const {error} = await sb.auth.signInWithPassword({email, password: password||''});
-  if(error) return 'Sai tên đăng nhập hoặc mật khẩu';
-  const ok = await verifyAndEnter();
-  return ok ? null : 'Tài khoản chưa được cấp quyền truy cập app này';
-}
+async function signInAdmin(email, password){ return loginRequest(email, password, 'Sai email hoặc mật khẩu'); }
+async function signInUser(username, password){ return loginRequest(username, password, 'Sai tên đăng nhập hoặc mật khẩu'); }
 function renderLoginGate(errorMsg){
   const root = qs('#loginGate');
   root.innerHTML = '';
   let mode = 'user'; // 'user' | 'admin'
   const card = el('div',{class:'card'},[
     el('div',{class:'card-h'},['🔒 Đăng nhập', el('div',{class:'rule'})]),
-    el('p',{class:'sub', style:'margin:0 0 10px;'},['App đã bật đồng bộ Supabase — cần đăng nhập để tiếp tục. Liên hệ Admin nếu chưa có tài khoản.']),
+    el('p',{class:'sub', style:'margin:0 0 10px;'},['App đã bật đồng bộ — cần đăng nhập để tiếp tục. Liên hệ Admin nếu chưa có tài khoản.']),
   ]);
   const tabRow = el('div',{class:'row', style:'margin-bottom:10px;'},[
     el('button',{class:'btn teal sm', id:'gateTabUser'},['👤 Nhân viên (Username)']),
@@ -2873,7 +2906,7 @@ function renderImageAttach(cp){
 /* ===================== ISSUE / ACTION (paired rows) =====================
    Input Form (tab Nhập liệu) nhập Issue/Abnormal + Action theo CẶP, nhiều
    dòng — lưu ở cp.fields[ISSUE_PAIRS_KEY] (mảng {issue,action}), NẰM TRONG
-   `fields` (jsonb) đã có sẵn nên đi qua IndexedDB + Supabase sync KHÔNG cần
+   `fields` (jsonb) đã có sẵn nên đi qua IndexedDB + đồng bộ máy chủ KHÔNG cần
    đổi schema.sql/cột mới nào (một field top-level mới trên checkpoint, như
    cp.issues, sẽ KHÔNG được đồng bộ — sync_get/put_checkpoints chỉ đọc đúng
    các cột đã khai báo). Để KHÔNG phá vỡ mọi hàm xuất báo cáo/Excel/QMS/Data
@@ -4036,7 +4069,7 @@ async function renderDataLog(){
   const dev = await getDeviceInfo();
   const card = el('div',{class:'card'},[
     el('div',{class:'card-h', style:'font-size:17px;'},['🕒 Data Input Log — Nhật ký cập nhật dữ liệu']),
-    el('p',{class:'sub', style:'margin:0 0 10px;'},[`Theo dõi User, Máy tính và thời gian mỗi lần dữ liệu được tạo/sửa/xoá/đồng bộ — giúp biết ai vừa thay đổi dữ liệu, gần như theo thời gian thực. Nhật ký cập nhật được ghi bởi máy chủ Supabase; danh sách hiển thị tối đa ${LOG_MAX} mục gần nhất.`]),
+    el('p',{class:'sub', style:'margin:0 0 10px;'},[`Theo dõi User, Máy tính và thời gian mỗi lần dữ liệu được tạo/sửa/xoá/đồng bộ — giúp biết ai vừa thay đổi dữ liệu, gần như theo thời gian thực. Nhật ký cập nhật được ghi bởi máy chủ; danh sách hiển thị tối đa ${LOG_MAX} mục gần nhất.`]),
     el('div',{class:'sub', style:'color:var(--teal-d);font-weight:700;'},['🖥️ Máy tính này — ID: '+dev.id]),
   ]);
   const nameInp = el('input',{class:'inp', type:'text', placeholder:'Đặt tên gợi nhớ, VD: PC Văn phòng QA', value: dev.name},[]);
@@ -5914,15 +5947,15 @@ async function renderShare(root){
     resultBox.appendChild(actionRow);
     const btns = qsa('button', actionRow);
     btns[0].addEventListener('click', async ()=>{
-      for(const r of fresh) await idbPut('shifts', r);
+      for(const r of fresh) await idbPut('shifts', forUpload(r));
       await refreshCache(); await persistAll();
       toast(`Đã thêm ${fresh.length} điểm kiểm tra mới vào file CSV tổng`);
       renderShare(root);
     });
     if(dupes.length){
       btns[1].addEventListener('click', async ()=>{
-        for(const r of fresh) await idbPut('shifts', r);
-        for(const r of dupes) await idbPut('shifts', r);
+        for(const r of fresh) await idbPut('shifts', forUpload(r));
+        for(const r of dupes) await idbPut('shifts', forUpload(r));
         await refreshCache(); await persistAll();
         toast(`Đã nhập ${incoming.length} điểm kiểm tra vào file CSV tổng (ghi đè ${dupes.length} điểm trùng)`);
         renderShare(root);
@@ -5979,7 +6012,7 @@ async function renderShare(root){
 }
 
 /* ===================== ADMIN — MEMBER MANAGEMENT =====================
-   Talks to the admin-users Edge Function (supabase/functions/admin-users) —
+   Talks to the Worker's /admin/users route (cloudflare/src/worker.js) —
    never the database directly — since creating/disabling accounts needs the
    service_role key, which must never reach the browser (see that function's
    own comments). Only rendered for a verified Admin (see renderSettings). */
@@ -5987,16 +6020,16 @@ async function adminUsersCall(action, params){
   const token = await currentAccessToken();
   if(!token) return {error:'Chưa đăng nhập'};
   try{
-    const res = await fetch(cloudCfg.url + '/functions/v1/admin-users', {
+    const res = await fetch(cloudCfg.url + '/admin/users', {
       method:'POST',
-      headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+token, 'apikey': cloudCfg.anonKey},
+      headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+token},
       body: JSON.stringify(Object.assign({action}, params||{})),
       signal: AbortSignal.timeout(20000),
     });
     let body = {}; try{ body = await res.json(); }catch(e){}
     if(!res.ok) return {error: body.error || ('HTTP '+res.status)};
     return body;
-  }catch(e){ return {error:'Không gọi được admin-users (đã deploy Edge Function chưa? xem supabase/README.md)'}; }
+  }catch(e){ return {error:'Không gọi được máy chủ quản lý tài khoản (kiểm tra mạng / địa chỉ máy chủ)'}; }
 }
 // role -> {label, icon} — dùng chung cho danh sách tài khoản, ô chọn vai
 // trò khi tạo mới, và các nơi khác cần hiển thị tên vai trò bằng tiếng Việt.
@@ -6134,16 +6167,47 @@ function renderTabConfigCard(){
   return card;
 }
 
+/* ===================== SAO LƯU / PHỤC HỒI JSON (v2) =====================
+   File sao lưu v2 = {version:2, exportedAt, checkpoints:[...kèm ảnh], meta:{schema, poList, clientList, itemCodeList,
+   technicians, poClosures, tabConfig, egressControl}}. Khi phục hồi, các dấu "đã đồng bộ" cục bộ (_syncedAt/_imagesSyncedFp)
+   bị bỏ đi: nếu không, bản ghi bị coi là ĐÃ có trên server và sẽ KHÔNG bao giờ được đẩy lên máy chủ mới. */
+function buildBackupJson(){
+  return {
+    version: 2, exportedAt: new Date().toISOString(),
+    checkpoints: allCheckpoints,
+    meta: { schema: SCHEMA, poList: PO_LIST, clientList: CLIENT_LIST, itemCodeList: ITEM_CODE_LIST, technicians: TECHNICIANS,
+      poClosures, tabConfig: TAB_CONFIG, egressControl: EGRESS_CONFIG },
+  };
+}
+function forUpload(r){
+  const c = Object.assign({}, r);
+  delete c._syncedAt; delete c._imagesSyncedFp;
+  return c;
+}
+async function restoreMetaFromBackup(meta){
+  let n = 0;
+  for(const key of ['schema','poList','clientList','itemCodeList','technicians','poClosures','tabConfig','egressControl']){
+    const value = meta[key];
+    if(value===undefined || value===null) continue;
+    // Chỉ Admin được ghi egressControl (máy chủ cũng kiểm lại) — người khác thì bỏ qua để khỏi tạo hàng đợi bị từ chối.
+    if(key==='egressControl' && !(currentMember && currentMember.role==='admin')) continue;
+    applyRemoteMeta(key, value);
+    await queueMetaSync(key, key==='schema' ? SCHEMA : key==='tabConfig' ? TAB_CONFIG : key==='egressControl' ? EGRESS_CONFIG : value);
+    n++;
+  }
+  return n;
+}
+
 /* ===================== DATA & EGRESS CONTROL CARD =====================
    Shown to everyone once cloud sync is configured (read-only progress/state
    — a device's own person should see WHY things feel slower), full editable
    controls only for Admin. Real enforcement of the Admin-only writes is
-   server-side (sync_put_meta, see supabase/schema.sql) — this is just UI. */
+   server-side (sync_put_meta, see cloudflare/src/worker.js) — this is just UI. */
 function renderEgressControlCard(){
   const isAdmin = currentMember && currentMember.role==='admin';
   const card = el('div',{class:'card'},[
     el('div',{class:'card-h'},['🛡️ Data & Egress Control', el('div',{class:'rule'})]),
-    el('p',{class:'sub', style:'margin:0 0 10px;'},['Tự động hạn chế lưu lượng dữ liệu (ảnh/đồng bộ nền) khi gần/vượt giới hạn hằng ngày do Admin đặt — KHÔNG khoá app, KHÔNG chặn nhập/lưu điểm kiểm tra QC. Đây là traffic ƯỚC TÍNH do chính app này tạo ra trên thiết bị này, không phải số liệu Egress chính xác từ Supabase Billing.']),
+    el('p',{class:'sub', style:'margin:0 0 10px;'},['Tự động hạn chế lưu lượng dữ liệu (ảnh/đồng bộ nền) khi gần/vượt giới hạn hằng ngày do Admin đặt — KHÔNG khoá app, KHÔNG chặn nhập/lưu điểm kiểm tra QC. Đây là traffic ƯỚC TÍNH do chính app này tạo ra trên thiết bị này, không phải số liệu chính xác từ trang thống kê của nhà cung cấp máy chủ.']),
   ]);
   const barTrack = el('div',{style:'height:10px;border-radius:6px;background:#E2E8F0;overflow:hidden;'},[]);
   const barFill = el('div',{style:'height:100%;width:0%;background:var(--pass);transition:width .3s;'},[]);
@@ -6162,7 +6226,7 @@ function renderEgressControlCard(){
   paintEgressBar(egressCardLive, egressState()); // initial paint — card isn't attached to the document yet, so refreshEgressLiveUI()'s "still on screen" guard would wrongly no-op here
 
   if(!isAdmin){
-    if(!cloudConfigured()) card.appendChild(el('p',{class:'sub'},['Chỉ áp dụng khi đã cấu hình đồng bộ Supabase ở trên.']));
+    if(!cloudConfigured()) card.appendChild(el('p',{class:'sub'},['Chỉ áp dụng khi đã cấu hình đồng bộ ở trên.']));
     return card;
   }
 
@@ -6213,15 +6277,13 @@ function renderSettings(){
   root.appendChild(el('div',{class:'section-title'},['Cài đặt']));
 
   const cloudCard = el('div',{class:'card'},[
-    el('div',{class:'card-h'},['☁️ Đồng bộ Supabase', el('div',{class:'rule'})]),
+    el('div',{class:'card-h'},['☁️ Đồng bộ Cloudflare', el('div',{class:'rule'})]),
     el('p',{class:'sub', style:'margin:0 0 10px;'},[
-      'Kết nối tới project Supabase đã chạy supabase/schema.sql (xem supabase/README.md trong mã nguồn) để đồng bộ dữ liệu với các thiết bị khác — gần như ngay lập tức nếu Realtime kết nối được, tối đa ~20 giây nếu không (tự động, không cần biết Realtime đang bật hay không). Dữ liệu vẫn luôn lưu trước trong máy này (IndexedDB) — mất mạng vẫn nhập liệu bình thường, app tự đồng bộ lại khi có mạng.'
+      'Kết nối tới máy chủ Cloudflare Worker (xem cloudflare/README.md trong mã nguồn) để đồng bộ dữ liệu với các thiết bị khác — gần như ngay lập tức nếu Realtime kết nối được, tối đa ~20 giây nếu không (tự động, không cần biết Realtime đang bật hay không). Dữ liệu vẫn luôn lưu trước trong máy này (IndexedDB) — mất mạng vẫn nhập liệu bình thường, app tự đồng bộ lại khi có mạng.'
     ]),
   ]);
-  const urlInp = el('input',{class:'inp', type:'text', placeholder:'https://<project-id>.supabase.co', value: cloudCfg.url},[]);
-  const anonKeyInp = el('input',{class:'inp', type:'text', placeholder:'Anon public key (Project Settings → API)', value: cloudCfg.anonKey},[]);
-  cloudCard.appendChild(el('label',{class:'fld'},[el('span',{class:'lab'},['Supabase URL']), urlInp]));
-  cloudCard.appendChild(el('label',{class:'fld', style:'margin-top:10px;'},[el('span',{class:'lab'},['Anon public key']), anonKeyInp]));
+  const urlInp = el('input',{class:'inp', type:'text', placeholder:'https://shiftly-report-api.<tài-khoản>.workers.dev', value: cloudCfg.url},[]);
+  cloudCard.appendChild(el('label',{class:'fld'},[el('span',{class:'lab'},['Địa chỉ máy chủ (Worker URL)']), urlInp]));
   const cloudStatusWord = !cloudConfigured() ? 'Chưa cấu hình' : cloudStatus==='syncing' ? 'Đang đồng bộ…' : cloudStatus==='offline' ? 'Offline — chờ mạng' : cloudStatus==='error' ? (lastCloudError || 'Lỗi (sẽ tự thử lại)') : 'Đã đồng bộ';
   cloudCard.appendChild(el('div',{class:'filepill'+(cloudStatus==='idle'?' linked':''), style:'margin-top:10px;'},[
     el('span',{class:'ic'},[cloudStatus==='idle'?'✅':cloudStatus==='syncing'?'🔄':'⚠️']),
@@ -6238,7 +6300,7 @@ function renderSettings(){
   cloudCard.appendChild(cloudBtnRow);
   const cloudBtns = qsa('button', cloudBtnRow);
   let bi = 0;
-  cloudBtns[bi++].addEventListener('click', ()=>saveCloudConfig(urlInp.value, anonKeyInp.value));
+  cloudBtns[bi++].addEventListener('click', ()=>saveCloudConfig(urlInp.value));
   cloudBtns[bi++].addEventListener('click', manualSync);
   if(cloudCfg.url){
     cloudBtns[bi++].addEventListener('click', resyncFromScratch);
@@ -6290,7 +6352,7 @@ function renderSettings(){
     ])
   ]);
   qsa('button', backupCard)[0].addEventListener('click', ()=>{
-    const blob = new Blob([JSON.stringify(allCheckpoints,null,2)], {type:'application/json'});
+    const blob = new Blob([JSON.stringify(buildBackupJson(),null,2)], {type:'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `shiftly_backup_${todayStr()}.json`;
@@ -6301,15 +6363,20 @@ function renderSettings(){
     const text = await file.text();
     try{
       const parsed = JSON.parse(text);
+      // Định dạng mới: {version:2, checkpoints:[...], meta:{...}}; định dạng cũ: mảng checkpoint trần — vẫn đọc được.
+      const list = Array.isArray(parsed) ? parsed : (parsed && Array.isArray(parsed.checkpoints) ? parsed.checkpoints : null);
+      if(!list) throw new Error('bad backup');
       const records = [];
-      parsed.forEach(r=>{
+      list.forEach(r=>{
         if(r.section !== undefined) records.push(r);
         else records.push(...splitLegacyIntoCheckpoints(r));
       });
-      for(const r of records) await idbPut('shifts', r);
+      for(const r of records) await idbPut('shifts', forUpload(r));
+      let metaCount = 0;
+      if(parsed && !Array.isArray(parsed) && parsed.meta) metaCount = await restoreMetaFromBackup(parsed.meta);
       await refreshCache();
       await persistAll();
-      toast(`Đã phục hồi ${records.length} điểm kiểm tra`);
+      toast(`Đã phục hồi ${records.length} điểm kiểm tra` + (metaCount ? ` và ${metaCount} mục cấu hình/danh mục` : '') + ' — đang đồng bộ lên máy chủ');
       renderAll();
     }catch(err){ toast('File JSON không hợp lệ'); }
   });
@@ -6342,7 +6409,7 @@ function renderSettings(){
   ]);
   qs('button', dangerCard).addEventListener('click', async ()=>{
     const msg = cloudCfg.url
-      ? 'Xoá TOÀN BỘ dữ liệu ca đã lưu trong MÁY NÀY? Đây chỉ xoá bản sao cục bộ — dữ liệu trên Supabase (và các thiết bị khác) KHÔNG bị xoá, và lần đồng bộ tiếp theo sẽ tự tải lại về máy này. Muốn xoá vĩnh viễn trên cả server, cần thao tác trực tiếp trong Supabase SQL Editor.'
+      ? 'Xoá TOÀN BỘ dữ liệu ca đã lưu trong MÁY NÀY? Đây chỉ xoá bản sao cục bộ — dữ liệu trên máy chủ (và các thiết bị khác) KHÔNG bị xoá, và lần đồng bộ tiếp theo sẽ tự tải lại về máy này. Muốn xoá vĩnh viễn trên cả server, cần thao tác trực tiếp trên Cloudflare D1 (npx wrangler d1 execute).'
       : 'Xoá TOÀN BỘ dữ liệu ca đã lưu trong máy này? Hành động không thể hoàn tác.';
     if(confirm(msg)){
       for(const r of allCheckpoints) await idbDelete('shifts', r.key);
@@ -6365,10 +6432,10 @@ function renderGuide(){
   <div class="card markd">
     <h4>0. Mô hình dữ liệu: Điểm kiểm tra (Checkpoint)</h4>
     <p>App không còn coi "1 ca = 1 PO cho tất cả công đoạn". Thực tế dây chuyền chạy liên tục nên <b>1 ca có thể có nhiều PO chạy song song</b>, mỗi PO chỉ ứng với 1 vài công đoạn cụ thể (VD: PO 65 chỉ có ở Rang, PO 89 và 90 cùng chạy ở Trích ly). Vì vậy đơn vị nhập liệu nhỏ nhất giờ là <b>Điểm kiểm tra</b> = 1 lần nhập cho đúng 1 Công đoạn + 1 PO cụ thể, trong 1 Ngày + Ca. 1 ca có thể có nhiều điểm kiểm tra.</p>
-    <h4>1. Đồng bộ Supabase (tuỳ chọn, khuyên bật để dùng nhiều thiết bị)</h4>
-    <p>Đây là bản Online của Shiftly Report — dữ liệu luôn được lưu trước trong chính máy đang dùng (IndexedDB), giống hệt bản offline gốc, nên mất mạng vẫn nhập liệu bình thường. Muốn nhiều tablet/máy tính cùng thấy chung 1 bộ dữ liệu, vào tab <b>Cài đặt</b> → mục "☁️ Đồng bộ Supabase" → nhập <b>Supabase URL</b> và <b>Anon public key</b> (do người triển khai app cung cấp — xem <code>supabase/README.md</code> trong mã nguồn) → "💾 Lưu cấu hình". Sau đó app sẽ yêu cầu <b>đăng nhập</b> (tài khoản do Admin tạo trong tab Cài đặt → "👥 Quản lý tài khoản") — mỗi người dùng riêng, đăng nhập xong app tự đẩy/kéo dữ liệu, không cần thao tác thêm.</p>
+    <h4>1. Đồng bộ Cloudflare (tuỳ chọn, khuyên bật để dùng nhiều thiết bị)</h4>
+    <p>Đây là bản Online của Shiftly Report — dữ liệu luôn được lưu trước trong chính máy đang dùng (IndexedDB), giống hệt bản offline gốc, nên mất mạng vẫn nhập liệu bình thường. Muốn nhiều tablet/máy tính cùng thấy chung 1 bộ dữ liệu, app đã có sẵn địa chỉ máy chủ Cloudflare mặc định nên không cần nhập gì thêm (tab <b>Cài đặt</b> → mục "☁️ Đồng bộ Cloudflare" chỉ để xem trạng thái hoặc đổi máy chủ khi cần). Mở app là app yêu cầu <b>đăng nhập</b> (tài khoản do Admin tạo trong tab Cài đặt → "👥 Quản lý tài khoản") — mỗi người dùng riêng, đăng nhập xong app tự đẩy/kéo dữ liệu, không cần thao tác thêm.</p>
     <h4>1b. Đăng nhập & quản lý tài khoản</h4>
-    <p>Khi đã cấu hình Đồng bộ Supabase, app yêu cầu đăng nhập trước khi vào — có 3 loại tài khoản: <b>Admin</b> (toàn quyền, đăng nhập bằng email + mật khẩu), <b>Nhân viên/User</b> (nhập liệu bình thường, đăng nhập bằng tên đăng nhập + mật khẩu), và <b>Giám sát/Quản lý</b> (chỉ xem — Báo cáo, Dữ liệu... — không nhập/sửa được dữ liệu; cũng đăng nhập bằng tên đăng nhập + mật khẩu). Chỉ Admin thấy mục "👥 Quản lý tài khoản" trong tab Cài đặt để tạo tài khoản mới, đổi vai trò (kể cả đổi qua lại giữa 3 vai trò), hoặc vô hiệu hóa một tài khoản (người bị vô hiệu hóa không đăng nhập được nữa, kể cả trên thiết bị đang mở sẵn — lần gọi đồng bộ tiếp theo sẽ bị từ chối và quay lại màn hình đăng nhập). Tài khoản Admin đầu tiên phải được tạo thủ công 1 lần trong Supabase Dashboard — xem <code>supabase/README.md</code>. Nếu chưa cấu hình Đồng bộ Supabase, app dùng bình thường không cần đăng nhập gì cả (y hệt trước đây). Khi đã đăng nhập, góc phải thanh trên cùng (mọi tab) hiện tên tài khoản kèm nút <b>"🚪 Đăng xuất"</b> — bấm vào sẽ đăng xuất VÀ tự xoá bộ nhớ cache trình duyệt của trang (Cache Storage/Service Worker nếu có), rồi tải lại trang; dữ liệu đã nhập trong máy (IndexedDB) không hề bị đụng tới.</p>
+    <p>Khi đã bật Đồng bộ Cloudflare, app yêu cầu đăng nhập trước khi vào — có 3 loại tài khoản: <b>Admin</b> (toàn quyền, đăng nhập bằng email + mật khẩu), <b>Nhân viên/User</b> (nhập liệu bình thường, đăng nhập bằng tên đăng nhập + mật khẩu), và <b>Giám sát/Quản lý</b> (chỉ xem — Báo cáo, Dữ liệu... — không nhập/sửa được dữ liệu; cũng đăng nhập bằng tên đăng nhập + mật khẩu). Chỉ Admin thấy mục "👥 Quản lý tài khoản" trong tab Cài đặt để tạo tài khoản mới, đổi vai trò (kể cả đổi qua lại giữa 3 vai trò), hoặc vô hiệu hóa một tài khoản (người bị vô hiệu hóa không đăng nhập được nữa, kể cả trên thiết bị đang mở sẵn — lần gọi đồng bộ tiếp theo sẽ bị từ chối và quay lại màn hình đăng nhập). Tài khoản Admin đầu tiên do người triển khai tạo 1 lần bằng khóa khởi tạo — xem <code>cloudflare/README.md</code>. Nếu chưa cấu hình đồng bộ, app dùng bình thường không cần đăng nhập gì cả (y hệt trước đây). Khi đã đăng nhập, góc phải thanh trên cùng (mọi tab) hiện tên tài khoản kèm nút <b>"🚪 Đăng xuất"</b> — bấm vào sẽ đăng xuất VÀ tự xoá bộ nhớ cache trình duyệt của trang (Cache Storage/Service Worker nếu có), rồi tải lại trang; dữ liệu đã nhập trong máy (IndexedDB) không hề bị đụng tới.</p>
     <h4>1c. Admin tuỳ chỉnh thứ tự & ẩn/hiện Tab theo vai trò</h4>
     <p>Ở tab Cài đặt, mục "🗂️ Sắp xếp &amp; Ẩn/hiện Tab" (chỉ Admin thấy) cho phép đổi thứ tự hiện ở thanh tab trên cùng (nút ▲▼, áp dụng chung cho mọi thiết bị/mọi người sau khi bấm Lưu), và chọn ẩn riêng từng tab với vai trò Nhân viên và/hoặc Giám sát/Quản lý — VD ẩn tab Specs với Nhân viên nếu không muốn họ tự sửa chỉ tiêu. Admin luôn thấy đủ mọi tab bất kể cấu hình này. Tab Cài đặt không bao giờ ẩn được (đây là nơi duy nhất có nút đăng xuất/ngắt kết nối, ẩn đi sẽ nhốt luôn tài khoản đó). Mặc định, vai trò Giám sát/Quản lý bị ẩn sẵn tab Nhập liệu.</p>
     <h4>2. Nhập liệu theo Điểm kiểm tra</h4>
@@ -6378,16 +6445,16 @@ function renderGuide(){
     <h4>4. Xem lại & sửa</h4>
     <p>Tab <b>Dữ liệu</b> liệt kê tất cả các điểm kiểm tra đã nhập (chế độ 📋 Danh sách ca), mỗi dòng có Công đoạn + PO riêng, chạm 👁 để xem chi tiết, ✎ sửa, hoặc 🗑 xoá. Chế độ 📅 Xem theo ngày hiển thị Ca 1/2/3 cạnh nhau — mỗi cột liệt kê tất cả điểm kiểm tra (mọi công đoạn, mọi PO) của ca đó, giống bố cục file Excel gốc.</p>
     <h4>6. An toàn dữ liệu</h4>
-    <p>Toàn bộ dữ liệu được lưu ngay trong máy đang dùng (IndexedDB) trước tiên — luôn vào được, kể cả mất mạng. Nếu có cấu hình đồng bộ Supabase, mỗi lần lưu app sẽ tự đẩy dữ liệu lên; nếu đang offline hoặc đồng bộ lỗi, các thay đổi được xếp vào 1 "hàng đợi" lưu ngay trong máy và app tự thử lại khi có mạng trở lại — không mất dữ liệu. Vẫn nên thỉnh thoảng tải file JSON sao lưu ở tab Cài đặt như 1 lớp an toàn bổ sung.</p>
-    <h4>6b. Đồng bộ Supabase — cách hoạt động</h4>
-    <p>Sau khi cấu hình ở tab Cài đặt, mỗi lần lưu 1 điểm kiểm tra/Specs/Danh sách PO-Recipe-Client-QC, app đẩy ngay thay đổi đó lên Supabase, đồng thời phát 1 tín hiệu Realtime "vừa có thay đổi" — các máy khác đang mở app nhận tín hiệu này gần như ngay lập tức và tự kéo dữ liệu mới về, không cần chờ. Nếu Realtime không kết nối được (mạng công ty chặn WebSocket, trình duyệt cũ...), app tự rơi về kiểm tra định kỳ mỗi ~15-20 giây (và mỗi khi mở lại app / có mạng trở lại) — vẫn tự động, không cần biết Realtime có đang hoạt động hay không. Nếu 2 người cùng sửa <b>đúng 1 điểm kiểm tra</b> (trùng Ngày+Ca+Công đoạn+PO) gần như cùng lúc, bản lưu <b>sau cùng sẽ thắng</b> (theo thời gian lưu) — vì mỗi điểm kiểm tra đã tách rất nhỏ theo Công đoạn+PO nên tình huống này hiếm khi xảy ra. Ảnh đính kèm đi kèm luôn trong dữ liệu của điểm kiểm tra (không tách riêng), nên máy nào nhận được điểm kiểm tra là có luôn ảnh, không cần chờ tải thêm. Có thể bấm "🔄 Đồng bộ ngay" ở tab Cài đặt để đồng bộ thủ công bất cứ lúc nào — app sẽ báo rõ vừa nhận thêm bao nhiêu thay đổi mới, hoặc lý do cụ thể nếu đồng bộ thất bại (sai Supabase URL/Anon Key, phiên đăng nhập hết hạn, mất mạng...) thay vì chỉ báo chung chung. Con trỏ đồng bộ dùng số thứ tự do server tự sinh (không dùng đồng hồ của máy) nên đồng hồ điện thoại/máy tính lệch nhau không làm mất hoặc trễ dữ liệu. Nếu nghi ngờ 1 thiết bị bị "kẹt" (báo đã đồng bộ nhưng thiếu dữ liệu), bấm "🔁 Đồng bộ lại từ đầu" để buộc tải lại toàn bộ từ server — an toàn, không mất dữ liệu.</p>
+    <p>Toàn bộ dữ liệu được lưu ngay trong máy đang dùng (IndexedDB) trước tiên — luôn vào được, kể cả mất mạng. Nếu có bật đồng bộ, mỗi lần lưu app sẽ tự đẩy dữ liệu lên; nếu đang offline hoặc đồng bộ lỗi, các thay đổi được xếp vào 1 "hàng đợi" lưu ngay trong máy và app tự thử lại khi có mạng trở lại — không mất dữ liệu. Vẫn nên thỉnh thoảng tải file JSON sao lưu ở tab Cài đặt như 1 lớp an toàn bổ sung — file này gồm cả điểm kiểm tra (kèm ảnh) lẫn Specs/danh mục/cấu hình, và phục hồi từ file sẽ tự đẩy lại lên máy chủ.</p>
+    <h4>6b. Đồng bộ Cloudflare — cách hoạt động</h4>
+    <p>Sau khi cấu hình ở tab Cài đặt, mỗi lần lưu 1 điểm kiểm tra/Specs/Danh sách PO-Recipe-Client-QC, app đẩy ngay thay đổi đó lên máy chủ, đồng thời máy chủ phát 1 tín hiệu Realtime "vừa có thay đổi" — các máy khác đang mở app nhận tín hiệu này gần như ngay lập tức và tự kéo dữ liệu mới về, không cần chờ. Nếu Realtime không kết nối được (mạng công ty chặn WebSocket, trình duyệt cũ...), app tự rơi về kiểm tra định kỳ mỗi ~15-20 giây (và mỗi khi mở lại app / có mạng trở lại) — vẫn tự động, không cần biết Realtime có đang hoạt động hay không. Nếu 2 người cùng sửa <b>đúng 1 điểm kiểm tra</b> (trùng Ngày+Ca+Công đoạn+PO) gần như cùng lúc, bản lưu <b>sau cùng sẽ thắng</b> (theo thời gian lưu) — vì mỗi điểm kiểm tra đã tách rất nhỏ theo Công đoạn+PO nên tình huống này hiếm khi xảy ra. Ảnh đính kèm được lưu ở kho ảnh riêng của máy chủ (Cloudflare R2); máy nhận điểm kiểm tra sẽ tải ảnh về ngay sau đó, và chỉ tải khi ảnh mới hoặc đã đổi. Có thể bấm "🔄 Đồng bộ ngay" ở tab Cài đặt để đồng bộ thủ công bất cứ lúc nào — app sẽ báo rõ vừa nhận thêm bao nhiêu thay đổi mới, hoặc lý do cụ thể nếu đồng bộ thất bại (sai địa chỉ máy chủ, phiên đăng nhập hết hạn, mất mạng...) thay vì chỉ báo chung chung. Con trỏ đồng bộ dùng số thứ tự do server tự sinh (không dùng đồng hồ của máy) nên đồng hồ điện thoại/máy tính lệch nhau không làm mất hoặc trễ dữ liệu. Nếu nghi ngờ 1 thiết bị bị "kẹt" (báo đã đồng bộ nhưng thiếu dữ liệu), bấm "🔁 Đồng bộ lại từ đầu" để buộc tải lại toàn bộ từ server — an toàn, không mất dữ liệu.</p>
     <h4>7. Đưa dữ liệu sang máy tính (Tablet Android ↔ PC Windows)</h4>
-    <p>Nếu đã bật Đồng bộ Supabase, việc này giờ <b>tự động</b> — bất kỳ máy nào (tablet ở xưởng, PC văn phòng, laptop quản lý) mở cùng 1 địa chỉ app, cấu hình cùng Supabase URL + Anon key, rồi đăng nhập tài khoản của mình sẽ tự thấy dữ liệu chung, không cần chép file qua lại nữa. Chỉ cần cả 2 máy có mạng tại một thời điểm nào đó (không cần đồng thời) để đồng bộ diễn ra.</p>
-    <p>Vẫn nên duy trì thói quen sao lưu thủ công định kỳ để phòng rủi ro (mất tài khoản Supabase, xoá nhầm, sự cố ngoài dự kiến):</p>
+    <p>Nếu đã bật Đồng bộ Cloudflare, việc này giờ <b>tự động</b> — bất kỳ máy nào (tablet ở xưởng, PC văn phòng, laptop quản lý) mở cùng 1 địa chỉ app, rồi đăng nhập tài khoản của mình sẽ tự thấy dữ liệu chung, không cần chép file qua lại nữa. Chỉ cần cả 2 máy có mạng tại một thời điểm nào đó (không cần đồng thời) để đồng bộ diễn ra.</p>
+    <p>Vẫn nên duy trì thói quen sao lưu thủ công định kỳ để phòng rủi ro (mất tài khoản Cloudflare, xoá nhầm, sự cố ngoài dự kiến):</p>
     <ul>
       <li><b>Định kỳ (hàng tuần):</b> tải JSON sao lưu (tab Cài đặt) gửi email cho chính mình hoặc copy qua USB.</li>
       <li><b>Không có mạng dài ngày ở xưởng:</b> vẫn nhập liệu bình thường — dữ liệu nằm an toàn trong máy (hàng đợi đồng bộ), tự đẩy lên hết khi có mạng trở lại, không cần thao tác gì thêm.</li>
-      <li><b>Chưa/không muốn bật Supabase:</b> vẫn dùng mục <b>Xuất nhập dữ liệu</b> (tab Cài đặt) để xuất CSV/Excel/JSON thủ công và chia sẻ qua OneDrive/SharePoint/USB như cách làm truyền thống.</li>
+      <li><b>Chưa/không muốn bật đồng bộ:</b> vẫn dùng mục <b>Xuất nhập dữ liệu</b> (tab Cài đặt) để xuất CSV/Excel/JSON thủ công và chia sẻ qua OneDrive/SharePoint/USB như cách làm truyền thống.</li>
     </ul>
     <h4>8. Xuất / nhập nhanh một phần dữ liệu (Short CSV)</h4>
     <p>Khi chỉ cần gửi vài ca (không phải toàn bộ lịch sử) cho người khác — ví dụ đưa số liệu hôm nay cho quản lý xem trên máy khác:</p>
@@ -6395,7 +6462,7 @@ function renderGuide(){
       <li><b>Xuất theo lựa chọn tay:</b> ở tab <b>Dữ liệu</b> (chế độ Danh sách ca), tick chọn các ca cần gửi (có "chọn tất cả" ở đầu bảng) → bấm <b>"Xuất ca đã chọn (Short CSV)"</b>.</li>
       <li><b>Xuất theo khoảng thời gian tự động:</b> ở mục <b>Xuất nhập dữ liệu</b> (tab Cài đặt), chọn phạm vi "Theo ca cụ thể / Theo ngày / Theo tuần / Theo tháng" → app tự lọc đúng các ca trong khoảng đó → "Xuất & Chia sẻ".</li>
       <li>Cả 2 cách đều tạo 1 file CSV nhỏ, tên bắt đầu bằng <b>"Short_"</b>, cùng định dạng cột với file CSV tổng nên mở được ở cả 2 nơi.</li>
-      <li><b>Nhập:</b> ở máy nhận, vào mục <b>Xuất nhập dữ liệu</b> (tab Cài đặt) → "Chọn file CSV để nhập" → chọn file "Short_..." (hoặc cả file CSV tổng) vừa nhận. App tự so sánh với dữ liệu đang có và <b>báo động nếu phát hiện ca trùng</b> (cùng Ngày+Ca đã tồn tại) — chọn "Chỉ thêm ca mới" (an toàn, bỏ qua trùng) hoặc "Ghi đè cả ca trùng" (nếu chắc chắn muốn thay bằng bản mới). Dữ liệu nhập vào được lưu vào máy này và tự đồng bộ lên Supabase (nếu đã cấu hình) như mọi thay đổi khác.</li>
+      <li><b>Nhập:</b> ở máy nhận, vào mục <b>Xuất nhập dữ liệu</b> (tab Cài đặt) → "Chọn file CSV để nhập" → chọn file "Short_..." (hoặc cả file CSV tổng) vừa nhận. App tự so sánh với dữ liệu đang có và <b>báo động nếu phát hiện ca trùng</b> (cùng Ngày+Ca đã tồn tại) — chọn "Chỉ thêm ca mới" (an toàn, bỏ qua trùng) hoặc "Ghi đè cả ca trùng" (nếu chắc chắn muốn thay bằng bản mới). Dữ liệu nhập vào được lưu vào máy này và tự đồng bộ lên máy chủ (nếu đã bật) như mọi thay đổi khác.</li>
     </ul>
     <h4>9. Đính kèm ảnh bất thường</h4>
     <p>Ngay dưới ô "Ghi chú bất thường" của mỗi công đoạn có 2 nút: <b>📎 Đính kèm ảnh</b> (chọn ảnh có sẵn trong máy) và <b>📷 Chụp ảnh</b> (mở camera chụp trực tiếp). Ảnh được nén gọn và lưu ngay trong máy (IndexedDB) — không cần bấm "Lưu công đoạn" mới lưu ảnh. Chạm ✕ trên ảnh nhỏ để xoá. <b>Lưu ý:</b> ảnh không đi kèm trong file CSV (CSV chỉ chứa số liệu để tương thích Excel) — ảnh chỉ xem được trong app trên chính máy đã chụp/đính kèm, hoặc trong bản backup JSON đầy đủ (tab Cài đặt).</p>
@@ -6445,8 +6512,8 @@ function renderGuide(){
     <p>Ảnh bất thường đính kèm cho từng công đoạn giờ hiện luôn trong báo cáo (cả chế độ Theo ca và Theo PO) — 1 dải ảnh nhỏ ngay dưới các chỉ tiêu của công đoạn đó, tối đa 6 ảnh/công đoạn trong bản ảnh PNG (nếu nhiều hơn sẽ ghi "+N"). Áp dụng cho cả 3 định dạng xuất: ảnh PNG, PDF (in trang), và HTML đầy đủ.</p>
     <h4>30. Xuất báo cáo HTML đầy đủ (đẹp, có ảnh)</h4>
     <p>Ở tab Báo cáo, chọn "Định dạng khác..." → <b>"🌐 Xuất báo cáo HTML đầy đủ (đẹp, có ảnh)"</b> — tạo 1 file .html độc lập, mở được bằng bất kỳ trình duyệt nào, không cần app. Bố cục dạng thẻ (card) rõ ràng theo từng công đoạn, có ô thống kê tổng quan, và <b>toàn bộ ảnh đính kèm hiển thị đầy đủ độ phân giải gốc</b> dạng lưới ảnh — chạm vào ảnh để xem full-size ở tab mới. Phù hợp khi cần gửi báo cáo đẹp, đầy đủ hình ảnh cho khách hàng hoặc lưu hồ sơ.</p>
-    <h4>31. Kiến trúc bản Online (GitHub + Supabase)</h4>
-    <p>Bản này (<code>index.html</code>) khác với bản offline gốc (<code>Shiftly_Report_App.html</code>) ở 1 điểm duy nhất: có thêm khả năng đồng bộ dữ liệu qua mạng, kèm đăng nhập tài khoản thật. Mã nguồn giao diện (chính file <code>index.html</code> này) được lưu trên GitHub và publish bằng GitHub Pages; dữ liệu thật (điểm kiểm tra kèm ảnh, cấu hình) lưu trong 1 project Supabase (Postgres + Auth) — app gọi thẳng vào các SQL function (RPC) của Supabase, xác thực bằng phiên đăng nhập thật của từng người (xem mục 1b), còn quyền ghi/đọc thật sự do chính các function đó tự kiểm tra người gọi có phải 1 tài khoản còn hoạt động hay không (không dựa vào 1 mật khẩu chung như trước nữa). Việc tạo/vô hiệu hóa tài khoản chạy qua 1 Edge Function riêng (giữ khoá quản trị, không nằm trong mã nguồn public). Xem thư mục <code>supabase/</code> trong mã nguồn (file <code>schema.sql</code> + <code>README.md</code> + <code>functions/admin-users/</code>) để biết chi tiết triển khai và các bước thiết lập.</p>
+    <h4>31. Kiến trúc bản Online (GitHub + Cloudflare)</h4>
+    <p>Bản này (<code>index.html</code>) khác với bản offline gốc (<code>Shiftly_Report_App.html</code>) ở 1 điểm duy nhất: có thêm khả năng đồng bộ dữ liệu qua mạng, kèm đăng nhập tài khoản thật. Mã nguồn giao diện (chính file <code>index.html</code> này) được lưu trên GitHub và publish bằng GitHub Pages (địa chỉ web không đổi); dữ liệu thật lưu ở Cloudflare — điểm kiểm tra, cấu hình và tài khoản nằm trong cơ sở dữ liệu D1, ảnh đính kèm nằm trong kho R2. App gọi thẳng vào 1 Cloudflare Worker (các hàm <code>/rpc/sync_*</code>), xác thực bằng phiên đăng nhập thật của từng người (xem mục 1b); Worker tự kiểm tra người gọi còn là tài khoản hoạt động và đúng vai trò ở MỌI lần gọi. Việc tạo/vô hiệu hóa tài khoản chạy qua route quản trị của chính Worker (chỉ Admin). Xem thư mục <code>cloudflare/</code> trong mã nguồn (<code>schema.sql</code>, <code>src/worker.js</code>, <code>README.md</code>) để biết chi tiết triển khai.</p>
     <h4>32. Ảnh chụp từ nhiều máy hiển thị lẫn nhau</h4>
     <p>Ảnh đính kèm chụp trên 1 máy đi kèm luôn trong dữ liệu của điểm kiểm tra đó (không tách riêng) — nên ngay khi 1 máy khác đồng bộ nhận được điểm kiểm tra, ảnh cũng đã có sẵn, xem được ngay kể cả trong Báo cáo (PNG/PDF/HTML đầy đủ) mà không cần tải thêm bước nào. Ảnh vừa chụp nhưng máy chưa kịp đồng bộ (đang chờ mạng) sẽ chỉ hiện được trên đúng máy đã chụp cho tới khi đồng bộ xong.</p>
     <h4>33. Item Code</h4>

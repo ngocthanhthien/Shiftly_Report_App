@@ -11,7 +11,10 @@ async function boot() {
   vc.on('jsdomError', e => errors.push(e.message));
   const dom = new JSDOM(html, {
     url: 'https://shiftly-report-app.example.workers.dev', runScripts: 'dangerously', pretendToBeVisual: true, virtualConsole: vc,
-    beforeParse(w) { w.indexedDB = new IDBFactory(); w.fetch = async () => { throw new Error('network disabled in test'); }; },
+    beforeParse(w) { w.indexedDB = new IDBFactory();
+      // Thiết bị đã đăng nhập từ trước (phiên lưu sẵn) và đang offline; tắt WebSocket thật để test không gọi ra mạng.
+      w.localStorage.setItem('shiftly-cf-auth', JSON.stringify({accessToken:'t', refreshToken:'r', expiresAt: 4102444800, user:{userId:'test-admin', displayName:'Test', username:'test', role:'admin'}}));
+      Object.defineProperty(w, 'WebSocket', {value: undefined, configurable: true}); w.fetch = async () => { throw new Error('network disabled in test'); }; },
   });
   const w = dom.window;
   for (let i = 0; i < 100 && !w.eval('typeof DB !== "undefined" && DB !== null'); i++) await new Promise(r => setTimeout(r, 10));
