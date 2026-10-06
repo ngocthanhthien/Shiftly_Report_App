@@ -1,3 +1,5 @@
+> **⚠️ LỖI THỜI (từ 2026-09-25):** backend đã chuyển sang Cloudflare — xem [`../cloudflare/README.md`](../cloudflare/README.md). Thư mục `supabase/` chỉ còn là bản chụp lịch sử (cũng có ở thẻ git `pre-cloudflare`) và được `tests/supabase.test.mjs` dùng. KHÔNG làm theo hướng dẫn dưới đây để thiết lập mới.
+
 # Shiftly Report — Supabase backend
 
 Data lives in 1 Supabase project (free tier is enough). Access is real

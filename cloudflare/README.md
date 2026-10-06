@@ -1,7 +1,6 @@
 # Backend Cloudflare (Worker + D1 + R2 + Durable Objects)
 
-Thay thế Supabase (Postgres + Auth + Edge Function + Realtime). **Chưa được frontend sử dụng** — bản web trên GitHub Pages
-vẫn chạy bằng Supabase cho tới khi chỉnh `index.html` để chuyển hướng sang đây.
+Backend đang chạy thật (thay Supabase từ 2026-09-25) — bản web trên GitHub Pages dùng backend này.
 
 | Thành phần | Vai trò |
 |---|---|

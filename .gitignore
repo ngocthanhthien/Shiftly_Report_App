@@ -6,3 +6,6 @@ cloudflare/.wrangler/
 cloudflare/.dev.vars
 cloudflare/users*.json
 users-export*.json
+
+# Supabase CLI link state (không còn dùng)
+supabase/.temp/

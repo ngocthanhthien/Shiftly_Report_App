@@ -1,69 +1,44 @@
 # Shiftly Report
 
 QC shift-report app for ILD Coffee Vietnam's freeze-dried coffee line —
-single-file offline-first PWA, with optional multi-device sync.
+single-file offline-first PWA with multi-device sync.
 
-- **Offline app**: `Shiftly_Report_App.html` — fully offline, no network
-  dependency at all. Meant to run locally on the tablets at the plant.
-- **Online app**: [`index.html`](index.html) — identical UI/business logic,
-  plus optional background sync so multiple tablets/PCs can share one data
-  set. Hosted as a static site (GitHub Pages); data lives in a Supabase
-  (Postgres) project — see [`supabase/README.md`](supabase/README.md) for
-  the one-time setup (paste one SQL file into the Supabase dashboard, no
-  CLI needed).
+- **App**: [`index.html`](index.html) — one static file (HTML + CSS + JS inline,
+  Vietnamese UI, no build step), hosted on GitHub Pages at
+  `https://ngocthanhthien.github.io/Shiftly_Report_App/`.
+- **Backend**: [`cloudflare/`](cloudflare/README.md) — a Cloudflare Worker with a
+  D1 database (accounts, checkpoints, lists, logs), an R2 bucket (photos) and
+  two Durable Objects (password hashing, realtime wake-up signal).
+- **Handoff / design notes**: [`HANDOFF.md`](HANDOFF.md).
 
-The 12-tab UI (Nhập liệu, Dữ liệu — bao gồm truy xuất/lọc theo PO/Ca/ngày,
-Danh sách PO/Client, Danh sách Items Code, Data Log, Báo cáo, Thống kê,
-Specs, Xuất nhập dữ liệu, Cài đặt, Hướng dẫn) is the same in both builds.
-Recipe is not a separate managed list/tab — it's looked up automatically
-from Item Code (Item Code Master).
+The 10-tab UI: Nhập liệu, Báo cáo, Dữ liệu, Danh sách Items Code, Danh sách
+Client, Specs, Data Log, Danh sách PO, Cài đặt (includes export/import and the
+Data & Egress Control card), Hướng dẫn. Recipe is not a separate list — it is
+looked up automatically from Item Code.
 
-## Architecture (online build)
+## Architecture
 
-There is no custom backend server beyond one small Supabase Edge Function
-for account management. `index.html` talks directly to Supabase's PostgREST
-RPC endpoint, authenticated as a real Supabase Auth user (Admin: email +
-password; User: username + password, mapped internally to a synthetic
-email); every real table (`checkpoints`, `meta`, `logs`, `members`,
-`member_audit`) has Row Level Security enabled with **no policies**, so
-direct REST access is denied outright even to a signed-in user. The only way
-in is through a handful of `sync_*` SQL functions (SECURITY DEFINER) that
-each check the caller is a signed-in, non-disabled row in `members` — see
-[`supabase/schema.sql`](supabase/schema.sql). Creating/disabling accounts
-needs the `service_role` key, which never reaches the browser — that only
-happens inside [`supabase/functions/admin-users`](supabase/functions/admin-users),
-which an Admin calls from the app's Cài đặt tab. See
-[`supabase/README.md`](supabase/README.md) for the one-time setup (paste
-`schema.sql`, then deploy that one Edge Function with the Supabase CLI).
-
-IndexedDB remains the source of truth on every device (offline-first,
-unchanged from the original app) — writes go into a local `outbox` and get
-pushed to Supabase whenever the device is online, with an incremental
-`seq`-based pull for whatever other devices pushed. See the `CLOUD SYNC` and
-`ACCESS CONTROL` sections at the top of `index.html` for the full design
-notes, including why the sync cursor is a server-assigned sequence rather
-than a timestamp (client clocks drift — a phone with the wrong time must
-never cause another device to silently miss data). If cloud sync isn't
-configured at all, none of the login gate applies — the app works exactly
-like before, fully offline, no account needed.
-
-A Supabase Realtime Broadcast channel (`shiftly-changes`) pings every
-connected device the instant one of them pushes a change, so sync is
-effectively immediate when the WebSocket connects; ~15-20s polling (already
-resilient to backgrounded tabs and reconnects) is the fallback when it
-doesn't. Broadcast carries no data — actual reads still only ever happen
-through the auth-checked RPCs above, so this adds no new access path.
+IndexedDB is the source of truth on every device: every save goes to the local
+database first, then into an outbox that is pushed to the Worker whenever the
+device is online (offline entry keeps working). `index.html` calls the Worker's
+`POST /rpc/sync_*` endpoints directly, authenticated as a real signed-in user
+(Admin: email + password; Nhân viên/Giám sát: username + password). Every
+request re-checks on the server that the account is active and allowed to do
+the action (supervisors are read-only; the egress limits are Admin-only), so
+knowing the URL grants nothing. Conflicts are last-write-wins by `updatedAt`;
+the pull cursor is a server-assigned sequence (`seq`), never a client clock.
+Photos live in R2 and are fetched separately, only when new or changed. A
+WebSocket (`/realtime`) pings other devices right after someone saves; ~15-60 s
+polling is the fallback. See the `CLOUD SYNC` and `ACCESS CONTROL` sections at
+the top of the script in `index.html`, and [`HANDOFF.md`](HANDOFF.md).
 
 ## Deploy
 
-1. Push this repo to GitHub, enable **GitHub Pages** (Settings → Pages →
-   deploy from the `main` branch, root folder). `index.html` is served at
-   the resulting `https://<user>.github.io/<repo>/` URL automatically on
-   every push — no build step.
-2. Set up the Supabase project once (schema + first Admin account + the
-   admin-users Edge Function) — see [`supabase/README.md`](supabase/README.md).
-3. Open the published URL → tab Cài đặt → enter the Supabase URL and anon
-   key from step 2 → log in with the Admin account you just created.
+- **Frontend**: push to `main`; GitHub Pages (deploy from `main`, root folder)
+  serves `index.html` within about a minute.
+- **Backend**: see [`cloudflare/README.md`](cloudflare/README.md)
+  (`npx wrangler login`, create D1 + R2, apply `schema.sql`, set secrets,
+  `npx wrangler deploy`, then import accounts with `/auth/bootstrap`).
 
 ## Tests
 
@@ -72,7 +47,7 @@ npm ci
 npm test
 ```
 
-Runs against a real embedded Postgres (`@electric-sql/pglite`) executing
-the actual `supabase/schema.sql` — not a hand-written mirror — plus a full
-jsdom boot of `index.html` that exercises the real sync code path end to
-end. See `tests/`.
+Runs the real Worker inside Cloudflare's local runtime (Miniflare: real D1, R2
+and Durable Objects) and boots the real `index.html` in jsdom against it, plus
+UI/logic tests for each tab. `supabase/` is the retired Supabase backend, kept
+only as a historical snapshot (git tag `pre-cloudflare`).

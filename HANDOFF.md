@@ -1,318 +1,95 @@
-> **⚠️ NHÁNH `cloudflare-migration` (chưa gộp vào `main`)** — nhánh này chuyển backend từ Supabase sang **Cloudflare** (Worker + D1 + R2 + Durable Objects, thư mục [`cloudflare/`](cloudflare/README.md), đã triển khai tại `https://shiftly-report-api.dangthanhbinh53.workers.dev`). `index.html` trên nhánh này gọi Worker thay vì Supabase (đăng nhập giữ nguyên tài khoản/mật khẩu cũ; ảnh ở R2; Realtime bằng WebSocket; file sao lưu JSON v2 có cả `meta`). `main` vẫn chạy bản Supabase cho tới khi gộp nhánh này và đẩy lên GitHub Pages. Các mô tả Supabase bên dưới là của `main`/bản cũ. Sau khi chuyển hẳn: xoá khóa `BOOTSTRAP_TOKEN` (`npx wrangler secret delete BOOTSTRAP_TOKEN`) và lưu trữ thư mục `supabase/`.
-
 # HANDOFF — Shiftly Report App
 
-Tài liệu bàn giao để tiếp tục làm việc ở phiên AI/công cụ khác. Cập nhật lần cuối: 2026-09-21.
+Tài liệu bàn giao cho phiên AI/công cụ khác. Cập nhật lần cuối: **2026-10-06**. Lịch sử chi tiết các tính năng đến 2026-09-25 (thời Supabase) nằm ở [`docs/HANDOFF_2026-09-25_supabase-era.md`](docs/HANDOFF_2026-09-25_supabase-era.md) — chỉ tham khảo, phần backend trong đó đã lỗi thời.
 
 ---
 
-## 1. Tổng quan project
+## 1. Dự án là gì
 
-Ứng dụng ghi nhận báo cáo QC theo ca sản xuất cà phê (ILD Coffee Vietnam), single-file PWA offline-first.
+Ứng dụng ghi nhận báo cáo QC theo ca sản xuất cà phê (ILD Coffee Vietnam): **một file `index.html` duy nhất** (HTML+CSS+JS inline, tiếng Việt, không có bước build), PWA offline-first. Dữ liệu luôn lưu trước trong IndexedDB của máy, rồi đồng bộ lên backend khi có mạng.
 
-**Kiến trúc hiện tại — GitHub Pages (hosting) + Supabase (dữ liệu + Auth) + 1 Edge Function (quản lý tài khoản). KHÔNG còn Cloudflare** (đã gỡ bỏ hoàn toàn trong phiên 2026-09-18 — trước đó có 2 Cloudflare Workers, `worker.js`/`wrangler.jsonc`/`cloudflare/` — các file này đã bị xoá, đừng tái tạo lại trừ khi người dùng yêu cầu quay lại):
+- **Frontend**: [`index.html`](index.html) — publish bằng GitHub Pages tại `https://ngocthanhthien.github.io/Shiftly_Report_App/` (đẩy lên `main` là tự cập nhật sau ~1 phút).
+- **Backend (từ 2026-09-25)**: **Cloudflare** — thư mục [`cloudflare/`](cloudflare/README.md). **Không còn dùng Supabase** (xem mục 6).
 
-1. **Frontend**: [index.html](index.html) — file tĩnh, publish qua GitHub Pages, không có build step. Bảo vệ dữ liệu dựa vào đăng nhập Supabase Auth thật (mục 2 dưới) khi có cấu hình đồng bộ — nếu KHÔNG cấu hình Đồng bộ Supabase, app chạy đúng như bản gốc, không cần đăng nhập gì cả (offline-only vẫn hoạt động y hệt trước).
-2. **Backend**: Supabase (Postgres + Auth) — xem [`supabase/schema.sql`](supabase/schema.sql) + [`supabase/README.md`](supabase/README.md). App gọi thẳng PostgREST RPC endpoint của Supabase, xác thực bằng access token của phiên đăng nhập thật (KHÔNG còn dùng `anon` key làm Authorization — `anon` key giờ chỉ còn nằm ở header `apikey`). Mọi bảng thật (`checkpoints`, `meta`, `logs`, `members`, `member_audit`) bật RLS và **không có policy nào** → chặn hết truy cập REST trực tiếp kể cả khi đã đăng nhập. Đường vào duy nhất là các SQL function `sync_get_checkpoints`/`sync_put_checkpoints`/`sync_delete_checkpoints`/`sync_get_meta`/`sync_put_meta`/`sync_post_logs`/`sync_whoami` (SECURITY DEFINER), mỗi function (trừ `sync_whoami`) tự gọi `is_active_member()` để kiểm tra người gọi là 1 dòng còn hoạt động (`disabled=false`) trong bảng `members`, khớp với `auth.uid()` của phiên đăng nhập.
-3. **Access control (thêm 2026-09-18, thay thế mô hình mật khẩu chung cũ)** — 2 loại tài khoản, đều là tài khoản Supabase Auth thật:
-   - **Admin**: đăng nhập bằng email + mật khẩu thật.
-   - **User (Nhân viên)**: đăng nhập bằng tên đăng nhập + mật khẩu — Supabase Auth chỉ biết email/phone nên tài khoản username được gán 1 email giả nội bộ `<username>@<project-ref>.users.internal` (người dùng không bao giờ thấy/gõ địa chỉ này) — logic ghép y hệt ở cả [index.html (`shadowAuthDomain`)](index.html) và [`supabase/functions/admin-users/index.ts`](supabase/functions/admin-users/index.ts), phải sửa đồng thời cả 2 nơi nếu đổi công thức này.
-   - Tạo/đổi vai trò/vô hiệu hóa tài khoản CHỈ chạy qua Edge Function `admin-users` (cần `service_role` key — không bao giờ đặt trong `index.html`); Admin gọi từ mục "👥 Quản lý tài khoản" trong tab Cài đặt (chỉ Admin thấy mục này). Deploy function này cần Supabase CLI 1 lần — xem `supabase/README.md` mục 5. Tài khoản Admin **đầu tiên** phải tạo thủ công qua Supabase Dashboard + 1 câu SQL (mục 4 trong `supabase/README.md`), vì chưa có Admin nào thì Edge Function tự chặn (yêu cầu caller đã là Admin).
-   - Toàn bộ app (kể cả nhập liệu offline-local) bị chặn sau màn hình đăng nhập MỘT KHI đã cấu hình Đồng bộ Supabase — xem module `ACCESS CONTROL` đầu `index.html` (`checkAccessGate`/`verifyAndEnter`/`onAccessRevoked`/`renderLoginGate`). Phiên đăng nhập persist qua `supabase-js` (`persistSession:true`, `storageKey:'shiftly-auth'`) nên không cần đăng nhập lại mỗi lần mở app — nhưng MỌI lần gọi sync đều tự re-verify qua `sync_whoami`/`is_active_member()`, nên nếu Admin vô hiệu hóa 1 tài khoản, thiết bị đó bị đá về màn hình đăng nhập ngay ở lần gọi kế tiếp, kể cả đang mở sẵn.
-4. Ảnh đính kèm đi thẳng trong cột `images` (jsonb, base64 `dataUrl`) của mỗi checkpoint — **không** có bảng/endpoint ảnh riêng.
-5. Con trỏ đồng bộ (`seq`) là 1 Postgres SEQUENCE, gán theo thứ tự ghi ở server (KHÔNG dùng đồng hồ client) — quan trọng: đừng bao giờ đổi cursor sang dùng timestamp lại, xem comment trong `supabase/schema.sql` và mục `CLOUD SYNC` đầu `index.html` để hiểu lý do (bug lệch đồng hồ đã từng xảy ra thật với bản Cloudflare).
-6. **Realtime** — mỗi lần đẩy dữ liệu thành công, app phát 1 tín hiệu "vừa có thay đổi" qua kênh Broadcast public tên `shiftly-changes`; máy khác nhận tín hiệu → gọi lại đúng `pullFromCloud()` đã có (debounce 400ms). **Cố tình dùng Broadcast, không dùng `postgres_changes`**: `postgres_changes` chỉ gửi được sự kiện cho client có quyền SELECT theo RLS, mà các bảng chính không có policy nào (xem mục 2) — dùng `postgres_changes` sẽ phải nới RLS, để lộ dữ liệu cho bất kỳ ai đã đăng nhập (kể cả người chưa được cấp `members`), phá vỡ mô hình bảo mật đã chọn. Cần load `@supabase/supabase-js` qua CDN trước thẻ `<script>` chính — nếu load lỗi (CDN chặn, offline), `ensureSupabaseClient()` trả `null`, Realtime tự no-op, app rơi về polling ~15-20s, không crash; nhưng lưu ý: nếu SDK không load được thì màn hình đăng nhập cũng không hoạt động được (`checkAccessGate` cũng "fail open" — cho vào thẳng app luôn thay vì khoá cứng, xem comment trong hàm) vì không có cách nào xác thực — đây là đánh đổi có chủ đích để tránh khoá chết người dùng khi CDN bị chặn, KHÔNG phải lỗi. **Chưa test được kết nối Realtime thật với 1 project Supabase sống** (không có sandbox mạng ngoài) — đã test kỹ nhánh "SDK không load được" và toàn bộ luồng auth+sync qua PGlite/jsdom (xem mục Test).
+## 2. Kiến trúc backend Cloudflare
 
-**Đã ÁP DỤNG (2026-09-18, đảo ngược quyết định trước đó cùng ngày)** mô hình 2 tầng tài khoản thật từ skill `supabase-sync-auth-patterns` (`references/access-management.md`), theo yêu cầu rõ ràng của người dùng để có "ngăn truy cập, quản lý tài khoản, đồng bộ realtime" giống hệt project song song [CloseCAPGMP](https://github.com/ngocthanhthien/CloseCAPGMP) (`C:\Users\BinhDang\Documents\GitHub\CloseCAPGMP`) — xem `HANDOFF_WEB.md`/`README.md` của project đó để đối chiếu chi tiết pattern gốc (bảng `gmp_members`, Edge Function `admin-users`, username→email nội bộ). Đánh đổi được người dùng xác nhận rõ: cần cài Supabase CLI 1 lần để deploy Edge Function (trước đó Shiftly cố tình giữ "không cần CLI, chỉ dán SQL"); đổi lại có tài khoản riêng từng người + Admin tự quản lý được, không còn 1 mật khẩu chung.
+Worker `shiftly-report-api` tại `https://shiftly-report-api.dangthanhbinh53.workers.dev` (mã: [`cloudflare/src/worker.js`](cloudflare/src/worker.js); cấu hình: [`cloudflare/wrangler.toml`](cloudflare/wrangler.toml); schema: [`cloudflare/schema.sql`](cloudflare/schema.sql)). Gói **Free**.
 
-**App chính**: [index.html](index.html) (~5400+ dòng, single file, HTML+CSS+JS inline, tiếng Việt). 12 tab: Nhập liệu, Dữ liệu (đã gộp Truy xuất — xem mục 3d), Danh sách PO/Client, **Danh sách Items Code** (mới 2026-09-21, xem mục 3c), Data Log, Báo cáo, Thống kê, Specs, Xuất nhập dữ liệu, Cài đặt, Hướng dẫn. Recipe không còn tab riêng — tự động truy xuất từ Item Code (xem mục 3j).
-
-**Data model cốt lõi:**
-- `SCHEMA` (khai báo `DEFAULT_SCHEMA`/`SCHEMA` gần đầu script) — mảng section: `ROA, EXT, EVA, FOAMING, FD, FP, REWORK, META`. Mỗi section có `fields[]` (type: number/boolean/text/textarea/select; có `hardMin/hardMax`, `recipeOverrides` theo Recipe, `trueLabel/falseLabel` cho boolean).
-- **Checkpoint** = 1 lần nhập cho 1 section trong 1 ca, key = `date_shift_section_po` ([checkpointKey](index.html:424)). Lưu IndexedDB store `shifts`, đồng bộ Supabase qua outbox pattern (`queueOutbox`/`flushOutbox`).
-- Danh mục phụ: `TECHNICIANS`, `RECIPES` (`RECIPE_OPTIONS`), `PO_LIST`, `CLIENT_LIST` — quản lý ở các tab list riêng.
-
-**Các hàm/khu vực quan trọng để sửa** (đúng tại thời điểm 2026-09-18 — chạy lại `grep -n "^function \|^async function "` nếu nghi ngờ đã lệch do sửa code sau này):
-- Nhập liệu: [renderInputForm](index.html:1531), [renderField](index.html:2007), [renderAutocomplete](index.html:1886)
-- Xem/tra cứu (kể cả lọc theo PO/Ca/ngày, đã gộp "Truy xuất" vào — mục 3d): [renderTable](index.html), [renderDetail](index.html)
-- Danh mục: [renderPOList](index.html:2388), [renderRecipeList](index.html:2512), [renderClientList](index.html:2581)
-- Audit: [renderDataLog](index.html:2698), [logChange](index.html:506)
-- Báo cáo (ảnh SVG để share/in): [renderReport](index.html:3415), [buildReportSVG](index.html:3317), [buildImagesLineForCheckpoint](index.html:3303), [renderLinesToSVG](index.html:2899)
-- Báo cáo HTML (file .html đầy đủ để mở/share): [buildFullHtmlReport](index.html:3186), [fullHtmlReportCheckpointCard](index.html:3165)
-- Thống kê: [renderStats](index.html:3582), [drawSPC](index.html:3745)
-- Chỉnh schema (dạng bảng chỉnh sửa trực tiếp từ 2026-09-21 — mục 3g): [renderSpecs](index.html), [buildRecipeOverrideEditor](index.html)
-- Export/Import: [renderShare](index.html:4089), [buildCsv](index.html:631), [computeHeaderMap](index.html:338), [buildExcelXml](index.html:657)
-- Cài đặt: [renderSettings](index.html:4437) (cloud sync config: Supabase URL/anon key), [renderMemberManagementCard](index.html) (Admin-only, ngay trước `renderSettings`)
-- Sync layer: [cloudFetch](index.html:934) (gọi PostgREST RPC bằng access token của phiên đăng nhập), [pullFromCloud](index.html:1060), [flushOutbox](index.html:1107), [armSync/wakeSync](index.html:1221), [startRealtime/pingRealtimeChanged](index.html:1277) (Broadcast, optional best-effort)
-- **Access control (mới)**: module `ACCESS CONTROL` ngay sau module Realtime trong `index.html` — `checkAccessGate`, `verifyAndEnter`, `onAccessRevoked`, `signInAdmin`/`signInUser`, `signOutCloud`, `renderLoginGate`. Login gate DOM: `#loginGate` (đầu `<body>`), toggle ẩn/hiện với `#appRoot`.
-
-Ghi chú bảo mật: mật khẩu app hardcode `const APP_PASSWORD = '1234'` ở [index.html:496](index.html:496) — dùng cho `promptPasswordOK()` (gate 1 số thao tác nhạy cảm trong app, VD xoá dữ liệu, sửa PO đã đóng), KHÁC HẲN với đăng nhập Supabase Auth ở trên — 2 lớp độc lập, đừng nhầm lẫn khi sửa 1 trong 2.
-
-**Test**: `npm ci && npm test` — chạy schema.sql THẬT qua Postgres nhúng (`@electric-sql/pglite`, không phải giả lập, có thêm stand-in `auth.users`/`auth.uid()` CHỈ trong test harness để mô phỏng Supabase Auth thật) + boot toàn bộ app qua jsdom rồi đăng nhập + đồng bộ thật qua đúng luồng RPC, kể cả case tài khoản bị vô hiệu hóa giữa phiên bị đá về màn hình đăng nhập, vai trò supervisor bị chặn ghi, và tính năng xuất Process/QMS (Item Code, cờ isQMS, định dạng ngày, không lộ ảnh). 76 test / 10 file, tất cả đang pass: `tests/supabase.test.mjs`, `tests/input-draft.test.mjs`, `tests/tab-config.test.mjs`, `tests/process-qms-export.test.mjs`, `tests/item-code-list.test.mjs`, `tests/list-tables.test.mjs`, `tests/data-tab-search.test.mjs`, `tests/input-form-v2.test.mjs`, `tests/specs-table.test.mjs`, `tests/egress-optimizations.test.mjs` (file cuối cùng mới nhất — mục 3i). **Chưa/không thể test được**: Edge Function `admin-users` (chạy trên Deno, không có runtime Deno trong môi trường test này) — chỉ được review code thủ công, chưa chạy tự động; nếu sửa file này, test bằng tay qua Supabase Dashboard → Edge Functions → Invoke, hoặc deploy thật rồi thử qua UI "👥 Quản lý tài khoản".
-
----
-
-## 2. Nội dung file feedback `SHIFTLY REPORT PAPERLESS.xlsx`
-
-File có **1 sheet** (`Sheet1`, A1:R12), không phải nhiều tab. Gồm 2 phần:
-
-### 2a. Bảng mẫu định dạng dữ liệu mong muốn (cột A–L)
-
-Cột chung, nhóm merge **"MAIN INFORMATION"** (A1:G1): `Date | Shift | Process | Item Code | PO | ISSUES/Abnormal | ACTION`
-
-Cột **"QMS"** (H1:L1, merge), khác nhau theo từng block Process (mỗi block là 1 mini-bảng lặp lại header):
-
-| Process | Cột QMS trong mẫu |
+| Thành phần | Dùng để |
 |---|---|
-| ROA | Moisture, Color |
-| EXT | %TC, Cupping |
-| EVA | TS, pH, Sediment set tank 2, Sediment Clarifier, Cupping |
-| FD | (không có cột QMS nào) |
-| FP | Moisture, Color, Density, Sediment, Cupping |
-
-Dữ liệu mẫu ví dụ (dòng A4): Date=`2026-01-10`, Shift=`1`, Process=`ROA`, Item Code=`1100011`, PO=`612600011`. Cột A2 ghi chú format ngày mong muốn: **`dd-mmm-yyy`** (kiểu `10-Jan-2026`), khác định dạng `DD/MM/YYYY` app đang dùng ([fmtDateVN](index.html:397)).
-
-### 2b. Ba khối ghi chú yêu cầu (cột O, dịch ý):
-
-1. **Yêu cầu xuất dữ liệu**: xuất theo đúng Process/Format ở bảng trên, **không xuất hình ảnh**; đặc biệt lưu ý định dạng ngày và định dạng Item Code; dữ liệu tự động xuất về 1 vị trí sau khi share báo cáo.
-2. **Yêu cầu báo cáo**: giữ format báo cáo theo ca; **bỏ "Parameters" chỉ giữ lại "QMS"** như bảng trên; ảnh phải kéo full chiều rộng báo cáo; phải hiển thị Recipe.
-3. **Quy trình nhập liệu**: Chọn Processing → Nhập PO → Chọn Recipe, chọn Technician; **trong lúc nhập không được reset dữ liệu** đã nhập trước/sau; dữ liệu chỉ reset toàn bộ khi KHÔNG bấm Lưu.
-
----
-
-## 3. Đối chiếu feedback ↔ code hiện tại
-
-### ✅ Yêu cầu (3) — Bug mất dữ liệu khi nhập — ĐÃ SỬA (2026-09-18)
-
-Nguyên nhân đã xác nhận: [renderInputForm](index.html:1307) trước đây chỉ ghi giá trị các ô chỉ tiêu vào `cp.fields` tại thời điểm bấm Lưu; đổi PO/Recipe/Client (hoặc Section khi thêm mới) trigger `renderInputForm()` chạy lại, tạo checkpoint trắng mới, xoá sạch giá trị đã gõ.
-
-**Đã sửa bằng cơ chế draft**: `renderInputForm._draft` — mỗi lần đổi PO (autocomplete `onChange`)/Recipe/Client, gọi `captureDraft()` (đọc giá trị hiện tại từ `fieldEls`/`noteEls`) TRƯỚC khi gọi lại `renderInputForm()`; khi dựng lại form, draft được áp lại vào `cp.fields`/`cp.fieldNotes` nếu `draftScope` khớp (`edit:<key>` khi sửa, `new:<section>` khi thêm mới — đổi Section vẫn reset đúng như mong muốn, vì đó là 2 bộ field khác nhau). Draft bị xoá (`renderInputForm._draft = null`) ở mọi điểm mở lại form cho 1 checkpoint khác hoặc bấm Đóng/Thêm mới — khớp đúng yêu cầu "chỉ reset toàn bộ khi KHÔNG bấm Lưu". Có guard `fieldsRendered` tránh lỗi truy cập biến `const` chưa khởi tạo khi PO còn rỗng (render pass thoát sớm trước khi field UI được tạo). Test: [tests/input-draft.test.mjs](tests/input-draft.test.mjs) (2 test, mô phỏng đúng qua DOM thật — gõ số liệu → đổi Recipe/Client → assert giá trị còn nguyên).
-
-### 🟡 Yêu cầu (2) — Báo cáo ảnh (dùng để share qua Zalo/in) — CHƯA SỬA, cần sửa 3 điểm
-
-[buildReportSVG](index.html:3093) (W cố định 760px):
-- Hiện in **mọi field có giá trị** trong section — không phân biệt "Parameters" (chi tiết) vs "QMS" (chỉ số cuối cùng cần báo cáo). Cần cơ chế đánh dấu field nào thuộc nhóm QMS để lọc.
-- Dòng tiêu đề mỗi checkpoint: `${sec.name} — PO ${cp.po} (QC: ${cp.technician})` — **KHÔNG có Recipe/Client**, trong khi bản HTML report ([fullHtmlReportCheckpointCard](index.html:2941)) đã có hiển thị Recipe/Client. Cần thêm Recipe vào bản SVG.
-- Ảnh đính kèm ([buildImagesLineForCheckpoint](index.html:3079)) chỉ là thumbnail nhỏ (`thumbDataUrl(src, 220)` — 220px), không phải full-width. Cần đổi sang full width của report (W=760).
-
-### ✅ Yêu cầu (1) — Xuất dữ liệu — ĐÃ SỬA (2026-09-19), bằng 1 nút xuất RIÊNG, không đổi CSV/Excel tổng hiện có
-
-Người dùng cung cấp 1 file mẫu thứ 2 (`Template Data export.xlsx`, cùng bố cục A1:R12 với PAPERLESS.xlsx trước đó) làm rõ chính xác layout mong muốn. Thay vì sửa CSV/Excel tổng (`buildCsv`/`buildExcelXml`, vẫn giữ nguyên `DD/MM/YYYY` + đầy đủ mọi field như trước — dùng cho backup/nhập lại), đã thêm 1 tính năng xuất RIÊNG, đúng bố cục mẫu:
-
-- **Item Code**: xác nhận với người dùng là field MỚI, nhập tay (giống PO) — đã thêm `cp.itemCode` (top-level, như `cp.po`/`cp.recipe`), ô nhập cạnh Mã PO trong [renderInputForm](index.html:1636), cột "ItemCode" trong CSV/Excel tổng + JSON backup (ngay sau PO), cột `item_code` trong `checkpoints` table + `sync_get/put_checkpoints`. Dùng đúng cơ chế draft-safety (`captureDraft`) đã sửa cho bug mất dữ liệu.
-- **QMS-only columns**: xác nhận chọn cách "cờ `isQMS` chỉnh được trong Specs" (không hard-code field nào ứng với cột nào — tên cột QMS trong mẫu, VD "%TC"/"Sediment set tank 2", khớp NHIỀU field ứng viên khác nhau tuỳ diễn giải, và 1 số cột QMS trong mẫu — Color/Sediment/Cupping cho FP — **chưa hề có field tương ứng nào tồn tại trong Specs hiện tại**, nên không thể đoán). Mỗi field trong Specs giờ có `isQMS:boolean` + `qmsLabel:string` (tên cột khi xuất, mặc định dùng tên chỉ tiêu) — sửa ở [renderSpecs](index.html) (checkbox "Xuất trong báo cáo QMS"). **Người dùng cần tự vào tab Specs đánh dấu đúng field của mình** trước khi dùng tính năng xuất — mặc định TẤT CẢ đang tắt (không tự đoán/tự bật sẵn field nào, kể cả các field khớp tên rõ ràng như "Moisture").
-- **ACTION**: xử lý KHÔNG PHẢI bằng field mới per-checkpoint (khác Item Code) — thay vào đó, cột ACTION trong export tự tìm 1 field có sẵn (id kết thúc `_ACTION`, hoặc tên đúng "Action") trong Specs của công đoạn đó; để trống nếu chưa có. Người dùng tự thêm field này qua Specs (kiểu "Ghi chú") cho công đoạn nào cần — không cần sửa code thêm.
-- **ISSUES/Abnormal**: tự động lấy từ field có sẵn kết thúc `_ISSUE` (đã tồn tại đồng nhất ở mọi section) — không cần cấu hình gì thêm.
-- **Định dạng ngày**: `dd-mmm-yyyy` kiểu Anh-Mỹ (VD `19-Sep-2026`, ngày không có số 0 đứng đầu — khớp đúng numfmt thật trong file mẫu) — CHỈ áp dụng cho tính năng xuất mới này qua [fmtDateExport](index.html); CSV/Excel tổng và mọi chỗ khác trong app vẫn giữ `DD/MM/YYYY` như cũ, không đổi.
-- **Không xuất ảnh**: đúng yêu cầu — [buildProcessQmsExcelXml](index.html)/[buildProcessQmsPrintHtml](index.html) không đụng tới `cp.images` (có test riêng khẳng định điều này).
-- **"Tự động xuất về 1 vị trí"**: implement bằng File System Access API (`showDirectoryPicker`, chọn 1 lần ở tab Cài đặt, lưu `FileSystemDirectoryHandle` trong IndexedDB — clone được sẵn trên Chromium) — hàm [exportFileToPreferredLocation](index.html) thay thế `robustShareOrDownload` ở MỌI nút xuất file Blob trong app (Short CSV, Truy xuất Excel, Báo cáo HTML/PNG, Specs Excel, Xuất nhập dữ liệu, và tính năng mới này) — tự ghi thẳng vào thư mục đã chọn, rơi về hộp thoại tải/chia sẻ cũ nếu chưa chọn/mất quyền/trình duyệt không hỗ trợ. **Giới hạn quan trọng, đã báo người dùng**: chỉ Chrome/Edge trên máy tính — KHÔNG có trên điện thoại/tablet (kể cả Chrome Android) hoặc Safari/Firefox; và KHÔNG áp dụng được cho xuất PDF (qua `window.print()`, trình duyệt tự kiểm soát việc lưu).
-
-**Vị trí (sửa lại 2026-09-19 theo phản hồi người dùng — LẦN ĐẦU đặt sai ở tab Dữ liệu, xuất theo tick-chọn/toàn bộ)**: nút "📊 Excel theo mẫu" / "📄 PDF theo mẫu" ở tab **Báo cáo**, chế độ "📋 Theo ca" — dùng lại đúng ô chọn Ngày+Ca có sẵn của tab này, cộng thêm 1 `<select>` Công đoạn mới (`processFilterSel`, mặc định "Tất cả công đoạn") ngay dưới đó. `currentQmsSubset()` luôn lấy từ `currentGen().checkpointList` (đúng theo Ngày+Ca/PO đang xem) rồi lọc thêm theo Công đoạn nếu có chọn — KHÔNG BAO GIỜ xuất toàn bộ `allCheckpoints`. Chế độ "🔎 Theo PO" cũng dùng được 2 nút này (xuất đúng các điểm kiểm tra khớp PO, không cần chọn Công đoạn). Có test riêng khẳng định phạm vi lọc đúng ([tests/process-qms-export.test.mjs](tests/process-qms-export.test.mjs), test "Báo cáo tab: template export is scoped...").
-
-**Cập nhật 2026-09-19 (lần 2)** — dropdown "Định dạng khác..." trong tab Báo cáo đã bị XOÁ HẲN, thay bằng nút riêng hiện sẵn — nếu code cũ/tài liệu cũ còn nhắc `<select>` "Định dạng khác" trong tab Báo cáo, đã lỗi thời. Đồng thời đã giải quyết luôn TODO cũ "QMS-only cho buildReportSVG + Recipe + ảnh full-width" (mục 5 bên dưới, từng ghi CHƯA làm):
-
-**Cập nhật 2026-09-19 (lần 3)** — theo yêu cầu người dùng, đã BỎ 3 nút "📄 PDF (in trang)" (`#btnRepPdf`), "🌐 HTML đầy đủ" (`#btnRepHtml`), "🖼️ Nhiều ảnh (mỗi công đoạn)" (`#btnRepMulti`) khỏi tab Báo cáo — xoá handler tương ứng trong `renderReport()`. **Còn lại 4 nút**: `#btnRepPng`, `#btnRepShare`, `#btnRepQmsXlsx`, `#btnRepQmsPdf`. Các hàm build phía sau (`buildPrintableReportHTML`, `buildFullHtmlReport`, `buildCheckpointImageSVGs`) CHƯA bị xoá khỏi code (vẫn còn định nghĩa, chỉ không còn nút nào gọi tới trong tab Báo cáo ở chế độ Theo ca) — cân nhắc dọn hẳn nếu về sau xác nhận không cần dùng lại nữa (kể cả ở chế độ Theo PO, vẫn đang tham chiếu `buildPrintablePOReportHTML`/`buildFullHtmlPOReport` tương tự nhưng cũng không còn nút gọi).
-- `buildReportSVG`/`buildPOReportSVG` nhận thêm tham số `qmsOnly` (mặc định false = giữ nguyên hành vi cũ) — bật qua checkbox `#reportQmsOnlyChk` mới trong tab Báo cáo, lọc `sec.fields` còn đúng field có `isQMS` (dùng chung dữ liệu với tính năng Excel/PDF theo mẫu), hiện `qmsLabel` thay tên field gốc khi bật.
-- Cả 2 hàm đều thêm Recipe vào dòng tiêu đề mỗi checkpoint (`... · Recipe <giá trị>`).
-- `renderLinesToSVG`: ảnh đính kèm đổi từ lưới thumbnail cố định 84×64 (tối đa 6/hàng) sang tối đa **2 ảnh/hàng, cao 200px, chia đều chiều rộng báo cáo** — hàng lẻ 1 ảnh thì ảnh đó tự full-width. Nguồn ảnh nhúng vào SVG cũng tăng từ 220px lên 500px để không bị vỡ nét khi hiển thị to hơn nhiều.
-- **`buildPrintableReportHTML`/`buildPrintablePOReportHTML`/`buildFullHtmlReport(PO)`/`buildCheckpointImageSVGs` (multi-export) KHÔNG đụng tới** — qmsOnly/full-width chỉ áp dụng cho đúng "báo cáo ảnh" (PNG/chia sẻ ảnh + khung xem trước), đúng phạm vi người dùng yêu cầu.
-
-**Câu hỏi CŨ giờ đã có câu trả lời** (giữ lại mục 4 dưới đây để tham khảo lịch sử, KHÔNG cần hỏi lại): ý nghĩa Item Code, vị trí ACTION, cách đánh dấu QMS, và "tự động xuất về 1 vị trí" đều đã chốt như mô tả ở trên. Câu hỏi 6 (thứ tự Recipe/Technician trong UI) **vẫn chưa hỏi lại** — chưa đổi.
-
----
-
-### 3c. Tab mới "Danh sách Items Code" (2026-09-21)
-
-Người dùng đính kèm file thật `Items Code.xlsx` (524 dòng, sheet `CodeLink`), yêu cầu thêm 1 tab quản lý bảng liên đới **Item Code ↔ Tên sản phẩm ↔ Recipe**, có xuất template/nhập Excel/xuất Excel.
-
-- **Data model**: mảng phẳng `{type:'FGs'|'RW', itemCode, name, recipe}` — `type` phân biệt 2 dải mã (FGs = thành phẩm, RW = hàng tái chế/Rework) theo đúng cách nhà máy quản lý. **Không dedupe theo `itemCode`** — dữ liệu thật có nhiều mã RW trùng lặp ứng với tên sản phẩm khác nhau; sửa/xoá thao tác theo INDEX trong mảng (giống hệt cách `renderClientList` đã làm), không theo khoá tự nhiên.
-- **Phát hiện quan trọng — không import trực tiếp được file gốc của người dùng**: toàn bộ cơ chế Excel import/export CÓ SẴN của app (`buildTableExcelXml`/`parseTableExcelXml`, dùng chung cho cả PO/Client/Items Code) chỉ đọc/ghi định dạng **SpreadsheetML 2003 (XML text, đuôi `.xls`)** mà chính app tự xuất ra — KHÔNG đọc được file `.xlsx` nhị phân/ZIP thật (như file người dùng gửi). Đây là giới hạn có từ trước, không phải lỗi mới, nhưng ảnh hưởng trực tiếp tới tính năng này.
-- **Cách xử lý đã chọn**: dùng Python/openpyxl (ngoài app) trích xuất sẵn toàn bộ 524 dòng thật, nhúng thẳng vào `index.html` thành hằng số `DEFAULT_ITEM_CODE_LIST` — mọi thiết bị mới đều có sẵn dữ liệu thật ngay từ đầu, KHÔNG cần người dùng tự import lại. `ITEM_CODE_LIST` khởi tạo từ hằng số này, chỉ bị ghi đè nếu IndexedDB đã có bản lưu khác (đã tự sửa qua UI hoặc đồng bộ về từ máy khác). Việc thêm/sửa/xoá về sau vẫn đi qua đúng UI thêm/sửa/xoá của tab, và Excel export/import về sau vẫn dùng đúng định dạng `.xls` nội bộ của app (đã ghi rõ trong help text của tab + mục 36 tab Hướng dẫn) — **KHÔNG** dùng để nhập lại 1 file `.xlsx` gốc khác từ Excel/Google Sheets mà chưa dán qua template trước.
-- **Đồng bộ**: `ITEM_CODE_LIST` đồng bộ qua đúng cơ chế `meta` sync có sẵn (`saveItemCodeList()` → `queueMetaSync('itemCodeList', ...)`; `applyRemoteMeta()` xử lý key `itemCodeList` giống các danh mục khác).
-- **Vị trí trong code**: khai báo `DEFAULT_ITEM_CODE_LIST`/`ITEM_CODE_LIST`/`saveItemCodeList()` ngay sau `clientByName()`; `renderItemCodeList()` ngay sau `renderClientList()`, theo đúng pattern UI (form thêm/sửa, card Excel, ô tìm kiếm + lọc theo Loại).
-- **Test**: `tests/item-code-list.test.mjs` (6 test, mới) — pre-seed ≥500 dòng cả 2 loại; thêm/sửa/xoá qua form; tìm kiếm + lọc theo Loại; round-trip Excel export→import (không tạo trùng khi import lại đúng file).
-- **Guide tab**: đã thêm mục 36 trong `index.html` giải thích tab này + lưu ý định dạng `.xls`.
-
-### 3d. Bảng chỉnh sửa trực tiếp cho 4 tab danh mục + gộp Truy xuất vào Dữ liệu (2026-09-21)
-
-Người dùng yêu cầu 2 việc liên tiếp trong cùng phiên:
-
-**(a) 4 tab Danh sách PO/Recipe/Client/Items Code → dạng bảng (table), có filter (nhiều lựa chọn), sort, điền mới & sửa trực tiếp trong bảng** (theo mẫu 1 bảng issue-tracker người dùng đính kèm ảnh). Thay hoàn toàn UI cũ "form thêm/sửa phía trên + danh sách `.specfield` phía dưới" bằng 1 component dùng chung mới, `buildEditableTable(opts)` (đặt ngay trước `renderPOList()` trong `index.html`):
-- Header có thể bấm để sort (chu kỳ 3 trạng thái: không sort → tăng dần → giảm dần → không sort), mũi tên `⇅/▲/▼` cạnh tên cột.
-- Hàng filter riêng ngay dưới header: cột dạng text có ô lọc gõ-là-lọc-ngay; cột dạng enum (Loại FGs/RW, Trạng thái PO, Highlight Client, Có/Không ghi đè Recipe) dùng multi-select thả xuống kiểu checkbox (`multiSelectFilterEl`, class `.msf`) — đúng yêu cầu "filter nhiều lựa chọn".
-- 1 hàng "Thêm mới" luôn ghim ở đầu `<tbody>` — điền rồi bấm "➕ Thêm" (hoặc Enter) để thêm dòng, không cần form riêng.
-- Mọi ô có thể sửa được (input/select) đều sửa TRỰC TIẾP trong bảng — commit khi `blur`/`change`; `col.set()` trả về `false` sẽ tự revert ô về giá trị cũ (dùng cho validate trùng tên/mã, hoặc huỷ xác thực đóng PO).
-- Thêm/xoá dòng (thay đổi CẤU TRÚC mảng) gọi lại nguyên hàm render của tab (VD `renderPOList()`) để rebuild toàn bảng; sửa 1 ô riêng lẻ (rename/đổi enum) CHỈ mutate trực tiếp object nguồn (cùng reference với mảng `PO_LIST`/`CLIENT_LIST`/`ITEM_CODE_LIST`) và lưu, KHÔNG re-render toàn bảng — tránh mất vị trí cuộn khi sửa 1 dòng giữa danh sách 524 dòng (Items Code).
-- Tab PO: gộp LUÔN 2 phần cũ (textarea khai báo PO + card "Tiến độ & Xác thực đóng PO") thành 1 bảng duy nhất — cột Trạng thái là `<select>` Đang mở/Đã đóng, chọn "Đã đóng" khi điền chưa đủ 100% sẽ `confirm()` giống hệt nút Verify cũ; các PO chỉ xuất hiện từ dữ liệu (chưa khai báo trong `PO_LIST`) hiển thị nhãn "từ dữ liệu", không sửa/xoá được (không có gì để xoá).
-- Excel import/export của Client/Items Code giữ nguyên logic cũ, chỉ đổi phần hiển thị danh sách bên dưới.
-- **Test**: `tests/item-code-list.test.mjs` viết lại hoàn toàn cho DOM bảng mới (7 test); `tests/list-tables.test.mjs` (mới, 3 test) cho PO/Recipe/Client.
-- **Lưu ý jsdom**: `window.scrollTo` không được jsdom implement (log "Not implemented" qua virtualConsole) — ban đầu định thêm tính năng tự khôi phục vị trí cuộn sau mỗi lần render lại, đã BỎ tính năng này (không phải yêu cầu của người dùng) để tránh phức tạp hoá test, thay vì viết code work-around.
-
-**(b) Gộp tab "Truy xuất" vào tab "Dữ liệu"** — theo đúng yêu cầu *"Truy xuất dựa vào bảng thông tin của Tab Dữ Liệu"*: xoá hẳn tab/nút/view `trace` và hàm `renderTrace()`; toàn bộ chức năng tìm theo PO (autocomplete, gồm cả PO đã đóng)/Ca/khoảng ngày chuyển thành 1 thẻ lọc "🔎 Truy xuất — lọc theo PO / Ca / khoảng ngày" nằm ngay trên **chính bảng danh sách ca** đã có sẵn ở tab Dữ liệu (không phải 1 bảng kết quả riêng như trước) — lọc live ngay khi đổi (PO commit lúc blur/chọn gợi ý, Ca/ngày lúc `change`), không cần bấm nút "Tìm kiếm". Khi có lọc: loại bỏ checkpoint `META`, hiện thêm nút "📊 Xuất Excel kết quả" (dùng lại `buildExcelXml`), và nút "✕ Xoá bộ lọc". Trạng thái lọc lưu ở `renderTable._filter` (persist qua các lần render giống `_mode`/`_editIdx` các tab khác).
-- **Sửa 1 gap hành vi khi gộp**: nút "✎ Sửa" ở tab Dữ liệu trước đây KHÔNG hỏi mật khẩu Force khi checkpoint thuộc 1 PO đã đóng (chỉ Truy xuất có guard này) — nay áp dụng guard đó cho MỌI nút Sửa ở Dữ liệu, không chỉ khi tìm qua bộ lọc.
-- Nút "👁 Xem" ở tab Danh sách PO (mở nhanh các điểm kiểm tra của 1 PO) đổi từ `renderTrace._prefillPO` sang set `renderTable._filter = {po, ...}` rồi `showTab('table')`.
-- Số tab giảm từ 14 → **13**; cập nhật `TAB_ORDER_DEFAULT`/`TAB_LABELS`, `README.md`, mục 14 trong Guide tab (`index.html`), và 3 chỗ hardcode số lượng tab trong test (`tests/supabase.test.mjs` ×2, `tests/tab-config.test.mjs` ×1 — chỉ là 1 mảng test input, không ảnh hưởng assertion).
-- **Test mới**: `tests/data-tab-search.test.mjs` (4 test) — xác nhận tab `trace` không còn tồn tại, lọc live thu hẹp đúng bảng + loại bỏ META, nút "Xem" ở PO nhảy đúng sang Dữ liệu kèm bộ lọc, và guard mật khẩu Force áp dụng cho checkpoint thuộc PO đã đóng.
-
-Tổng cộng sau 2 việc trên: 52/52 test pass (`npm test`).
-
-### 3e. Viết lại Tab Nhập liệu (Input Form) theo 11 yêu cầu mới (2026-09-21)
-
-Yêu cầu gốc (tiếng Anh, dài, đánh số 1–11) đòi hỏi quy trình nhập liệu **kiểm soát chặt hơn**: `Date → Shift → QC → Process → Item Code → Item Name (AUTO) → Recipe (AUTO) → PO → Checkpoint → Issue/Abnormal + Action → Save`, với validate CỨNG (không hỏi "vẫn lưu?") cho nhiều field, đồng thời **bắt buộc giữ nguyên** kiến trúc/dữ liệu cũ (SCHEMA, IndexedDB, Supabase sync, Item Code Master, PO Master, Data Log, dữ liệu lịch sử FOAMING/REWORK/META). Toàn bộ thay đổi nằm trong `renderInputForm()` ([index.html](index.html)) + vài helper mới, **không đổi schema.sql/không thêm cột Supabase nào**.
-
-- **`getProductionDate()`** (mới, cạnh `todayStr()`) — giờ từ 00:00 đến trước 06:00 thì Ngày mặc định vẫn là hôm qua (ca đêm tràn qua nửa đêm). Chỉ là GIÁ TRỊ GỢI Ý BAN ĐẦU — `renderInputForm._date` một khi người dùng đã tự chọn thì luôn được ưu tiên, cơ chế `||` y hệt cách Ngày đã hoạt động từ trước (không đổi hành vi "không ghi đè ngày đã chọn tay").
-- **Ca (Shift)**: đổi mặc định từ tự chọn "Ca 1" sang **để trống** (`— Chọn Ca —`), và cả tab Nhập liệu (Bàn giao ca, danh sách điểm kiểm tra, form thêm/sửa) đều **ẩn hết, chỉ hiện dòng nhắc "Vui lòng chọn Ca..."** cho tới khi chọn — đây chính là cách "Ca trống → cảnh báo → không cho lưu" được hiện thực (không có gì để lưu nếu chưa chọn Ca).
-- **QC**: vốn ĐÃ để trống mặc định từ trước (`— Chọn QC —`, dùng thẳng `TECHNICIANS` = `Định, Trân, Trang, Huy, Hiền` — chính là "Huy/Tran/Dinh/Trang/Hien" trong yêu cầu, chỉ khác cách gõ dấu; **cố tình KHÔNG tạo danh sách QC ASCII riêng**, theo đúng chỉ dẫn "dùng lại cấu hình QC/technician sẵn có"). Cái THIẾU trước đây là **validate cứng** — đã thêm `if(!qcSel.value){ toast(...); return; }` ở đầu hàm Lưu. QC giờ cũng là field ĐẦU TIÊN trong form (trước đây đứng cuối, sau Recipe/Client) nên đã thêm cơ chế `renderInputForm._newQc` + change-handler gọi `captureDraft()` giống Process/PO/Recipe/Client — nếu không thêm, đổi Process/PO sau khi đã chọn QC sẽ LÀM MẤT lựa chọn QC (rebuild lại `<select>` mặc định rỗng) vì trước đây QC không cần cơ chế này (đứng cuối, không có gì render lại sau nó).
-- **`INPUT_PROCESS_OPTIONS = ['ROA','EXT','EVA','FD','FP']`** (mới, cạnh `stageIds()`) — dropdown Công đoạn khi **TẠO MỚI** chỉ build từ mảng này thay vì `SCHEMA.filter(s=>s.id!=='META')` (trước đây có cả FOAMING/REWORK). **`SCHEMA`/`DEFAULT_SCHEMA` KHÔNG bị đổi gì** — sửa 1 checkpoint FOAMING/REWORK cũ vẫn hiện đúng tên công đoạn (dạng chữ, không phải dropdown, y hệt cách "Công đoạn" luôn hiển thị read-only khi Sửa từ trước tới nay) và Báo cáo/Excel/QMS đọc `SCHEMA` như cũ, không hề bị ảnh hưởng.
-- **`lookupItemByCode(code)`** (mới, cạnh `ITEM_CODE_LIST`) — tra CHÍNH `ITEM_CODE_LIST` hiện có (không tạo database riêng), trả về 1 trong 4 trạng thái: `not_found`, `ok` (điền Tên+Recipe), `ambiguous` (cùng Item Code nhưng có bản ghi Tên/Recipe **khác nhau thật sự** — dữ liệu thật cho phép trùng mã với tên GIỐNG NHAU, chỉ chặn khi thật sự mâu thuẫn), `missing_recipe` (tìm thấy nhưng Recipe trống trong Master). Ô Item Code giờ bắt buộc đúng `/^\d{8}$/`; Tên sản phẩm + Recipe hiện dạng `<input readonly>` (nền xám), tự cập nhật lại mỗi khi `itemCodeInp` blur (đi qua đúng chu trình `captureDraft()+renderInputForm()` đã có sẵn — **không** thêm re-render riêng theo từng ký tự gõ). **Quyết định quan trọng: KHÔNG lưu Tên sản phẩm vào checkpoint** (không có `cp.itemName`) — vì `sync_get/put_checkpoints` chỉ đọc đúng các cột đã khai báo trong `schema.sql` (`item_code, recipe, client, technician, fields, ...`), 1 field top-level MỚI trên checkpoint sẽ **im lặng không được đồng bộ** giữa các thiết bị (mất dữ liệu âm thầm) — Tên sản phẩm vì vậy luôn được tra cứu lại từ Item Code Master mỗi khi cần hiển thị, đúng tinh thần "không tạo database Item Code thứ hai". `cp.recipe` thì AN TOÀN để gán trực tiếp (`cp.recipe = lookupResult.recipe`) vì cột `recipe` đã tồn tại sẵn từ trước.
-- **PO**: giữ nguyên ô autocomplete sẵn có (`renderAutocomplete`, gõ tay hoặc chọn gợi ý) — chỉ thêm validate: đúng `/^\d{9}$/` HOẶC đúng chữ "SHUTDOWN" (không phân biệt hoa/thường khi gõ, tự chuẩn hoá thành in hoa lúc Lưu). PO = SHUTDOWN **không** miễn trừ Item Code — vẫn bắt buộc vì Recipe phụ thuộc Item Code (đúng yêu cầu mục 23).
-- **Issue/Abnormal + Action theo cặp**: xem chi tiết kỹ thuật + lý do tương thích ngược ở comment khối `ISSUE_PAIRS_KEY`/`getIssueActionPairs`/`syncIssueActionToLegacyFields` ngay trước `groupOf()` trong `index.html`. Tóm tắt: lưu ở `cp.fields['__issueActionPairs__']` (NẰM TRONG `fields` jsonb đã đồng bộ sẵn — lại một lần nữa tránh thêm cột Supabase mới), lúc Lưu tự ghép lại và ghi NGƯỢC vào đúng field `<Section>_ISSUE` (luôn có) + `<Section>_ACTION`/field tên "Action" (nếu công đoạn đó có cấu hình qua Specs, dùng CHUNG logic tìm field với `buildProcessQmsExcelXml` đã có) — nên **không cần sửa bất kỳ hàm xuất báo cáo/Excel/QMS/Data Log nào khác**, tất cả tiếp tục đọc đúng 2 field cũ như trước giờ. Field `<Section>_ISSUE`/`_ACTION` bị **ẩn khỏi lưới nhập chỉ tiêu thông thường** (đã có UI riêng), nhưng **vẫn còn định nghĩa trong SCHEMA** — Data Log, `renderDetail`, Báo cáo,... vẫn đọc được bình thường. Checkpoint lịch sử (không có `__issueActionPairs__`) tự fallback đọc lại đúng 1 cặp từ 2 field cũ đó khi Sửa.
-- **Quyết định về phạm vi validate CỨNG (điểm cần lưu ý nhất)**: yêu cầu chỉ nói rõ ràng riêng Công đoạn ("mục 18: giới hạn Process CHỈ áp dụng cho checkpoint MỚI, không áp dụng cho dữ liệu lịch sử"). Với QC/Item Code/PO/Issue-Action, yêu cầu KHÔNG nói rõ có tách biệt New/Edit hay không — đã chọn áp dụng **ĐỒNG NHẤT cho cả Thêm mới lẫn Sửa** (cùng 1 nút Lưu, cùng 1 bộ validate), vì đọc theo đúng câu chữ yêu cầu ("Input Form" nói chung, không tách riêng). **Hệ quả cần biết**: sửa 1 checkpoint lịch sử có Item Code trống/sai định dạng, QC trống, hoặc PO không đúng 9 số (dữ liệu nhập trước khi có tính năng này) giờ sẽ **bị chặn lưu** cho tới khi điền đúng các field đó — kể cả khi người dùng chỉ định sửa 1 chỉ tiêu không liên quan. Đây là đánh đổi được cân nhắc rõ ràng (không phải bug), nhưng NẾU không mong muốn, có thể sửa lại thành "chỉ validate cứng khi TẠO MỚI" — xem mục "Vấn đề còn tồn đọng" trong báo cáo trả lời gốc.
-- **Client (tuỳ chọn)**: KHÔNG nằm trong 11 yêu cầu, vẫn giữ nguyên (tính năng cũ), chuyển vị trí xuống sau PO/trước lưới chỉ tiêu.
-- **Test mới**: `tests/input-form-v2.test.mjs` (9 test) — `getProductionDate()` đủ 4 mốc giờ; `lookupItemByCode()` đủ 4 trạng thái (gồm phân biệt trùng-nhưng-giống-nhau vs trùng-và-mâu-thuẫn); adapter Issue/Action round-trip 2 chiều; dropdown Process chỉ có đúng 5 lựa chọn; toàn bộ chuỗi validate cứng (QC/Item Code 3 kiểu sai/PO 2 kiểu sai) đều chặn lưu với đúng thông báo, không lưu bất cứ gì; PO=SHUTDOWN (kể cả chữ thường) lưu được nhưng Item Code vẫn bắt buộc; dòng Issue/Action để trống hoàn toàn được bỏ qua nhưng điền nửa chừng thì chặn lưu kèm đúng số thứ tự dòng; sửa 1 checkpoint FOAMING lịch sử vẫn hoạt động đúng (Công đoạn hiện dạng chữ, Issue cũ tự nạp vào ô mới); Item Code gợi ý danh sách có sẵn (mục 3f). `tests/input-draft.test.mjs`/`tests/process-qms-export.test.mjs` (2 test draft-safety cũ) đã cập nhật lại theo cấu trúc form mới (chọn Ca/Process trước khi thao tác tiếp, đổi field-đổi để test bằng QC/Client vì Recipe không còn là dropdown thủ công nữa).
-
-### 3f. 2 chỉnh sửa nhỏ theo phản hồi người dùng (2026-09-21, cùng ngày với mục 3e)
-
-- **Item Code giờ là autocomplete** (dùng lại đúng `renderAutocomplete` đã có cho PO) thay vì `<input>` thường — gợi ý số ngay khi gõ, lấy từ `allKnownItemCodes()` (mới, cạnh `lookupItemByCode`) = danh sách mã duy nhất trong `ITEM_CODE_LIST` (Item Code Master), y hệt cách PO gợi ý từ `allKnownPOs()`. Vẫn là free-text (gõ mã chưa có trong danh sách vẫn được, chỉ bị chặn ở bước validate/lookup lúc Lưu như trước) — KHÔNG giới hạn chỉ được chọn từ danh sách. **Lưu ý khi viết test/code khác**: từ nay `#view-input` có HAI `.ac-wrap input` (Item Code đứng trước, PO đứng sau) — chọn nhầm cái đầu tiên bằng `.ac-wrap input` sẽ trúng Item Code chứ không phải PO; phân biệt bằng `placeholder` (`'VD: 11000011'` vs chứa `'SHUTDOWN'`).
-- **Nhãn checkbox ở tab Specs** sửa lại cho đúng vị trí thực tế: "Xuất trong báo cáo QMS (nút "Xuất theo mẫu" ở tab Dữ liệu)" → **"Hiển thị trong báo cáo QMS ở tab Báo cáo"** (nút xuất Excel/PDF theo mẫu QMS đã chuyển sang tab Báo cáo từ 1 phiên làm việc trước đó — mục 3 phần "Yêu cầu (1)" — nhãn cũ ở Specs bị bỏ sót, chưa cập nhật theo).
-
-### 3g. Tab Specs → dạng bảng chỉnh sửa trực tiếp (2026-09-21, cùng ngày)
-
-Người dùng yêu cầu tab Specs trình bày dạng bảng giống Danh sách Items Code (sort/filter/sửa trực tiếp/thêm). Thay hoàn toàn UI cũ "danh sách `.specfield` + form `openForm` mở/đóng theo từng chỉ tiêu" bằng **1 bảng `buildEditableTable` riêng cho mỗi Công đoạn** (7-8 bảng trong tab, mỗi Công đoạn 1 bảng, y hệt cấu trúc cũ theo `sec.name`).
-
-- **2 kiểu ô mới thêm vào `buildEditableTable`** (component dùng chung, mở rộng cho tất cả các tab đang dùng nó, không chỉ Specs): `type:'textarea'` (đa dòng, commit lúc blur — dùng cho Tên chỉ tiêu vì label có thể nhiều dòng, và Lựa chọn/options) và `type:'checkbox'` (commit lúc `change`, hiển thị giữa ô căn giữa).
-- **8 cột**: Tên chỉ tiêu (sort+filter) | Loại (sort+filter nhiều lựa chọn) | Giới hạn LSL/LCL/UCL/USL (4 ô nhỏ trong 1 ô — chỉ áp dụng Loại Số) | Nhãn Đạt/Lỗi (2 ô nhỏ — Loại Đạt/Lỗi) | Lựa chọn (Loại Danh sách) | Bắt buộc/Ghi chú/±Âm (nhóm checkbox) | QMS (checkbox + tên cột khi xuất) | Hành động (▲▼ sắp xếp tay, 🧬 Ghi đè Recipe, 🗑️ xoá). 3 cột compound (Giới hạn/Nhãn Đạt-Lỗi/Cờ) dùng `render(row)` trả về DOM có input/checkbox tự gắn handler riêng (không qua khung `get/set` chuẩn của cột) — mỗi input tự `saveSchema()` ngay khi blur/change, KHÔNG rebuild bảng (giữ focus, không giật trang), chỉ Add/Xoá/Đổi Loại/Sắp xếp (thay đổi CẤU TRÚC `sec.fields`) mới gọi lại `renderSpecs()` toàn bộ.
-- **Đổi Loại (Kiểu dữ liệu)**: xoá sạch config cũ không còn liên quan (`hardMin/tMin/tMax/hardMax/options/recipeOverrides/trueLabel/falseLabel`) trước khi gán Loại mới — y hệt hành vi `openForm` cũ khi đổi kiểu dữ liệu, tránh rác cấu hình cũ lẫn qua kiểu mới.
-- **Ghi đè theo Recipe** (trước đây nằm trong `openForm`, chỉ hiện khi Loại=Số) tách thành `buildRecipeOverrideEditor(f)` — 1 khối riêng mở/đóng bên dưới bảng của Công đoạn đó khi bấm nút "🧬 Ghi đè" ở dòng tương ứng (không nhét vào ô bảng vì đây là 1 bảng con nhiều dòng, không hợp làm 1 ô). Tự lưu ngay mỗi lần đổi (không có nút "Lưu" riêng); nhãn "🧬 Ghi đè (N)" ở nút chỉ cập nhật lại số N sau lần bảng được rebuild kế tiếp (VD sau khi Thêm/Xoá/Sắp xếp 1 chỉ tiêu khác) — trạng thái `recipeOverrides` bên dưới luôn đúng ngay lập tức, chỉ con số hiển thị trên nút có thể tạm thời cũ cho tới lần rebuild sau — đánh đổi có chủ đích để tránh rebuild toàn bảng (mất focus/giật trang) mỗi lần gõ 1 ô ghi đè.
-- **▲▼ sắp xếp thủ công** thao tác trên INDEX THẬT trong `sec.fields` (không phải vị trí đang hiển thị sau khi sort/filter) — nếu đang bật sort cột khác, bấm ▲▼ vẫn đổi đúng thứ tự thật (ảnh hưởng thứ tự hiển thị ở tab Nhập liệu) nhưng có thể KHÔNG thấy dòng nhảy vị trí ngay trên bảng đang sort — cần tắt sort (bấm lại tiêu đề cột về "không sort") để thấy trực quan việc sắp xếp tay.
-- **Không đổi**: cấu trúc `SCHEMA`/`DEFAULT_SCHEMA`, `saveSchema()`, card "Sao lưu/Đồng bộ cấu hình Specs" (Xuất/Nhập JSON, Xuất Excel) ở đầu tab — giữ nguyên y hệt.
-- **Test mới**: `tests/specs-table.test.mjs` (8 test) — bảng render đúng cột; sửa Tên chỉ tiêu + LSL/LCL/UCL/USL lưu đúng vào SCHEMA + IndexedDB; đổi Loại xoá sạch config cũ; checkbox Bắt buộc/QMS lưu đúng; thêm/xoá/sắp xếp chỉ tiêu; panel Ghi đè Recipe chỉ mở được cho Loại Số, thêm 1 dòng ghi đè lưu đúng; lọc theo Loại (nhiều lựa chọn) + lọc chữ theo Tên chỉ tiêu; SCHEMA mặc định thật (ROA/FOAMING...) vẫn render đúng dạng bảng.
-
-### 3h. Đồng bộ định dạng ngày dd/mm/yyyy toàn app + bỏ auto-tick QMS mặc định (2026-09-21, cùng ngày)
-
-Người dùng phát hiện tính năng "Xuất Excel/PDF theo mẫu Process/QMS" (mục 34, tab Báo cáo) là NGOẠI LỆ DUY NHẤT không dùng dd/mm/yyyy — nó cố ý dùng `d-mmm-yyyy` (VD: 19-Sep-2026) từ hồi mới làm để khớp đúng numfmt của 1 file mẫu Excel thật người dùng gửi trước đó (xem mục 2/3 lịch sử). Đã hỏi lại rõ ràng trước khi đổi (vì đổi sẽ làm file xuất không còn khớp numfmt file mẫu gốc nữa) — người dùng xác nhận **đổi luôn sang dd/mm/yyyy cho nhất quán toàn app**.
-
-- `fmtDateExport(iso)` giờ chỉ gọi thẳng `fmtDateVN(iso)` (dd/mm/yyyy) — **vẫn giữ là 1 function riêng** (không rút gọn thành `const fmtDateExport = fmtDateVN;`) vì top-level `const`/`let` trong classic `<script>` KHÔNG gắn lên `window` (chỉ tồn tại trong lexical scope của script) — trong khi `function ...(){}` declaration thì có, và test harness (`w.fmtDateExport(...)`) cũng như bất kỳ chỗ nào lỡ gọi qua `window.fmtDateExport` cần nó vẫn truy cập được. Đã xoá `EXPORT_MONTHS_EN` (không còn ai dùng).
-- Đã rà toàn bộ codebase tìm chỗ hiển thị ngày không qua `fmtDateVN`/`fmtDateTimeVN` — không còn chỗ nào khác (mọi CSV/Excel/báo cáo/PDF/UI đều đã dùng `fmtDateVN` từ trước). Các chỗ dùng ISO `yyyy-mm-dd` còn lại (`todayStr()`/`getProductionDate()` cho value của `<input type="date">`, và tên file xuất `Shiftly_${date}_...`) **cố tình giữ nguyên** — không phải "định dạng ngày hiển thị cho người xem", mà là (a) giá trị kỹ thuật bắt buộc của input ngày HTML (trình duyệt tự hiển thị theo ngôn ngữ máy, không phải giá trị thô), và (b) quy ước đặt tên file để sắp xếp đúng thứ tự theo alphabet — đổi sang dd/mm/yyyy ở đây sẽ làm hỏng thứ tự sắp xếp file.
-- **Tiện thể xử lý luôn 1 yêu cầu liên quan gửi cùng lúc**: checkbox "Hiển thị trong báo cáo QMS ở tab Báo cáo" (isQMS, tab Specs) trước đây có `seedQmsDefaults()` tự động tick sẵn ~13 chỉ tiêu khớp rõ với file mẫu QMS (1 lần duy nhất lúc khởi động, theo đúng yêu cầu 2026-09-19 "mặc định tích chọn giúp tôi"). Người dùng nay đổi ý: **"mặc định bỏ chọn"** — đã xoá hẳn `QMS_DEFAULT_SEED`/`seedQmsDefaults()` và lời gọi trong `init()`. Từ giờ MỌI chỉ tiêu, kể cả thiết bị hoàn toàn mới, đều bắt đầu KHÔNG tick QMS — người dùng tự tick từng chỉ tiêu cần thiết ngay trong bảng Specs (giờ rất nhanh nhờ mục 3g). Thiết bị nào đã từng chạy bản cũ và có sẵn `isQMS:true` tồn dư trong `meta.schema` (IndexedDB) sẽ KHÔNG tự động bị xoá lại (không có migration ngược) — tự bỏ tick thủ công trong bảng Specs nếu cần.
-- **Test cập nhật**: `tests/process-qms-export.test.mjs` — test `fmtDateExport` đổi sang kỳ vọng dd/mm/yyyy; 2 test `buildProcessQmsExcelXml`/`buildProcessQmsPrintHtml` đổi chuỗi ngày kỳ vọng từ "19-Sep-2026"/"5-Jan-2026" sang "19/09/2026"/"05/01/2026"; comment nhắc `seedQmsDefaults()` đã lỗi thời được sửa lại. `tests/supabase.test.mjs` — sửa lại comment ở test đo outbox rỗng (không còn nhắc `seedQmsDefaults()` là nguồn phát sinh outbox item nữa). **Test mới**: `tests/specs-table.test.mjs` — thêm test xác nhận KHÔNG có chỉ tiêu nào trong `SCHEMA` mặc định được tick sẵn `isQMS`, và mọi checkbox QMS trong bảng Specs hiển thị unchecked trên thiết bị mới.
-
-### 3i. Audit + khắc phục Egress Supabase lần 3 (2026-09-21, cùng ngày)
-
-Người dùng yêu cầu audit toàn diện rồi khắc phục hết. Đã tìm và sửa 2 điểm mức **Cao** (mới phát sinh chính từ các tính năng vừa xây trong session này) + 1 điểm **Trung bình-Cao**, cộng thêm 1 công cụ dọn dữ liệu cũ (thủ công). **QUAN TRỌNG: phải chạy lại `supabase/schema.sql` mới nhất trên project Supabase thật** (thêm cột `images_fp`, đổi chữ ký trả về của `sync_get_checkpoints`, thêm 2 hàm mới) — code cũ trên Supabase sẽ không tương thích với `index.html` mới cho tới khi làm việc này.
-
-**(a) Ảnh không còn kèm theo mỗi lần checkpoint đổi BẤT KỲ field nào (mức Cao):**
-- Thêm cột `checkpoints.images_fp` (fingerprint rẻ, mirror đúng `imagesFingerprint()` phía client — nối các timestamp ảnh đã sắp xếp, cách nhau dấu phẩy). `sync_put_checkpoints` chỉ tính lại khi client THẬT SỰ gửi kèm `images` lần push đó (dùng chung toán tử `?` kiểm tra key tồn tại, y hệt logic bỏ-ảnh-không-đổi đã có).
-- `sync_get_checkpoints` **không còn trả `images`** nữa — chỉ trả `imagesFp`. Thêm hàm mới `sync_get_checkpoint_images(p_keys jsonb)` — client gom NHIỀU key trong 1 lệnh (không N+1), chỉ gọi khi phát hiện `imagesFp` khác ảnh đang có sẵn cục bộ (hoặc chưa từng thấy dòng đó).
-- `pullFromCloud()` (index.html) viết lại: mỗi dòng áp dụng xong, so `row.imagesFp` với `local._imagesSyncedFp` — khớp thì GIỮ NGUYÊN `local.images` (không cần tải lại gì), khác thì gom key vào `needImages` rồi gọi `sync_get_checkpoint_images` 1 lần cho cả trang đang xử lý. Nếu lệnh lấy ảnh lỗi mạng, **cố tình KHÔNG tiến cursor** (để lần poll sau thử lại nguyên trang đó, tránh mất ảnh vĩnh viễn).
-- Migration tự backfill `images_fp` cho dữ liệu cũ đã có sẵn trong `schema.sql` (an toàn chạy lại nhiều lần — chỉ động vào dòng có `images_fp=''`).
-
-**(b) Debounce thật cho meta (Specs/PO/Recipe/Client/Items Code) — mức Cao:**
-- `scheduleFlush()` cũ chỉ gộp các lệnh gọi trong 1 cửa sổ CỐ ĐỊNH 800ms kể từ lần gọi ĐẦU TIÊN — sửa cách nhau > 800ms (rất thường gặp khi dùng bảng chỉnh sửa trực tiếp mới) thì MỖI LẦN SỬA LÀ 1 LẦN ĐẨY + MỌI THIẾT BỊ KHÁC TẢI LẠI NGUYÊN CẢ danh sách (Item Code Master ~55KB/524 dòng, Specs ~9KB).
-- Thêm `scheduleMetaFlush()` — debounce THẬT SỰ (reset lại bộ đếm giờ mỗi lần gọi, 2.5s im lặng mới thực sự đẩy), dùng riêng cho `queueMetaSync()`. `queueOutbox()` đã tự gộp theo key sẵn nên không cần đổi gì ở tầng RPC — chỉ cần trì hoãn ĐÚNG THỜI ĐIỂM gọi `flushOutbox()` là cả 1 phiên sửa nhiều ô liên tiếp tự động chỉ còn đúng 1 lần đồng bộ.
-- `scheduleFlush()` (dùng cho checkpoint) giữ nguyên không đổi — checkpoint cần đẩy nhanh (dữ liệu QC chính), chỉ meta (danh mục) mới cần debounce dài hơn.
-
-**(c) Polling nền co giãn theo trạng thái Realtime thật — mức Trung bình-Cao:**
-- Thêm biến `realtimeConnected` (khác hẳn "có object channel hay không") — cập nhật qua callback `subscribe(status=>...)` của `startRealtime()` (`status==='SUBSCRIBED'`), reset về `false` trong `stopRealtime()`.
-- `baseSyncDelay()`: khi `realtimeConnected` đã xác nhận true, nới nhịp poll từ 8s/20s lên **30s/60s** (PC/Tablet) — Realtime lo phần "gần như tức thời", polling chỉ còn là lưới an toàn dự phòng. Khi vừa đổi trạng thái kết nối, áp dụng `syncDelay` mới ngay (không đợi tới lần `armSync()` kế tiếp).
-
-**(d) Công cụ dọn ảnh cũ (thủ công, KHÔNG tự chạy) — mức Trung bình, quyết định nghiệp vụ còn treo:**
-- Thêm `clear_old_checkpoint_images(p_days int)` trong `schema.sql`, cùng khuôn mẫu với `prune_logs_older_than` đã có (KHÔNG grant cho anon/authenticated, không pg_cron, Admin tự chạy tay trong SQL Editor khi đã chốt được thời hạn giữ ảnh). Chỉ xoá `images`/`images_fp`, giữ nguyên toàn bộ số liệu QC.
-
-**Test mới/cập nhật:**
-- `tests/supabase.test.mjs`: thêm `sync_get_checkpoint_images` vào bảng dispatch `rpc()` + vào test "unauthorized"; viết lại 2 test ảnh cũ (`images travel inline...`, `omitting the images key...`) theo đúng luồng 2 bước mới (kiểm `imagesFp` từ `sync_get_checkpoints`, ảnh thật từ `sync_get_checkpoint_images`); thêm test batch-nhiều-key; thêm 1 test e2e mới (`pullFromCloud(): fetches a photo only via sync_get_checkpoint_images...`) dựng 2 "thiết bị" (1 qua RPC trực tiếp, 1 qua app thật đã boot) xác nhận ảnh chỉ tải đúng 1 lần dù checkpoint đó bị sửa field khác thêm 1 lần nữa.
-- `tests/egress-optimizations.test.mjs` (**mới**, 4 test): debounce meta gộp đúng nhiều lần sửa liên tiếp thành 1 lần đẩy; sanity-check debounce KHÔNG bị vô hiệu hoá (sửa cách xa nhau vẫn tách thành 2 lần đẩy riêng); `baseSyncDelay()` nới đúng theo `realtimeConnected` + theo tab đang xem; `stopRealtime()` reset lại cờ.
-
-**Việc CHƯA làm (cân nhắc thêm nếu cần)**: Vấn đề #4 trong báo cáo audit (giới hạn `sync_get_checkpoints` theo SỐ DÒNG chứ không theo DUNG LƯỢNG) không còn đáng lo sau khi bỏ hẳn `images` khỏi hàm này (mỗi dòng còn lại rất nhẹ) — không cần sửa thêm. Đề xuất dài hạn (chuyển ảnh sang Supabase Storage, lazy-load ảnh theo yêu cầu thay vì đồng bộ sẵn, tách Item Code Master thành bảng Postgres thật thay vì 1 blob `meta`) — CHƯA làm, cần quyết định kiến trúc lớn hơn, xem báo cáo audit gốc.
-
-### 3j. Xoá tab Danh sách Recipe + làm lại bảng Specs (2026-09-21, cùng ngày)
-
-Recipe không còn là 1 danh mục quản lý riêng — nó đã được tự động truy xuất từ Item Code (Item Code Master → `lookupItemByCode()`) từ mục 3c/3e, nên tab "Danh sách Recipe" (và toàn bộ `RECIPES`/`RECIPE_OPTIONS`/`saveRecipes()`) chỉ còn là code chết, gây hiểu nhầm. Đồng thời làm lại bảng Specs cho gọn/chuyên nghiệp hơn theo yêu cầu người dùng.
-
-**(a) Xoá hẳn tab "Danh sách Recipe":**
-- Xoá nút tab, `<div id="view-recipelist">`, dòng dispatch trong `showTab()`, entry trong `TAB_ORDER_DEFAULT`/`TAB_LABELS`, và toàn bộ `renderRecipeList()`/`recipeOverrideDetails()`.
-- Xoá `RECIPE_OPTIONS`, `let RECIPES`, `saveRecipes()`, nhánh `'recipes'` trong `applyRemoteMeta()`, và đoạn tải `meta.recipes` trong `init()`.
-- Thêm `allKnownRecipes()` (mirror `allKnownItemCodes()`) — lấy danh sách mã Recipe duy nhất, không rỗng, trực tiếp từ `ITEM_CODE_LIST`. Panel "🧬 Ghi đè theo Recipe" (trong Specs) đổi ô chọn Recipe từ `<select>` cố định sang `renderAutocomplete()` (gõ tự do + gợi ý), dùng chung `allKnownRecipes()`.
-- Số tab giảm từ 13 → **12**; cập nhật 2 chỗ hardcode số tab trong `tests/supabase.test.mjs`, xoá 1 test "Danh sách Recipe" trong `tests/list-tables.test.mjs`, sửa `README.md`/mục "App chính" ở trên, và Guide tab (mục 24 cũ → viết lại thành "Recipe được truy xuất tự động từ Item Code", mục 26 bỏ phần nhắc tới Recipe).
-- **Lưu ý dữ liệu**: `ITEM_CODE_LIST` seed sẵn có 1 số dòng (loại `FGs`/`RW`) mang giá trị `recipe:"0"` (không áp dụng recipe thật) — `allKnownRecipes()` phản ánh đúng dữ liệu master nên "0" vẫn xuất hiện như 1 gợi ý hợp lệ (và có thể là gợi ý ĐẦU TIÊN do sắp xếp alphabet). Không phải lỗi code — nếu muốn dọn, sửa trực tiếp trường Recipe cho các dòng đó trong tab Danh sách Items Code.
-
-**(b) Làm lại bảng Specs (tinh gọn, chuyên nghiệp hơn):**
-- Cột **"Lựa chọn (Danh sách) — mỗi dòng 1 lựa chọn" dời xuống CUỐI CÙNG** (trước cột Hành động) — trước đây nằm giữa (sau Nhãn Đạt/Lỗi).
-- Thêm bộ lọc theo **"Bắt buộc"** (cột Bắt buộc/Ghi chú/±Âm giờ sortable + multi-filter Có/Không bắt buộc) và theo **Lựa chọn** (text filter trên nội dung các dòng lựa chọn) — trước chỉ lọc được Tên/Loại/QMS.
-- **Bỏ hàng "thêm" nội tuyến cũ** (chỉ nhập Tên+Loại) — thay bằng nút **"➕ Thêm chỉ tiêu"** ở đầu mỗi bảng công đoạn, mở 1 **popup** (component `openModal()` mới, chưa từng có pattern modal nào trong app trước đây) nhập đầy đủ 1 lần: Tên, Loại, rồi các trường tuỳ Loại (Giới hạn Số / Nhãn Đạt-Lỗi / Lựa chọn), Bắt buộc, Cho phép ghi chú, ± Số âm, QMS + tên cột QMS.
-- CSS mới `.specs-table` (header nền đậm `var(--ink)` chữ trắng, zebra stripe, hover màu teal nhạt) cho bảng Specs tương phản/dễ đọc hơn — không đụng tới giao diện các bảng khác (PO/Client/Items Code) vốn không nằm trong yêu cầu.
-- `buildEditableTable()` có thêm option `tableClass` (tuỳ chọn, thêm class CSS cho `<table>`) để phục vụ style riêng này mà không phá các bảng còn lại.
-
-**Test cập nhật**: `tests/specs-table.test.mjs` viết lại gần như toàn bộ — thứ tự cột mới, luồng thêm qua popup (2 test mới: thêm chỉ tiêu Loại Số với LSL/USL, và Loại Danh sách với Lựa chọn), lọc theo Bắt buộc, panel Ghi đè theo Recipe dùng `ITEM_CODE_LIST` thay vì `RECIPES`. `tests/list-tables.test.mjs`, `tests/tab-config.test.mjs`, `tests/supabase.test.mjs` cập nhật theo số tab mới/bỏ Recipe. Tổng: vẫn 10 file / **76 test** (thêm 1 test mới ở `specs-table.test.mjs` — thêm chỉ tiêu Loại Danh sách qua popup — bù đúng 1 test "Danh sách Recipe" bị xoá ở `list-tables.test.mjs`), tất cả pass.
-
-### 3k. Chọn nhiều dòng + xoá hàng loạt trong bảng Specs, bắt mật khẩu Admin (2026-09-21, cùng ngày)
-
-Yêu cầu: cho chọn nhiều chỉ tiêu cùng lúc ở tab Specs rồi xoá 1 lần, và bắt nhập mật khẩu Admin (dùng lại `APP_PASSWORD` = `1234`, đúng mật khẩu Force sửa/xoá dữ liệu ca đã có sẵn ở tab Dữ liệu — KHÔNG tạo thêm mật khẩu/vai trò mới) trước khi xoá thật.
-
-- **`buildEditableTable(opts)`** (component bảng dùng chung) có thêm nhóm option mới, tất cả **opt-in** (không đổi hành vi các bảng khác — PO/Client/Items Code vẫn y hệt cũ vì không truyền các option này): `selectable:true` bật cột tick chọn đầu tiên (kèm ô tick "chọn tất cả" ở header — chỉ chọn các dòng đang lọc/hiện ra, không chọn ẩn); `rowKey:row=>...` định danh ổn định cho từng dòng (dùng `f.id`, KHÔNG dùng index vì index đổi khi sort/filter/xoá); `onBulkDelete:async selectedRows=>...` callback chứa toàn bộ logic nghiệp vụ xoá thật (component chỉ lo UI chọn/đếm/hiện thanh hành động), trả `false` để coi là "huỷ, không xoá gì" (component không tự xoá lựa chọn trong trường hợp này); `bulkDeleteLabel` tuỳ chọn đổi chữ nút.
-- Khi có ≥1 dòng được chọn, 1 thanh `.seltoolbar` (nền teal nhạt) hiện ngay trên bảng: "Đã chọn N dòng" + nút "🗑️ Xoá N mục đã chọn".
-- `renderSpecs()`: bảng Specs bật `selectable`/`rowKey:row=>row.f.id`; `onBulkDelete` làm đúng 2 bước như xoá 1 dòng đã có (`confirm()` liệt kê tên từng chỉ tiêu sẽ xoá, rồi `promptPasswordOK()` — cùng hàm dùng cho Force sửa/xoá checkpoint), chỉ khi CẢ HAI bước đều pass mới thật sự lọc bỏ các field khỏi `sec.fields`, dọn `renderSpecs._overrideOpen[sec.id]` nếu field đang mở panel Ghi đè nằm trong nhóm bị xoá, xoá sạch `state.selected`, `saveSchema()`, rồi `rebuildSection()`.
-- **Lưu ý kỹ thuật** (để tránh bug tương tự nếu mở rộng `selectable` cho bảng khác sau này): `onBulkDelete` phải tự `.clear()` đúng `Set` đang dùng (`renderSpecs._tableState[sec.id].selected`) TRƯỚC khi gọi `rebuildSection()` — nếu để component tự clear SAU khi callback trả về, bảng mới dựng lại bên trong `rebuildSection()` sẽ đọc phải `state.selected` còn sót id của các field VỪA bị xoá (không còn dòng nào khớp id đó để hiện tick, nhưng `selCount` vẫn đếm nhầm).
-
-**Test mới**: `tests/specs-table.test.mjs` thêm 2 test — (1) chọn 2 dòng → thấy thanh + nút đúng số lượng; huỷ ở bước `confirm()` thì không hỏi mật khẩu và không xoá gì; sai mật khẩu thì không xoá; đúng mật khẩu (`1234`) thì xoá đúng các dòng đã chọn và thanh chọn biến mất; (2) ô "chọn tất cả" chỉ chọn các dòng đang hiện ra sau khi lọc, không chọn dòng đang bị ẩn bởi bộ lọc. Toàn bộ `tr.children[N]`/`filterRow.children[N]` trong file này dịch thêm 1 vì cột tick chọn mới chèn vào đầu. Tổng: 10 file / **78 test**, tất cả pass.
-
-### 3l. Chặn mở phần chỉ tiêu ngay khi gõ Mã PO sai định dạng (2026-09-21, cùng ngày)
-
-Validate cứng "Mã PO phải đúng 9 chữ số, hoặc SHUTDOWN" đã có sẵn ở nút Lưu (mục 3e) — yêu cầu mới là cảnh báo **SỚM HƠN**, ngay khi đang gõ PO cho 1 điểm kiểm tra MỚI, thay vì phải điền hết cả form rồi mới biết sai lúc bấm Lưu.
-
-- [renderInputForm](index.html:2131), nhánh tạo MỚI (không phải đang Sửa): gate rỗng-PO cũ (`if(!poVal0){...return;}`) giữ nguyên, thêm ngay sau đó 1 gate thứ 2 — chuẩn hoá `poVal0` giống hệt cách chuẩn hoá ở nút Lưu (`/^shutdown$/i` → `'SHUTDOWN'`), nếu không phải `'SHUTDOWN'` và không khớp `/^\d{9}$/` thì render 1 dòng cảnh báo màu đỏ (`⚠️ Mã PO phải gồm đúng 9 chữ số, hoặc là SHUTDOWN...`) rồi `return` — y hệt cơ chế "chưa nhập PO thì chưa mở phần chỉ tiêu" đã có, chỉ thêm 1 điều kiện.
-- **Cố tình KHÔNG áp dụng gate này khi đang SỬA** (`editingCp`) — chỉ áp dụng lúc tạo mới. Lý do: dữ liệu lịch sử có thể đã lưu PO không đúng định dạng 9 chữ số từ trước khi quy tắc này tồn tại; validate cứng ở nút Lưu (mục 3e) vẫn chặn LƯU LẠI dữ liệu sai định dạng, nhưng không khoá luôn quyền MỞ RA XEM/sửa các field khác của 1 bản ghi cũ.
-- **Test cập nhật**: `tests/input-form-v2.test.mjs` — test "Save is blocked..." đoạn cuối (PO 5 chữ số) đổi từ "bấm nút Lưu rồi kiểm tra toast lỗi" sang "kiểm tra cảnh báo hiện ngay + nút Lưu không tồn tại" (vì giờ nút Lưu không còn được render nữa ở bước đó); thêm 1 test mới "PO gate: ..." xác nhận PO 5 chữ số hiện cảnh báo + ẩn phần Client/Save, còn PO đủ 9 chữ số thì mở đúng phần còn lại. Tổng: 10 file / **79 test**, tất cả pass.
-
----
-
-## 4. (Lịch sử) Câu hỏi từng cần xác nhận — xem mục 3 ở trên để biết câu trả lời đã chốt
-
-1. ~~Ý nghĩa "Item Code"~~ → field mới, nhập tay (xem mục 3).
-2. ~~Field "ACTION" đặt ở đâu~~ → field tuỳ chọn tự thêm qua Specs, export tự tìm theo id/tên (xem mục 3).
-3. ~~Cách đánh dấu field nào thuộc nhóm "QMS"~~ → cờ `isQMS` chỉnh trong Specs (xem mục 3).
-4. ~~"Tự động xuất về 1 vị trí"~~ → File System Access API, chọn thư mục 1 lần ở Cài đặt (xem mục 3).
-5. Định dạng ngày `dd-mmm-yyy` áp dụng cho **xuất CSV/Excel**, cho **báo cáo hiển thị**, hay cả hai? — đã chốt: CHỈ áp dụng cho tính năng xuất mới (mục 3), không đổi phần còn lại của app.
-6. ~~Thứ tự "Chọn Recipe, chọn Technician"~~ → **đã chốt 2026-09-19**: Công đoạn → Nhập PO → chọn Recipe (+ Client) → chọn Technician (QC). Đổi trong [renderInputForm](index.html:1636) — chuyển khối Recipe/Client lên TRƯỚC khối QC (trước đó QC đứng trước). Chỉ đổi thứ tự DOM/hiển thị, không đổi field nào hay logic lưu.
-
----
-
-## 5. Việc CHƯA làm (để làm tiếp)
-
-- [x] Fix bug mất dữ liệu khi nhập (mục 3) — xong 2026-09-18.
-- [x] Gỡ bỏ Cloudflare, chuyển sang GitHub Pages + Supabase — xong 2026-09-18.
-- [x] Access control thật (Supabase Auth Admin/User + Edge Function quản lý tài khoản), thay thế mô hình mật khẩu chung — xong 2026-09-18.
-- [x] Vai trò Supervisor (chỉ xem, chặn ghi ở server qua `is_writer_member()`) + Admin tự sắp xếp/ẩn-hiện Tab theo vai trò (`TAB_CONFIG`) — xong 2026-09-18.
-- [x] Yêu cầu (1) Xuất dữ liệu — Item Code, cờ isQMS, xuất Excel/PDF theo mẫu Process/QMS, thư mục lưu tự động (File System Access API) — xong 2026-09-19 (chi tiết mục 3 ở trên).
-- [x] **Audit dữ liệu + đồng bộ (2026-09-19)**, tối ưu theo đúng bối cảnh "Tablet nhập liệu / PC quản lý-truy xuất" — xem mục 3b ngay dưới đây cho chi tiết từng phần.
-- [x] Lọc "QMS-only" cho **báo cáo ảnh** (`buildReportSVG`/`buildPOReportSVG`) + hiển thị Recipe + ảnh full-width + dropdown "Định dạng khác" đổi thành nút riêng — xong 2026-09-19 (chi tiết "Cập nhật 2026-09-19 (lần 2)" ở mục 3 trên).
-- [x] Đổi thứ tự nhập liệu: Công đoạn → PO → Recipe/Client → Technician (QC) — xong 2026-09-19 (xem mục 4.6).
-- [x] **Audit egress Supabase (2026-09-19, theo skill "web-egress-reduction")** — 2 điểm đã sửa:
-  - `sync_get_meta(p_since text default null)` — trước đây luôn trả về TOÀN BỘ bảng `meta` (SCHEMA + PO/Recipe/Client list + Technicians + poClosures) mỗi lần gọi, dù `pullFromCloud()` gọi hàm này ở MỖI chu kỳ poll (~8-20s/thiết bị) — lãng phí egress lớn nhất trong app vì lặp vô hạn theo thời gian. Giờ có cursor giống hệt seq của checkpoints — không đổi gì thì trả về `{}` gần như ngay lập tức. Client thêm `syncCursors.meta` (cùng object với `syncCursors.checkpoints`, cùng persist key `'syncCursors'` trong IndexedDB) — reset về `null` trong `resyncFromScratch()`.
-  - `sync_delete_checkpoints(p_deletes jsonb)` — trước đây nhận `(p_keys text[], p_updated_at text)` và client GỌI TỪNG KEY MỘT trong vòng lặp (N+1 round-trip khi xoá nhiều ca cùng lúc), dù hàm SQL vốn hỗ trợ mảng. Đổi chữ ký sang `jsonb` — mảng `[{key, updatedAt}, ...]`, mỗi key giữ đúng `updatedAt` riêng (không dùng chung 1 giá trị cho cả batch, tránh sai last-write-wins) — client giờ gộp 1 lệnh gọi duy nhất cho mọi key cần xoá trong `flushOutbox()`.
-  - Test: `tests/supabase.test.mjs` có thêm test cho cursor `sync_get_meta` và batch-delete độc lập last-write-wins theo từng key trong cùng 1 lệnh gọi.
-  - **Không đổi** (không phải quick win, cần kiến trúc lớn hơn): pull-side chưa tối ưu ảnh trùng lặp giữa các thiết bị — chỉ mới tối ưu chiều push (bỏ ảnh không đổi) ở audit trước.
-- [x] **Tab "Danh sách Items Code"** (2026-09-21) — bảng liên đới Item Code ↔ Tên sản phẩm ↔ Recipe, pre-seed 524 dòng dữ liệu thật, xuất template/nhập/xuất Excel — xong, có test (chi tiết mục 3c ở trên).
-- [x] **4 tab Danh sách PO/Recipe/Client/Items Code → dạng bảng chỉnh sửa trực tiếp** (filter nhiều lựa chọn, sort, thêm/sửa ngay trong bảng) + **gộp tab Truy xuất vào tab Dữ liệu** (2026-09-21) — xong, có test (chi tiết mục 3d ở trên). Số tab: 14 → 13.
-- [x] **Viết lại Tab Nhập liệu theo 11 yêu cầu** (Ngày/Ca/QC/Công đoạn/Item Code+lookup/Recipe tự động/PO/Issue-Action theo cặp, validate cứng, tương thích ngược 100%) (2026-09-21) — xong, có test (chi tiết mục 3e ở trên). Cân nhắc còn treo: validate cứng áp dụng cho CẢ Sửa checkpoint lịch sử (xem mục 3e, đoạn "Quyết định về phạm vi validate CỨNG").
-- [x] **Item Code ở tab Nhập liệu → autocomplete** + **tab Specs → dạng bảng chỉnh sửa trực tiếp** (sort/filter/sửa trực tiếp/thêm, giống Danh sách Items Code) (2026-09-21) — xong, có test (chi tiết mục 3f/3g ở trên).
-- [x] **Đồng bộ dd/mm/yyyy cho MỌI ngày trong app** (kể cả Xuất Excel/PDF theo mẫu Process/QMS, trước đó cố ý khác) + **bỏ hẳn auto-tick "QMS" mặc định** (isQMS mặc định luôn bỏ chọn, kể cả thiết bị mới) (2026-09-21) — xong, có test (chi tiết mục 3h ở trên).
-- [x] **Audit + khắc phục Egress Supabase lần 3** (ảnh tách khỏi `sync_get_checkpoints` + RPC ảnh riêng, debounce thật cho meta, poll co giãn theo Realtime, công cụ dọn ảnh cũ thủ công) (2026-09-21) — xong, có test (chi tiết mục 3i ở trên). **⚠️ CẦN CHẠY LẠI `supabase/schema.sql` MỚI NHẤT trên project Supabase thật trước khi dùng bản `index.html` này** — đổi chữ ký trả về của `sync_get_checkpoints` (bỏ `images`, thêm `imagesFp`) + thêm cột `images_fp` + 2 hàm mới (`sync_get_checkpoint_images`, `clear_old_checkpoint_images`), không tương thích ngược với code SQL cũ trên server.
-- [ ] Người dùng cần: (a) chạy lại `supabase/schema.sql` mới nhất (thêm `item_code`, `members.role` cho phép `supervisor`, `is_writer_member()`, tối ưu `sync_put_checkpoints` bỏ-qua-ảnh-không-đổi, `prune_logs_older_than`) trên project Supabase thật; (b) tự rà lại danh sách chỉ tiêu đã được TỰ ĐỘNG tích "isQMS" (xem `QMS_DEFAULT_SEED` trong index.html) — bỏ chọn cái nào không đúng; (c) nếu chưa làm ở phiên trước: bật Email auth, tạo Admin đầu tiên bằng SQL, deploy lại Edge Function `admin-users` bằng Supabase CLI (đã sửa để nhận thêm role `supervisor`).
-- [ ] Chưa test Edge Function `admin-users` với 1 project Supabase thật (không có runtime Deno trong sandbox) — người dùng cần tự thử luồng tạo/vô hiệu hóa tài khoản qua UI "👥 Quản lý tài khoản" sau khi deploy, và báo lại nếu có lỗi.
-- [ ] **Quyết định nghiệp vụ còn treo (KHÔNG tự làm)**: thời hạn lưu `logs` (Data Log) — hàm `prune_logs_older_than(days)` đã có trong schema.sql nhưng KHÔNG tự chạy (không grant, không pg_cron) vì đây có thể là dữ liệu cần cho audit FSSC/khách hàng — chỉ Admin tự chạy thủ công trong SQL Editor khi đã chốt được thời hạn, xem comment ngay phía trên hàm đó trong schema.sql.
-
-### 3b. Chi tiết Audit dữ liệu + đồng bộ (2026-09-19)
-
-Người dùng yêu cầu audit + thực hiện toàn bộ đề xuất, với lăng kính "Tablet nhập liệu (mạng yếu) / PC quản lý-truy xuất":
-
-1. **Không re-upload ảnh không đổi khi chỉ sửa số liệu** — `sync_put_checkpoints` giờ phân biệt "client không gửi field `images`" (giữ nguyên ảnh cũ, dùng toán tử jsonb `?`) với "client gửi mảng rỗng" (xoá thật). Client: `imagesFingerprint(cp)` (dấu vân tay rẻ = danh sách `ts` của từng ảnh) + `stripLocalMarkers()` tự lược bỏ `images` khỏi payload khi vân tay không đổi so với `_imagesSyncedFp` (cập nhật lại đúng lúc ack thành công VÀ có gửi ảnh lần đó). Đây là thay đổi tác động lớn nhất tới băng thông Tablet.
-2. **Giới hạn `MAX_IMAGES_PER_CHECKPOINT = 8`** — áp dụng ở cả 2 nơi đính kèm ảnh (`renderImageAttach`, và "Nhập ảnh đính kèm từ xa" ở tab Xuất nhập dữ liệu).
-3. **`ensureStoragePersisted()`** — gọi `navigator.storage.persist()` lúc khởi động (không chặn boot), hiển thị trạng thái ở Cài đặt. Chỉ hoạt động trên trình duyệt hỗ trợ; không hỗ trợ thì hiện "❔" thay vì lỗi.
-4. **IndexedDB index `by_date`/`by_po` trên store `shifts`** (bump version DB → 4) — CHỈ thêm index, CHƯA đổi bất kỳ hàm đọc dữ liệu nào (`refreshCache()` vẫn `idbGetAll` toàn bộ) — việc chuyển các tab sang dùng index này (thay vì load hết vào RAM) là 1 refactor lớn hơn, cố tình CHƯA làm để tránh rủi ro ảnh hưởng nhiều tab cùng lúc trong 1 lần đổi.
-5. **`chunkRowsBySize()`** — `flushOutbox()` giờ gộp các dòng cần đẩy theo tổng dung lượng JSON ước tính (~1.5MB/lần gọi) thay vì đếm cố định 5 dòng.
-6. **`baseSyncDelay()`** — nhịp poll nền co giãn theo tab đang xem: tab Nhập liệu (Tablet, chủ yếu ghi) giữ 20s như cũ; các tab khác (PC, quản lý/xem) rút xuống 8s.
-7. Kế hoạch lưu trữ/archival dài hạn — CHƯA implement (quyết định nghiệp vụ, không phải kỹ thuật).
-8. `prune_logs_older_than(days)` — xem mục treo ở trên, KHÔNG tự động chạy.
-
-Test: `tests/supabase.test.mjs` có thêm test cho hành vi bỏ-qua-ảnh-không-đổi (SQL) và `prune_logs_older_than`; `tests/process-qms-export.test.mjs` có thêm test đơn vị cho `stripLocalMarkers`/`imagesFingerprint` phía client.
+| **D1** `shiftly` | users, sessions, checkpoints (cột `seq`), meta, logs, member_audit, counters, login_attempts |
+| **R2** `shiftly-images` | nội dung ảnh (khóa `cp/<key>/<ts>`); D1 chỉ giữ metadata ảnh vì giới hạn **2 MB/dòng** |
+| **Durable Object `Hasher`** | kiểm/băm mật khẩu (Worker Free chỉ có 10 ms CPU; bcrypt không đủ) |
+| **Durable Object `Hub`** | Realtime: phát chữ `changed` tới các WebSocket đang mở (`/realtime?token=`) |
+
+**Giao diện HTTP** (giữ cùng tên/định dạng như hàm Postgres của bản Supabase để `cloudFetch()` ít đổi):
+- `POST /rpc/<fn>` với `sync_whoami, sync_get_checkpoints, sync_get_checkpoint_images, sync_put_checkpoints, sync_delete_checkpoints, sync_get_meta, sync_put_meta, sync_post_logs, sync_get_logs`. Lỗi quyền trả **HTTP 200 + `{error:'unauthorized'|'forbidden_role'}`** (cloudFetch xử lý một chỗ).
+- `POST /auth/login | /auth/refresh | /auth/logout` — JWT HS256 ~1 giờ + refresh token (băm SHA-256 trong D1, xoay vòng mỗi lần làm mới).
+- `POST /admin/users` (chỉ Admin): `list-users, create-user, change-role, disable-user, enable-user`.
+- `POST /auth/bootstrap` (header `X-Bootstrap-Token`): nhập tài khoản hàng loạt / tạo Admin đầu tiên. Chạy lại an toàn.
+- CORS chỉ cho origin trong biến `ALLOWED_ORIGINS` (hiện chỉ `https://ngocthanhthien.github.io`).
+
+**Quy tắc phải giữ nguyên:**
+1. **Cursor đồng bộ là `seq` do server gán** (bảng `counters` tăng nguyên tử trong cùng `db.batch` với lần ghi). KHÔNG bao giờ đổi sang timestamp/đồng hồ máy khách (bản Cloudflare đời đầu từng lệch đồng hồ làm mất dữ liệu).
+2. **Last-write-wins theo `updatedAt`** (so chuỗi ISO), ở cả client lẫn server. Ngoại lệ có chủ đích: cùng `updatedAt` nhưng lần này **kèm ảnh khác** thì vẫn nhận (đường thử lại ảnh bị hoãn).
+3. **Giới hạn gói Free: 50 thao tác D1+R2 mỗi request.** Vì vậy: ghi tối đa **20 dòng/lần** (dòng dư trả `reason:'batch_too_large'`), chi phí mỗi dòng = 2 + số ảnh, `PUSH_MAX_COST=40` ở client; `sync_get_checkpoint_images` trả phần chưa phục vụ trong `pending`; trang tải checkpoint = 200 dòng. Đừng nâng các con số này mà không đổi gói.
+4. **Quyền ở SERVER mỗi request** (bảng `users`: còn hoạt động, đúng vai trò): supervisor không ghi; khóa meta `egressControl` chỉ Admin ghi. Client chỉ ẩn nút cho tiện.
+5. Nhật ký (`logs`) chỉ giữ **10 dòng mới nhất** (server tự xoá phần cũ sau mỗi lần ghi).
+6. Xoá/đổi ảnh: chỉ xoá đối tượng R2 của dòng **thật sự được ghi** (tránh xoá nhầm khi thua cuộc đua).
+
+**Secrets đã đặt trên Worker** (giá trị không nằm trong repo): `JWT_SECRET`, `BOOTSTRAP_TOKEN`. Sau khi mọi người đăng nhập ổn định nên xoá `BOOTSTRAP_TOKEN`: `cd cloudflare && npx wrangler secret delete BOOTSTRAP_TOKEN`.
+
+**Triển khai lại Worker** (sau khi sửa `worker.js`): `cd cloudflare && npx wrangler deploy` (đã `npx wrangler login` trên máy chủ phát triển). Sửa schema: thêm câu `ALTER`/`CREATE ... IF NOT EXISTS` vào `schema.sql` rồi `npx wrangler d1 execute shiftly --remote --file=schema.sql`. Xem dữ liệu: `npx wrangler d1 execute shiftly --remote --command "SELECT ..."`.
+
+## 3. Tài khoản & đăng nhập
+
+- 3 vai trò: `admin` (toàn quyền), `user` (Nhân viên, nhập liệu), `supervisor` (Giám sát, chỉ xem).
+- Admin đăng nhập bằng **email**, Nhân viên/Giám sát bằng **tên đăng nhập** + mật khẩu — **giữ nguyên tài khoản/mật khẩu cũ**: hash bcrypt được nhập từ Supabase (`/auth/bootstrap`), tự nâng cấp sang PBKDF2 ở lần đăng nhập đầu của mỗi người. Hiện có **5 tài khoản** (2 Admin, 3 Nhân viên).
+- Client lưu phiên ở `localStorage['shiftly-cf-auth']`. Mất mạng vẫn vào app bằng phiên đã lưu (offline-first); lần đồng bộ có mạng kế tiếp mới kiểm lại quyền thật. Làm mới phiên hỏng chỉ vì mạng KHÔNG đá người dùng ra; chỉ khi server từ chối.
+- Giới hạn đoán mật khẩu: 8 lần sai / 15 phút theo (IP, tên) → HTTP 429.
+- Chỉ Admin thấy mục "👥 Quản lý tài khoản" ở tab Cài đặt (gọi `/admin/users`).
+- Còn một mật khẩu cứng `APP_PASSWORD = '1234'` trong `index.html` — chỉ để chặn một số thao tác nhạy cảm trong app (xoá hàng loạt Specs, sửa PO đã đóng…). **Độc lập** với đăng nhập ở trên, đừng nhầm.
+
+## 4. Frontend — những điều cần biết
+
+**Thứ tự tab mặc định:** Nhập liệu, Báo cáo, Dữ liệu, Danh sách Items Code, Danh sách Client, Specs, Data Log, Danh sách PO, Cài đặt, Hướng dẫn (10 tab; đã bỏ tab Thống kê, tab Xuất nhập dữ liệu gộp vào **Cài đặt**).
+**Nhân viên mặc định chỉ thấy:** Nhập liệu, Báo cáo, Dữ liệu, Items Code, Hướng dẫn. Admin luôn thấy đủ và chỉnh được ở Cài đặt → "Sắp xếp & Ẩn/hiện Tab". Cấu hình lưu có số phiên bản (`TAB_CONFIG_VERSION`, hiện 4): đổi bố cục mặc định thì tăng số này để mọi máy nhận mặc định mới.
+
+**Các module chính trong `index.html`** (dùng `grep -n "^function \|^async function "` để lấy số dòng hiện tại, đừng tin số dòng cũ):
+- Đồng bộ: `cloudFetch` (cửa duy nhất gọi server, tự làm mới phiên và thử lại 1 lần), `pullFromCloud`, `flushOutbox` (đẩy + kéo, chia lô theo dung lượng và `PUSH_MAX_COST`), `persistAll`, `queueMetaSync`, `applyRemoteMeta`, `stripLocalMarkers`, `startRealtime/stopRealtime` (WebSocket, tự kết nối lại, rơi về polling), `baseSyncDelay`.
+- Đăng nhập: `checkAccessGate`, `verifyAndEnter`, `loginRequest`, `currentAccessToken`, `onAccessRevoked`, `renderLoginGate`, `adminUsersCall`.
+- Thiết bị cũ còn lưu địa chỉ Supabase → `loadCloudState()` tự đổi sang Worker mặc định (`DEFAULT_API_URL`), đặt lại cursor một lần (khóa `meta.backend='cloudflare-v1'`), **giữ outbox chưa gửi**.
+- Sao lưu JSON **v2**: `buildBackupJson()` = `{version:2, checkpoints (kèm ảnh), meta:{schema,poList,clientList,itemCodeList,technicians,poClosures,tabConfig,egressControl}}`. Phục hồi dùng `forUpload()` (bỏ `_syncedAt/_imagesSyncedFp` để bản ghi tự lên server) rồi `scheduleFlush()` — **không** dùng `persistAll()` cho nạp hàng loạt (O(n²)). File JSON cũ (mảng trần) vẫn đọc được.
+- Data Log: `logChange` ghi User/Máy (ID `PC-XXXXXXXX` + tên gợi nhớ)/Hành động; `LOG_MAX = 10`; tab đọc từ server qua `sync_get_logs` khi mở/làm mới.
+- **Data & Egress Control** (Cài đặt): trần MB/ngày Soft/Hard do Admin đặt (mặc định 100/200), 3 trạng thái 🟢 Normal / 🟠 Data Saving / 🔴 Protection, đếm traffic ước tính **cục bộ** trong `cloudFetch` (không gọi mạng để đo). Protection: hoãn đẩy ảnh mới (ảnh vẫn nằm trong IndexedDB, dòng giữ "dirty" để tự gửi lại), chặn "Đồng bộ lại từ đầu", giãn polling; **không bao giờ chặn nhập/lưu QC**. Extra MB/Unlock Today hết hiệu lực khi sang ngày (so ngày lưu với `todayStr()`).
+- Banner cảnh báo đồng bộ ở tab Nhập liệu cập nhật live (`updateInputSyncBanner`), không còn là ảnh chụp lúc vẽ form.
+- Section FOAMING và REWORK đã **xoá vĩnh viễn** khỏi Specs (`REMOVED_SECTION_IDS`/`stripRemovedSections`); checkpoint cũ của chúng giữ nguyên trong dữ liệu nhưng không hiển thị/được chọn.
+- Báo cáo "Theo PO" là biểu đồ Gantt Process×Date×Shift (có sửa Issue/Action ngay trên ô, nút xoá), xuất PDF khổ ngang, Excel/PDF theo mẫu đều có Gantt.
+
+## 5. Kiểm thử
+
+`npm ci && npm test` — **145 test, đều qua** (Node `node:test`, `jsdom`, `fake-indexeddb`):
+- `tests/cloudflare.test.mjs`: Worker THẬT (esbuild đóng gói, chạy trong workerd qua **Miniflare 4**: D1/R2/Durable Object thật) — auth, vai trò, last-write-wins, cursor `seq`, ảnh/R2, meta, nhật ký, admin API, WebSocket, giới hạn gói Free.
+- `tests/cloudflare-frontend.test.mjs`: app thật (jsdom) ↔ Worker thật — đăng nhập bằng tài khoản bcrypt, đồng bộ 2 máy kèm ảnh, vô hiệu hóa giữa phiên, sao lưu JSON v2, tự chuyển cấu hình từ Supabase, nạp hàng loạt. Helper: `tests/helpers/cf-backend.mjs`.
+- Các file còn lại: UI/logic từng tab (Nhập liệu, Items Code, Specs, Báo cáo/Gantt, Data Log, tab config, Egress…). Mỗi lần boot jsdom, test **gài sẵn phiên đăng nhập** vào `localStorage` và tắt `WebSocket` để app vào thẳng giao diện, không gọi mạng.
+- `tests/supabase.test.mjs` và các test PGlite ở nửa cuối `tests/egress-control.test.mjs` kiểm **bản SQL Supabase cũ** (`supabase/schema.sql`) — chỉ còn là bản chụp lịch sử; có thể xoá cùng thư mục `supabase/` khi chắc chắn không quay lại.
+- Cạm bẫy khi viết test: `document.body.textContent` của jsdom **chứa cả mã nguồn trong thẻ `<script>`** → luôn giới hạn vào `#view-...`; JSON không mang được `Infinity`; `window.confirm/print` cần stub; `location.reload` không ghi đè được; hàng đợi gửi chạy nền nên dùng vòng chờ "đã đồng bộ hết" thay cho `setTimeout` cố định.
+
+## 6. Việc đã xong / còn lại
+
+**Đã xong (2026-09-25):** chuyển hoàn toàn backend sang Cloudflare; nhánh đã gộp vào `main`, GitHub Pages chạy bản mới; dữ liệu nạp từ máy Admin bằng JSON (69 điểm kiểm tra, 9 ảnh); tài khoản Admin và Nhân viên đã đăng nhập thử thật. Thẻ git **`pre-cloudflare`** = bản Supabase cuối cùng (để lùi nếu cần).
+
+**Còn lại / cần người quyết định:**
+1. **Danh mục tuỳ chỉnh có thể chưa lên server.** Lần kiểm tra cuối, D1 chỉ có 3 khóa meta (`itemCodeList`, `schema`, `technicians` = đúng 5 tên mặc định). Chưa có `poList`, `clientList`, `poClosures`, `tabConfig`, `egressControl`. Nếu máy Admin có Danh sách PO/Client/đóng PO tuỳ chỉnh thì cần nạp lại: tải lại **JSON v2** (dòng đầu file phải là `{` và có `"version": 2`) rồi "Phục hồi từ JSON"; hoặc thêm nút "Đẩy danh mục lên máy chủ" trong Cài đặt (chưa làm).
+2. **Chưa thử** đăng nhập các tài khoản Nhân viên còn lại (`cam.do`, `dung.tran`, `qaline@ild-coffee.com`).
+3. **Project Supabase vẫn còn tồn tại** — người dùng định xoá. Việc này **không hoàn tác được**; chỉ nên làm sau khi mục 1–2 xong và chạy ổn vài ngày. Sau đó: xoá `BOOTSTRAP_TOKEN` (mục 2) và xoá thư mục `supabase/` cùng 2 nhóm test cũ ở mục 5 (hoặc giữ làm lưu trữ).
+4. Theo dõi tuần đầu trên dashboard Cloudflare: request/ngày (trần Free 100.000), D1 (500 MB, đọc 5 triệu/ghi 100.000 dòng/ngày), R2 (10 GB).
+5. Chưa thử Realtime với nhiều máy thật cùng lúc (mới thử trong test tự động và 1 trình duyệt); nếu lỗi, app vẫn tự đồng bộ bằng polling.
+6. Tối ưu băng thông (nếu cần): ảnh là phần nặng nhất; có thể nén mạnh hơn/giới hạn số ảnh, giãn polling.
+
+## 7. Lưu ý làm việc
+
+- Máy phát triển là Windows + Git Bash. **Heredoc dài chứa dấu nháy trong Bash hay lỗi** — ghi file bằng công cụ ghi file rồi chạy, thay vì nhét script dài vào lệnh.
+- Không commit dữ liệu nhạy cảm: file xuất tài khoản (`cloudflare/users*.json`, chứa hash mật khẩu) đã nằm trong `.gitignore`; xoá ngay sau khi dùng.
+- Xem trước giao diện: `.claude/launch.json` có cấu hình `static` (python http.server cổng 8934); thêm `http://localhost:8934` vào `ALLOWED_ORIGINS` TẠM THỜI nếu muốn gọi Worker thật từ localhost, rồi gỡ ra và deploy lại.
+- Ngôn ngữ giao diện, thông báo, comment: tiếng Việt, giữ phong cách hiện có. Yêu cầu của người dùng luôn kèm "không đổi ngoài phạm vi" — sửa tối thiểu, không refactor lớn.
