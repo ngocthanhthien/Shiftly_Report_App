@@ -4253,9 +4253,12 @@ function renderLinesToSVG(lines, W){
         // mối liên hệ Issue -> Action ngay cả khi có nhiều cặp trong 1
         // checkpoint. Độ cao mỗi cặp phụ thuộc số dòng chữ sau khi wrap.
         const pairs = l.pairs || [];
+        // Giữ nguyên chỗ xuống dòng (Enter) người dùng đã gõ: tách theo '\n'
+        // TRƯỚC rồi mới wrap từng đoạn — wrapText() tự nó nuốt mọi khoảng trắng.
+        const wrapIA = t => String(t||'—').split(/\r?\n/).flatMap(seg=>wrapText(seg, colW-16, FONT-0.5, ctx));
         const iaMeta = pairs.map(p=>{
-          const issueLines = wrapText(p.issue||'—', colW-16, FONT-0.5, ctx);
-          const actionLines = wrapText(p.action||'—', colW-16, FONT-0.5, ctx);
+          const issueLines = wrapIA(p.issue);
+          const actionLines = wrapIA(p.action);
           const lineCount = Math.max(issueLines.length, actionLines.length, 1);
           return {issueLines, actionLines, blockH: 16 + lineCount*13 + 10};
         });
@@ -4407,16 +4410,18 @@ function buildPrintableReportHTML(dateVal, shiftVal){
     cps.filter(cp=>cp.section===sec.id).forEach(cp=>{
       html += `<div class="prtsec"><h3>${escapeHtmlPr(sec.name)} — PO ${escapeHtmlPr(cp.po||'—')} (QC: ${escapeHtmlPr(cp.technician||'—')})</h3><div class="prtrows">`;
       let any=false;
+      const ia = findIssueActionFieldIds(sec);
       sec.fields.forEach(f=>{
         const v = cp.fields[f.id];
         if(v===undefined||v===null||v==='') return;
         any=true;
+        const isIA = f.id===ia.issueId || f.id===ia.actionId; // Issue/Action: giữ chỗ xuống dòng đã gõ
         let disp, color='#0F172A';
         if(f.type==='boolean'){ disp=boolDisp(f, v); color=v?'#15803D':'#B91C1C'; }
         else if(f.type==='number'){ const ok=inSpec(f,v); disp=String(v); color=ok===false?'#B91C1C':ok===true?'#15803D':'#0F172A'; }
-        else disp = String(v).replace(/\n/g,' / ');
+        else disp = isIA ? String(v) : String(v).replace(/\n/g,' / ');
         const fullCls = (f.type==='textarea'||f.type==='text') ? ' full' : '';
-        html += `<div class="prtrow${fullCls}"><span class="k">${escapeHtmlPr(f.label.split('\n')[0])}</span><span class="v" style="color:${color};">${escapeHtmlPr(disp)}</span></div>`;
+        html += `<div class="prtrow${fullCls}"><span class="k">${escapeHtmlPr(f.label.split('\n')[0])}</span><span class="v" style="color:${color};${isIA?'white-space:pre-wrap;text-align:left;':''}">${escapeHtmlPr(disp)}</span></div>`;
       });
       if(!any) html += `<div class="prtrow full"><span class="k">— Không có dữ liệu —</span></div>`;
       html += `</div></div>`;
@@ -4439,16 +4444,18 @@ function buildPrintablePOReportHTML(poQuery, matches){
     const sec = sectionById(cp.section);
     html += `<div class="prtsec"><h3>${escapeHtmlPr(sec?sec.name:cp.section)} — Ca ${escapeHtmlPr(cp.shift)} ${fmtDateVN(cp.date)} (QC: ${escapeHtmlPr(cp.technician||'—')})</h3><div class="prtrows">`;
     let any=false;
+    const ia = sec ? findIssueActionFieldIds(sec) : {};
     (sec?sec.fields:[]).forEach(f=>{
       const v = cp.fields[f.id];
       if(v===undefined||v===null||v==='') return;
       any=true;
+      const isIA = f.id===ia.issueId || f.id===ia.actionId; // Issue/Action: giữ chỗ xuống dòng đã gõ
       let disp, color='#0F172A';
       if(f.type==='boolean'){ disp=boolDisp(f, v); color=v?'#15803D':'#B91C1C'; }
       else if(f.type==='number'){ const ok=inSpec(f,v); disp=String(v); color=ok===false?'#B91C1C':ok===true?'#15803D':'#0F172A'; }
-      else disp = String(v).replace(/\n/g,' / ');
+      else disp = isIA ? String(v) : String(v).replace(/\n/g,' / ');
       const fullCls = (f.type==='textarea'||f.type==='text') ? ' full' : '';
-      html += `<div class="prtrow${fullCls}"><span class="k">${escapeHtmlPr(f.label.split('\n')[0])}</span><span class="v" style="color:${color};">${escapeHtmlPr(disp)}</span></div>`;
+      html += `<div class="prtrow${fullCls}"><span class="k">${escapeHtmlPr(f.label.split('\n')[0])}</span><span class="v" style="color:${color};${isIA?'white-space:pre-wrap;text-align:left;':''}">${escapeHtmlPr(disp)}</span></div>`;
     });
     if(!any) html += `<div class="prtrow full"><span class="k">— Không có dữ liệu —</span></div>`;
     html += `</div></div>`;
@@ -4590,12 +4597,14 @@ function buildCheckpointImageSVGs(cpsList, headerTitle){
     lines.push({t:'sub', text: `${sec?sec.name:cp.section} — PO ${cp.po||'—'}  ·  Ca ${cp.shift} ${fmtDateVN(cp.date)}  ·  QC: ${cp.technician||'—'}`});
     lines.push({t:'gap'});
     const rows = [];
+    const ia = sec ? findIssueActionFieldIds(sec) : {};
     (sec?sec.fields:[]).forEach(f=>{
       const v = cp.fields[f.id];
       if(v===undefined||v===null||v==='') return;
       let disp, color='#0F172A';
       if(f.type==='boolean'){ disp = boolDisp(f, v); color = v?'#15803D':'#B91C1C'; }
       else if(f.type==='number'){ const ok=inSpec(f,v); disp=String(v); color= ok===false?'#B91C1C':ok===true?'#15803D':'#0F172A'; }
+      else if(f.id===ia.issueId || f.id===ia.actionId) disp = String(v); // Issue/Action: giữ chỗ xuống dòng đã gõ (renderLinesToSVG tự tách theo '\n')
       else disp = String(v).replace(/\n/g,' / ');
       rows.push({label: f.label.split('\n')[0], disp, color});
     });
@@ -6722,10 +6731,18 @@ function processQmsSections(rows){
 // 1 ô ss:MergeAcross tô màu (style "ganttBar"), header đậm màu style
 // "ganttHdr" — cả 2 style được khai báo sẵn trong <Styles> của
 // buildProcessQmsExcelXml() (luôn có, không tốn thêm gì khi không dùng).
+// Ô Issue/Action trong Excel: giữ chỗ xuống dòng (Enter) đã gõ — Excel chỉ
+// hiện nhiều dòng trong 1 ô khi ký tự xuống dòng là &#10; VÀ ô bật Wrap Text
+// (style "wrap", khai báo trong <Styles> của buildProcessQmsExcelXml()).
+function excelWrapCell(v){
+  if(v===undefined||v===null||v==='') return '<Cell/>';
+  return `<Cell ss:StyleID="wrap"><Data ss:Type="String">${xmlEscape(v).replace(/\r?\n/g,'&#10;')}</Data></Cell>`;
+}
 function buildGanttExcelSheet(poLabel, base){
   const {cols, dateGroups, cpIndex, bySection, presentSections} = base;
   const plainCell = v => (v===undefined||v===null||v==='') ? '<Cell/>' : `<Cell><Data ss:Type="String">${xmlEscape(v)}</Data></Cell>`;
   const hdrCell = (v, span) => `<Cell ss:StyleID="ganttHdr"${span>1?` ss:MergeAcross="${span-1}"`:''}><Data ss:Type="String">${xmlEscape(v)}</Data></Cell>`;
+  const wrapCell = v => excelWrapCell(v);
   const emptyCells = n => '<Cell/>'.repeat(Math.max(0,n));
   let xml = `<Worksheet ss:Name="Gantt"><Table>\n`;
   xml += `<Row>${plainCell('ITEM CODE')}${plainCell(base.itemCode||'—')}</Row>\n`;
@@ -6751,8 +6768,8 @@ function buildGanttExcelSheet(poLabel, base){
       xml += emptyCells(cols.length);
     }
     xml += '</Row>\n';
-    xml += '<Row>' + plainCell('Issues/Abnormal') + cols.map(c=>plainCell(ganttCellText(cpIndex[id+'|'+c.date+'|'+c.shift], sec, 'issue'))).join('') + '</Row>\n';
-    xml += '<Row>' + plainCell('Action') + cols.map(c=>plainCell(ganttCellText(cpIndex[id+'|'+c.date+'|'+c.shift], sec, 'action'))).join('') + '</Row>\n';
+    xml += '<Row>' + plainCell('Issues/Abnormal') + cols.map(c=>wrapCell(ganttCellText(cpIndex[id+'|'+c.date+'|'+c.shift], sec, 'issue'))).join('') + '</Row>\n';
+    xml += '<Row>' + plainCell('Action') + cols.map(c=>wrapCell(ganttCellText(cpIndex[id+'|'+c.date+'|'+c.shift], sec, 'action'))).join('') + '</Row>\n';
   });
   xml += `</Table></Worksheet>`;
   return xml;
@@ -6765,7 +6782,8 @@ function buildProcessQmsExcelXml(rows, gantt){
   xml += `<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n`;
   xml += `<Styles><Style ss:ID="hdr"><Font ss:Bold="1"/><Interior ss:Color="#EEF1F6" ss:Pattern="Solid"/></Style>`;
   xml += `<Style ss:ID="ganttHdr"><Font ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#0B1220" ss:Pattern="Solid"/><Alignment ss:Horizontal="Center"/></Style>`;
-  xml += `<Style ss:ID="ganttBar"><Interior ss:Color="#0D9488" ss:Pattern="Solid"/></Style></Styles>\n`;
+  xml += `<Style ss:ID="ganttBar"><Interior ss:Color="#0D9488" ss:Pattern="Solid"/></Style>`;
+  xml += `<Style ss:ID="wrap"><Alignment ss:Vertical="Top" ss:WrapText="1"/></Style></Styles>\n`;
   if(gantt) xml += buildGanttExcelSheet(gantt.poLabel, buildGanttBaseData(gantt.matches));
   xml += `<Worksheet ss:Name="Data Export"><Table>\n`;
   const strCell = v => (v===undefined||v===null||v==='') ? '<Cell/>' : `<Cell><Data ss:Type="String">${xmlEscape(v)}</Data></Cell>`;
@@ -6781,8 +6799,8 @@ function buildProcessQmsExcelXml(rows, gantt){
       cells += strCell(sec.id);
       cells += strCell(r.itemCode||'');
       cells += strCell(r.po||'');
-      cells += strCell(issueField ? (r.fields[issueField.id]||'') : '');
-      cells += strCell(actionField ? (r.fields[actionField.id]||'') : '');
+      cells += excelWrapCell(issueField ? (r.fields[issueField.id]||'') : '');
+      cells += excelWrapCell(actionField ? (r.fields[actionField.id]||'') : '');
       qmsFields.forEach(f=>{
         const v = qmsCellDisplay(f, r.fields[f.id]);
         cells += (f.type==='number' && typeof v==='number') ? numCell(v) : strCell(v);
@@ -6839,6 +6857,7 @@ function buildProcessQmsPrintHtml(rows, landscape, gantt){
 h1{font-size:15px;margin:0 0 12px;}
 table{width:100%;border-collapse:collapse;margin:0 0 16px;}
 th,td{border:1px solid #94A3B8;padding:4px 6px;text-align:left;}
+td{white-space:pre-wrap;}
 th{background:#EEF1F6;font-weight:700;}
 .sectitle{font-weight:700;background:#0B1220;color:#fff;padding:5px 8px;margin:14px 0 6px;border-radius:4px;}
 table.gantthdr{width:auto;margin:0 0 14px;} table.gantthdr td{border:none;padding:2px 8px 2px 0;}
