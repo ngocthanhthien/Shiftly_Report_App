@@ -5104,9 +5104,12 @@ function renderPOTimeline(container, poQuery, matches, onEdited){
   const itemName = withCode && (lookup.status==='ok'||lookup.status==='missing_recipe') ? lookup.name : '';
   const recipeVal = withCode ? (withCode.recipe || (lookup.status==='ok' ? lookup.recipe : '')) : '';
 
+  const editItemBtn = el('button',{class:'btn ghost sm', type:'button', style:'margin-left:8px;'},['✎ Sửa Items Code']);
+  editItemBtn.addEventListener('click', ()=>openPOItemCodeEditor(poQuery, matches, onEdited));
+  const itemCodeValue = el('span',{class:'v'},[withCode ? (withCode.itemCode||'—') : '—']);
   const hdr = el('div',{class:'card'},[
     el('div',{class:'card-h'},['QUALITY & ACTIVITIES FOLLOW UP', el('div',{class:'rule'})]),
-    el('div',{class:'kv'},[el('span',{class:'k'},['ITEM CODE']), el('span',{class:'v'},[withCode ? (withCode.itemCode||'—') : '—'])]),
+    el('div',{class:'kv'},[el('span',{class:'k'},['ITEM CODE']), itemCodeValue, editItemBtn]),
     el('div',{class:'kv'},[el('span',{class:'k'},['ITEM NAME']), el('span',{class:'v'},[itemName||'—'])]),
     el('div',{class:'kv'},[el('span',{class:'k'},['PO']), el('span',{class:'v'},[poQuery])]),
     el('div',{class:'kv'},[el('span',{class:'k'},['RECIPE']), el('span',{class:'v'},[recipeVal||'—'])]),
@@ -5192,6 +5195,45 @@ function renderPOTimeline(container, poQuery, matches, onEdited){
     });
     tbody.appendChild(issueRow);
     tbody.appendChild(actionRow);
+  });
+}
+
+function openPOItemCodeEditor(poQuery, matches, onSaved){
+  if(!promptPasswordOK('Nhập mật khẩu để sửa Items Code của PO:')) return;
+  const choices = ITEM_CODE_LIST.map((item, index)=>({item,index})).filter(x=>String(x.item.itemCode||'').trim());
+  if(!choices.length){ toast('Danh sách Items Code chưa có mã để chọn'); return; }
+  const current = matches.find(cp=>cp.section!=='META' && cp.itemCode) || matches.find(cp=>cp.section!=='META');
+  const body = el('div',{},[]);
+  const select = el('select',{class:'inp'},[]);
+  choices.forEach(({item,index})=>{
+    const option = el('option',{value:String(index)},[`${item.itemCode} — ${item.name||'—'} — Recipe ${item.recipe||'—'}`]);
+    if(current && String(item.itemCode).trim()===String(current.itemCode||'').trim() && String(item.recipe||'').trim()===String(current.recipe||'').trim()) option.setAttribute('selected','selected');
+    select.appendChild(option);
+  });
+  const nameValue = el('div',{class:'kv'},[el('span',{class:'k'},['ITEM NAME']),el('span',{class:'v'},[])]);
+  const recipeValue = el('div',{class:'kv'},[el('span',{class:'k'},['RECIPE']),el('span',{class:'v'},[])]);
+  const updatePreview = ()=>{
+    const item = ITEM_CODE_LIST[Number(select.value)];
+    nameValue.querySelector('.v').textContent = item ? (item.name||'—') : '—';
+    recipeValue.querySelector('.v').textContent = item ? (item.recipe||'—') : '—';
+  };
+  select.addEventListener('change',updatePreview);
+  body.appendChild(el('label',{class:'fld'},[el('span',{class:'lab'},['ITEM CODE']),select]));
+  body.appendChild(nameValue); body.appendChild(recipeValue);
+  const saveBtn = el('button',{class:'btn teal',type:'button',style:'margin-top:12px;'},['✓ Xác nhận lưu']);
+  body.appendChild(saveBtn); updatePreview();
+  const modal = openModal(`Sửa Items Code — PO ${poQuery}`,body);
+  saveBtn.addEventListener('click',async()=>{
+    const item = ITEM_CODE_LIST[Number(select.value)];
+    if(!item || !String(item.itemCode||'').trim()){ toast('Items Code không hợp lệ'); return; }
+    if(!confirm(`Cập nhật Items Code, Item Name và Recipe cho toàn bộ dữ liệu đã lưu của PO ${poQuery}?`)) return;
+    const now = new Date().toISOString();
+    const poRows = allCheckpoints.filter(cp=>cp.section!=='META' && String(cp.po||'').trim().toLowerCase()===String(poQuery||'').trim().toLowerCase());
+    for(const cp of poRows){ cp.itemCode=String(item.itemCode).trim(); cp.recipe=String(item.recipe||'').trim(); cp.updatedAt=now; await idbPut('shifts',cp); }
+    await refreshCache();
+    await persistAll();
+    modal.close(); toast(`Đã cập nhật ${poRows.length} dòng của PO ${poQuery}`);
+    if(onSaved) onSaved();
   });
 }
 function renderReport(){
